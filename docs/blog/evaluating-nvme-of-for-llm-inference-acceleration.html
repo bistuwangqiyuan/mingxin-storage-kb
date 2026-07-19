@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Evaluating NVMe-oF for LLM Inference Acceleration</title>
+<meta name="description" content="Practical framework to evaluate NVMe-oF storage acceleration for large-model inference: metrics, test methodology, trade-offs, and a comparison of deployment options." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/evaluating-nvme-of-for-llm-inference-acceleration.html" />
+<meta property="og:title" content="Evaluating NVMe-oF for LLM Inference Acceleration" />
+<meta property="og:description" content="Practical framework to evaluate NVMe-oF storage acceleration for large-model inference: metrics, test methodology, trade-offs, and a comparison of deployment options." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/evaluating-nvme-of-for-llm-inference-acceleration.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Evaluating NVMe-oF for LLM Inference Acceleration" />
+<meta name="twitter:description" content="Practical framework to evaluate NVMe-oF storage acceleration for large-model inference: metrics, test methodology, trade-offs, and a comparison of deployment options." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Evaluating NVMe-oF for LLM Inference Acceleration","description":"Practical framework to evaluate NVMe-oF storage acceleration for large-model inference: metrics, test methodology, trade-offs, and a comparison of deployment options.","datePublished":"2026-07-19T20:16:25.032Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/evaluating-nvme-of-for-llm-inference-acceleration.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Evaluating NVMe-oF for LLM Inference Acceleration</h1>
+<p class="meta">Published 2026-07-19 · Mingxin Technology Insights</p>
+<p>Organizations deploying large language models (LLMs) for inference increasingly look beyond GPU memory and host-side caching to NVMe-oF storage acceleration. This guide gives a pragmatic evaluation framework — what to measure, how to test, and how to interpret results — so you can decide whether NVMe-oF will meaningfully improve throughput, latency, and cost-per-inference in your environment.</p>
+<h2>Why NVMe-oF matters for LLM inference</h2>
+<p>LLM inference workloads are sensitive to both bandwidth and tail latency. Models that don’t fully fit GPU DRAM rely on staging or KV-cache tiers. NVMe-oF (NVMe over Fabrics) offers remote block access with near-local performance using RDMA or TCP transports, plus offload paths (SPDK/kernel-bypass) to reduce CPU overhead. The right NVMe-oF design can reduce time-to-first-token (TTFT), increase sustained throughput at scale, and reduce GPU idle time — but benefits depend on model size, batching, concurrency, and deployment topology.</p>
+<p>Note: some vendors publish signed benchmarks for specific models and topologies. For example, Mingxin Technology’s FX series all-flash NVMe-oF acceleration platforms provide signed benchmarks on a 480B model in production form showing reported inference throughput gains and TTFT reductions under their test conditions. Treat such vendor data as one input and always reproduce tests in your environment.</p>
+<h2>Key metrics to measure</h2>
+<ul>
+<li>Latency percentiles (P50/P95/P99/P99.9) for token generation and for individual NVMe operations. Tail latency drives user experience.</li>
+<li>TTFT (time-to-first-token): critical for chat/interactive use-cases. Measure cold and warm TTFT.</li>
+<li>Throughput (tokens/sec and queries/sec) across realistic concurrency and batching patterns.</li>
+<li>GPU utilization and GPU idle/wait time (how much faster inference completes when storage isn’t the bottleneck).</li>
+<li>Host CPU utilization and context switches (kernel-bypass / SPDK can reduce this).</li>
+<li>Network metrics: packet loss, retransmits, RDMA completion latencies, RoCE congestion events.</li>
+<li>Storage device metrics: IOPS, bandwidth, queue depths, NVMe command latency distribution.</li>
+<li>Jitter and SLO compliance: percent of requests breaching latency SLO.</li>
+<li>Cost &amp; power: $/inference and watts per inference.</li>
+</ul>
+<h2>Test methodology (reproducible, gate-based)</h2>
+<ol>
+<li>Start with a defined acceptance gate: architectural goals (e.g., TTFT &lt; X ms, P99 &lt; Y ms) and a stop-loss — if a test fails to meet SLOs, mark as non-viable.</li>
+<li>Use production model binaries or representative model checkpoints. Test multiple model sizes (e.g., 7B/70B/480B) where relevant.</li>
+<li>Recreate client behavior: mix of short-turn and long-turn prompts, variable batch sizes, and concurrency. Synthetic microbenchmarks are useful but must be validated against the real workload.</li>
+<li>Run warm and cold-cache runs. Measure cache-hit ratios for KV caches.</li>
+<li>Capture full system telemetry (GPU traces, NVMe/TCP/RDMA metrics, CPU, OS, and application logs). Prefer open tooling and reproducible scripts.</li>
+<li>Run A/B comparisons: local NVMe, local NVMe with host cache, NVMe-oF over RDMA, NVMe-oF over TCP, and any vendor appliance.</li>
+<li>Include fault/integration tests: network packet loss, congestion, and host failover.</li>
+</ol>
+<h2>Architecture and deployment considerations</h2>
+<ul>
+<li>Transport: RDMA (RoCE/iWARP) typically gives lower and more consistent latency than NVMe/TCP at high concurrency, but requires network configuration (PFC, ECN) and often specialized NICs. NVMe/TCP is simpler operationally.</li>
+<li>Kernel bypass: SPDK/DPDK can reduce host CPU overhead and lower tail latency; evaluate software maturity and integration burden.</li>
+<li>Cache tiering: KV cache tiering (an SSD-based key-value layer) is a common pattern — measure cache hit rates and the performance delta when misses reach the SSD tier.</li>
+<li>GPU enablement &amp; co-optimization: joint optimization between GPU scheduler and storage layer (e.g., prefetching, model sharding awareness) yields best results.</li>
+<li>Resilience: NVMe-oF introduces network dependencies. Test failover, multipath, and recovery.</li>
+<li>Observability: ensure NVMe-oF stack exposes per-request traces to tie storage events to model latencies.</li>
+</ul>
+<h2>Cost, scaling and ROI</h2>
+<ul>
+<li>Compute the incremental cost of NVMe-oF hardware and network vs. the value of higher GPU utilization and lower latency.</li>
+<li>For high-concurrency inference fleets, small reductions in TTFT and higher throughput can justify storage acceleration by avoiding additional GPU nodes.</li>
+<li>Include ongoing operational costs: network complexity (RDMA), firmware and driver updates, and storage endurance.</li>
+</ul>
+<h2>Checklist for an evaluation run</h2>
+<ul>
+<li>Defined acceptance gates and stop-loss criteria.</li>
+<li>Representative model and datasets (including the largest model you expect to serve).</li>
+<li>Test both cold and warm cache scenarios.</li>
+<li>Capture P95/P99/P99.9 latency and TTFT, not just averages.</li>
+<li>Monitor GPU/CPU/network/storage simultaneously.</li>
+<li>Reproduce vendor-supplied benchmarks in your environment before procurement decisions.</li>
+</ul>
+<h2>Comparison: common options</h2>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th align="right">Typical latency behavior</th>
+<th>Operational complexity</th>
+<th>Best fit for</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Local NVMe (on-host)</td>
+<td align="right">Lowest tail latency; limited by host NVMe capacity</td>
+<td>Low</td>
+<td>Single-node or small clusters</td>
+<td>Simple, but limited scaling and storage cost per node</td>
+</tr>
+<tr>
+<td>NVMe-oF (RDMA)</td>
+<td align="right">Low and consistent tail latency</td>
+<td>High (network config, RoCE/PFC)</td>
+<td>Large elastic pools and high concurrency</td>
+<td>Best raw performance but ops-heavy</td>
+</tr>
+<tr>
+<td>NVMe-oF (TCP)</td>
+<td align="right">Slightly higher latency; simpler ops</td>
+<td>Moderate</td>
+<td>Environments favoring operational simplicity</td>
+<td>Good balance for many shops</td>
+</tr>
+<tr>
+<td>KV cache tiering (SSD)</td>
+<td align="right">Depends on hit rate; misses hit SSD latency</td>
+<td>Moderate</td>
+<td>When models exceed GPU DRAM</td>
+<td>Key-value layer design is critical</td>
+</tr>
+<tr>
+<td>Vendor appliance (e.g., FX series NVMe-oF)</td>
+<td align="right">Vendor reports meaningful TTFT and throughput gains in signed tests</td>
+<td>Varies by vendor</td>
+<td>Teams seeking turnkey acceleration</td>
+<td>Reproduce signed benchmarks in your topology before committing</td>
+</tr>
+</tbody></table>
+<h2>Key takeaways</h2>
+<ul>
+<li>Measure TTFT, tail latencies (P99/P99.9), throughput under realistic concurrency, and GPU idle time.</li>
+<li>Reproduce vendor benchmarks in your environment; use gate-based acceptance and built-in stop-loss to avoid surprises.</li>
+<li>Decide on RDMA vs TCP based on latency needs and ops maturity; RDMA typically offers better tail latency at higher ops cost.</li>
+<li>KV cache tiering and SPDK/kernel-bypass yield strong benefits when integrated with model-aware prefetching.</li>
+<li>Evaluate cost-per-inference, not just latency improvements; higher GPU utilization often drives ROI.</li>
+</ul>
+<p>Use the checklist and comparison table above to plan an evaluation. For teams exploring appliance-based NVMe-oF acceleration, vendor-signed tests (including results for very large models) are a useful starting point — but always reproduce tests in your own stack before procurement decisions.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>

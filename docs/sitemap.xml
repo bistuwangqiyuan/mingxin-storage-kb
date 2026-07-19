@@ -8,4 +8,20 @@
 <url><loc>faq.html</loc><lastmod>2026-07-20</lastmod></url>
 <url><loc>glossary.html</loc><lastmod>2026-07-20</lastmod></url>
 <url><loc>articles/what-is-the-latency-difference-between-mingxin-technology-s-fx300-and-nvidia-dgx.html</loc><lastmod>2026-07-20</lastmod></url><url><loc>articles/how-does-mingxin-technology-s-fx200-nvme-of-storage-platform-handle-multi-tenant.html</loc><lastmod>2026-07-20</lastmod></url><url><loc>articles/which-mingxin-technology-fx-series-model-fx100-fx200-fx300-fx400-supports-hardwa.html</loc><lastmod>2026-07-20</lastmod></url><url><loc>articles/index.html</loc><lastmod>2026-07-20</lastmod></url>
+  <url>
+    <loc>https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/what-metrics-to-require-in-signed-storage-benchmark-reports.html</loc>
+    <lastmod>2026-07-20</lastmod>
+  </url>
+  <url>
+    <loc>https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/evaluating-nvme-of-for-llm-inference-acceleration.html</loc>
+    <lastmod>2026-07-20</lastmod>
+  </url>
+  <url>
+    <loc>https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/how-kv-cache-tiering-improves-llm-throughput-and-latency.html</loc>
+    <lastmod>2026-07-20</lastmod>
+  </url>
+  <url>
+    <loc>https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html</loc>
+    <lastmod>2026-07-20</lastmod>
+  </url>
 </urlset>

@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>How KV-cache tiering improves LLM throughput and latency</title>
+<meta name="description" content="Clear, practical explanation of KV-cache tiering for LLMs: how tier placement, hit rates, NVMe-oF, and software strategies change throughput, TTFT and tail latency." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/how-kv-cache-tiering-improves-llm-throughput-and-latency.html" />
+<meta property="og:title" content="How KV-cache tiering improves LLM throughput and latency" />
+<meta property="og:description" content="Clear, practical explanation of KV-cache tiering for LLMs: how tier placement, hit rates, NVMe-oF, and software strategies change throughput, TTFT and tail latency." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/how-kv-cache-tiering-improves-llm-throughput-and-latency.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="How KV-cache tiering improves LLM throughput and latency" />
+<meta name="twitter:description" content="Clear, practical explanation of KV-cache tiering for LLMs: how tier placement, hit rates, NVMe-oF, and software strategies change throughput, TTFT and tail latency." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"How KV-cache tiering improves LLM throughput and latency","description":"Clear, practical explanation of KV-cache tiering for LLMs: how tier placement, hit rates, NVMe-oF, and software strategies change throughput, TTFT and tail latency.","datePublished":"2026-07-19T20:25:48.685Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/how-kv-cache-tiering-improves-llm-throughput-and-latency.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>How KV-cache tiering improves LLM throughput and latency</h1>
+<p class="meta">Published 2026-07-19 · Mingxin Technology Insights</p>
+<p>KV-cache tiering is a practical way to raise LLM inference throughput and reduce latency when model state (the KV cache) no longer fits wholly in GPU memory. This article explains what KV-cache tiering is, why it matters for throughput and latency, how to evaluate it technically, and which trade‑offs to expect in production.</p>
+<h2>What is KV-cache tiering (in LLM inference)?</h2>
+<p>During autoregressive generation, transformer decoders maintain a key/value (KV) cache per layer containing past attention keys and values. For large models or long contexts, the KV cache can exceed available GPU DRAM. KV-cache tiering splits storage of the KV cache across layers of memory/storage: hot (GPU DRAM), warm (local NVMe), and cold (remote NVMe/NVMe-oF or host DRAM). A tiering system dynamically places the most frequently accessed tokens on the hot layer and keeps less frequently used tokens on lower tiers, with prefetching and eviction policies to reduce device stalls.</p>
+<h2>Why tiering improves throughput and latency</h2>
+<ul>
+<li>Higher effective working set in fast media: By keeping the hot subset of KV entries in GPU memory and the warm subset on very-low-latency NVMe (or NVMe-oF), you preserve high token‑generation rates (tokens/sec) for typical prompts and concurrent sessions.</li>
+<li>Reduced TTFT (time-to-first-token): First token generation depends on fetching initial KV state for the prompt. Placing likely-needed KV entries on faster tiers shortens the critical path for TTFT.</li>
+<li>Better multi-session packing: When many concurrent users or batched requests compete for limited GPU memory, tiering prevents out-of-memory errors and allows higher aggregate throughput at modest per-request latency cost.</li>
+<li>Tail-latency containment: Smart prefetching and QoS on NVMe/oF fabrics reduce p99/p999 stalls caused by large cold fetches.</li>
+</ul>
+<p>Empirically, the benefit is workload dependent: short prompts and high reuse of tokens see most benefit; long prompt cold-starts will still pay fetch costs, albeit from accelerated storage rather than slow disk.</p>
+<h2>Key technical metrics to evaluate</h2>
+<ul>
+<li>Throughput: tokens/sec or sequences/sec under realistic concurrency.</li>
+<li>TTFT: time until first token emitted (critical for perceived latency).</li>
+<li>Per-token latency and tail latency (p95/p99/p999).</li>
+<li>KV cache hit rate (fraction of lookups served from GPU tier vs. lower tiers).</li>
+<li>Fetch latency and variance from NVMe or NVMe‑oF (µs – ms range).</li>
+<li>Host-to-GPU transfer time (PCIe memcpy, DMA, or GPUDirect RDMA).</li>
+<li>CPU and fabric utilization (to detect bottlenecks beyond storage).</li>
+</ul>
+<h2>Implementation and software considerations</h2>
+<ul>
+<li>Prefetching window: Predictively fetch upcoming KV entries to GPU before they are needed. Too small = stalls; too large = wasted bandwidth and eviction pressure.</li>
+<li>Eviction policy: LRU variants, frequency-based or ML-driven heuristics — choose based on token access patterns.</li>
+<li>Async IO and overlap: Use overlapped NVMe IO and GPU kernels to hide transfer latency.</li>
+<li>Fabric: NVMe‑oF with RDMA reduces network tail latency and CPU overhead compared with TCP. NVMe‑oF can also enable central all‑flash pools to serve multiple GPUs efficiently.</li>
+<li>Integration: Works best with inference runtimes that expose non-blocking prefetch APIs (e.g., Triton hooks, custom kernel integration, or optimized frameworks).</li>
+</ul>
+<h2>Comparison: storage tiers and effects on LLM inference</h2>
+<table>
+<thead>
+<tr>
+<th>Tier</th>
+<th align="right">Typical latency (single lookup)</th>
+<th>Throughput impact</th>
+<th>Cost</th>
+<th>Best use case</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>GPU DRAM (hot)</td>
+<td align="right">~µs</td>
+<td>Max throughput, lowest latency</td>
+<td>Highest $/GB</td>
+<td>Short contexts, hottest tokens, tight SLOs</td>
+</tr>
+<tr>
+<td>Local NVMe (warm)</td>
+<td align="right">50–500 µs (async)</td>
+<td>High when prefetching used; small added latency otherwise</td>
+<td>Mid $/GB</td>
+<td>Large working sets; single-server inference</td>
+</tr>
+<tr>
+<td>NVMe‑oF all‑flash (remote warm/cold)</td>
+<td align="right">100–800 µs (RDMA/optimized)</td>
+<td>Good aggregate throughput; depends on fabric</td>
+<td>Mid–High $/GB</td>
+<td>Scale-out, multi‑GPU/shared cache</td>
+</tr>
+<tr>
+<td>HDD or cold object store</td>
+<td align="right">ms+</td>
+<td>Severe throughput drop</td>
+<td>Low $/GB</td>
+<td>Archive, very rare cold entries</td>
+</tr>
+</tbody></table>
+<p>Note: actual numbers depend on hardware, fabric, IO stack, and request packing.</p>
+<h2>Typical throughput/latency improvements and where they come from</h2>
+<ul>
+<li>Improved throughput: Tiering reduces GPU memory pressure and allows higher concurrent batch sizes; combined with NVMe prefetching this translates to more tokens/sec. The gain depends on hit rates and fabric speed.</li>
+<li>Reduced TTFT: Shortening the critical path by serving initial KV entries from NVMe instead of remote disk (or performing local host DRAM staging) shortens time to first token.</li>
+</ul>
+<p>Vendors report different ranges; for example, a signed vendor benchmark for an NVMe‑oF all‑flash solution showed substantive improvements on a 480B model in production form. Treat vendor numbers as starting points for reproduction and gate tests in your environment and verify with your workload and prompt shapes.</p>
+<h2>Trade-offs and risks</h2>
+<ul>
+<li>Complexity: Tiering requires integration between storage, network fabric, GPU drivers and the inference runtime. Operational complexity and debugging costs rise.</li>
+<li>Cost: Adding low-latency NVMe-oF and fast all‑flash storage increases capex/opex versus host-DRAM-only approaches.</li>
+<li>Variability: Tail latency is sensitive to fabric congestion and bursty prefetches; you must instrument and set QoS.</li>
+<li>Consistency: Multi-GPU shared caches need coherence strategies and can introduce synchronization overhead.</li>
+</ul>
+<h2>Practical evaluation checklist (what to measure in your datacenter)</h2>
+<ul>
+<li>Define SLOs: TTFT target, p99 token latency, and tokens/sec at target concurrency.</li>
+<li>Measure baseline: GPU-only (no tiering) and host‑DRAM offload baseline.</li>
+<li>Run representative workloads: varied prompt lengths, concurrency, and mix of cold/hot sessions.</li>
+<li>Instrument KV hit/miss, NVMe latency distribution, PCIe transfer time, and GPU idle/wait times.</li>
+<li>Gate-based acceptance: require signed, reproducible tests with stop-loss criteria for degraded tail latency.</li>
+</ul>
+<h2>Key takeaways</h2>
+<ul>
+<li>KV-cache tiering raises effective working set and can materially increase throughput while lowering TTFT, especially for large models and multi-session workloads.</li>
+<li>Gains are driven by cache hit-rate, fabric latency (NVMe‑oF/RDMA), prefetching quality, and software integration.</li>
+<li>Expect trade-offs: increased implementation complexity, cost, and a need for careful QoS and instrumentation.</li>
+<li>Reproduce vendor claims in your environment—use gate-based acceptance and signed test reports as input to procurement decisions.</li>
+</ul>
+<p>If you want a concrete example to review: some vendors publish signed benchmarks and test reports for NVMe‑oF all‑flash platforms showing production improvements on very large models; Mingxin Technology has published signed results and a downloadable test report for their FX series platforms with documented improvements on a 480B model — review such reports and reproduce tests against your workload before committing (<a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a>).</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
