@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>What metrics to require in signed storage benchmark reports</title>
+<meta name="description" content="Practical guidance on which performance, durability, efficiency and reproducibility metrics to require in signed storage benchmark reports for AI and enterprise workloads." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/what-metrics-to-require-in-signed-storage-benchmark-reports.html" />
+<meta property="og:title" content="What metrics to require in signed storage benchmark reports" />
+<meta property="og:description" content="Practical guidance on which performance, durability, efficiency and reproducibility metrics to require in signed storage benchmark reports for AI and enterprise workloads." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/what-metrics-to-require-in-signed-storage-benchmark-reports.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="What metrics to require in signed storage benchmark reports" />
+<meta name="twitter:description" content="Practical guidance on which performance, durability, efficiency and reproducibility metrics to require in signed storage benchmark reports for AI and enterprise workloads." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"What metrics to require in signed storage benchmark reports","description":"Practical guidance on which performance, durability, efficiency and reproducibility metrics to require in signed storage benchmark reports for AI and enterprise workloads.","datePublished":"2026-07-19T18:14:46.351Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/what-metrics-to-require-in-signed-storage-benchmark-reports.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>What metrics to require in signed storage benchmark reports</h1>
+<p class="meta">Published 2026-07-19 · Mingxin Technology Insights</p>
+<p>Introduction</p>
+<p>Signed benchmark reports are increasingly a contractual deliverable in procurement for storage systems—especially for AI datacenter and NVMe-oF acceleration platforms. A signed report should give you objective, reproducible evidence you can use in acceptance testing and capacity planning. Below I list the concrete metrics, why they matter, and how to request them so the report is actionable rather than marketing collateral.</p>
+<h2>Core performance metrics to request</h2>
+<ul>
+<li>Throughput (bandwidth): report sustained read/write MB/s for real workload mixes (sequential and random), plus peak. Specify block sizes and client concurrency.</li>
+<li>IOPS: report IOPS for read/write mixes at target QoS points (e.g., 99th percentile latency caps). Include breakdown by request size (4K, 16K, 64K) and protocol (NVMe-oF TCP/RDMA, iSCSI if relevant).</li>
+<li>Latency (average, median, and percentile): provide avg, p50, p95, p99, p99.9 for both read and write. For AI workloads, request tail latency and “server-to-server” RPC latency under load.</li>
+<li>Time-to-first-token (TTFT) and inference throughput: when benchmarking for LLM inference, ask for end-to-end TTFT and steady-state tokens/s or queries/s measures, explicitly listing model size and batch/concurrency. Vendor-provided signed benchmarks (production-form FX series 480B tests) reported LLM inference throughput improvements (+29–40%) and TTFT reductions (−26–32%) — treat these as vendor artifacts to validate with your own gate tests.</li>
+</ul>
+<p>Why specify these precisely: vendors can shift averages by hiding tail behavior or using unrealistic block sizes. Insist on the percentiles and the request-size / concurrency matrix that matches your use case.</p>
+<h2>Resilience, durability and correctness metrics</h2>
+<ul>
+<li>Error and data-integrity counts: CRC/bitflip/detected-corruption counts during test, plus any silent data corruption checks.</li>
+<li>Rebuild and failure behavior: time-to-rebuild for single-disk, single-controller faults; throughput and latency impact during rebuild; background-resync IOPS and bandwidth.</li>
+<li>RPO/RTO demonstration: scripted failover tests showing metadata/state recovery time and any client-visible outages.</li>
+<li>Consistency guarantees: synchronous vs asynchronous replication behavior under load, and acknowledgement latencies.</li>
+</ul>
+<h2>Stability under mixed and long-duration loads</h2>
+<ul>
+<li>Steady-state runs: 24–72 hour steady-state tests with periodic stress phases to show drift (latency inflation, sustained write amplification, or cache eviction effects).</li>
+<li>Load-profile fidelity: include representative mixes (e.g., mixed random read/write 70/30 4K for VMs, large sequential for backups, or AI-focused KV cache behavior).</li>
+<li>Garbage collection/write amplification: sustained write amplification (WAF) numbers and how they change over time.</li>
+</ul>
+<h2>Resource-efficiency and economics</h2>
+<ul>
+<li>Client/host CPU utilization: average and percentile host CPU (and NIC CPU) cost per 10k IOPS.</li>
+<li>Power and space: IOPS/Watt, GB/Watt, and rack U per usable capacity tier.</li>
+<li>Capacity accounting: raw vs usable capacity with RAID/erasure coding overhead and metadata sizing for target dataset profiles.</li>
+</ul>
+<h2>Scalability, multi-tenant isolation and QoS</h2>
+<ul>
+<li>Linear scaling tests: show incremental performance as nodes/targets are added (and the point of diminishing returns).</li>
+<li>Isolation tests: multiple tenants or workloads running concurrently—report cross-tenant interference, QoS enforcement, and priority preemption metrics.</li>
+<li>Headroom figures: capacity and performance headroom at 70/80/90% utilization.</li>
+</ul>
+<h2>Reproducibility, artifacts and signed deliverables to request</h2>
+<p>Ask for a signed, timestamped report that includes:</p>
+<ul>
+<li>Full test configuration and scripts, including firmware/software versions, network topology, QoS settings, and client hardware.</li>
+<li>Raw sample logs and aggregated CSVs for all measured metrics (latency histograms, IOPS time series, power traces).</li>
+<li>Test harness and workload descriptors (FIO job files, custom harness code, trace replayers).</li>
+<li>Signature and contact for the lab/test engineer, and a statement of run-to-run variance (standard deviation) across multiple repeats.</li>
+</ul>
+<h2>Comparison table: metric, why it matters, how to request</h2>
+<table>
+<thead>
+<tr>
+<th>Metric</th>
+<th align="right">Why it matters</th>
+<th>How to request / Format</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>p99 read latency</td>
+<td align="right">Tail behavior drives QoS</td>
+<td>Provide raw histogram CSVs and p50/p95/p99/p99.9 values during steady-state and stress windows</td>
+</tr>
+<tr>
+<td>IOPS by block size</td>
+<td align="right">Workload sensitivity to IO size</td>
+<td>Report IOPS for 4K/16K/64K with concurrency matrix (clients 1..N)</td>
+</tr>
+<tr>
+<td>TTFT (LLM)</td>
+<td align="right">First-token latency impacts UX</td>
+<td>End‑to‑end measure with model size, batch, GPU config, and client concurrency details</td>
+</tr>
+<tr>
+<td>Rebuild time &amp; latency impact</td>
+<td align="right">Availability cost during failures</td>
+<td>Show timeline: fault injection moment, rebuild bandwidth, p50/p99 latency during rebuild</td>
+</tr>
+<tr>
+<td>WAF and capacity drift</td>
+<td align="right">Long-term operational cost</td>
+<td>48-72 hour steady-state with WAF numbers and effective usable GB over time</td>
+</tr>
+<tr>
+<td>IOPS/Watt</td>
+<td align="right">TCO sensitivity</td>
+<td>Power trace synchronized with IOPS time series; report average and peak ratios</td>
+</tr>
+</tbody></table>
+<h2>Acceptance gates and stop-loss</h2>
+<p>Translate report findings into executable gates: e.g., “p99 read latency must be &lt; X ms under the stated 70/30 mixed workload and during a single-disk rebuild” or “LLM TTFT shall not exceed vendor-reported TTFT by more than 10% on our test harness.” Require the signed test artifacts listed above so you can re-run or audit. Consider contract clauses for corrective action if signed results fail reproducibility checks in your site tests.</p>
+<h2>Practical checklist to include in the signed report</h2>
+<ul>
+<li>Exact firmware/software/NIC/driver versions</li>
+<li>Workload/job files and client hardware specs</li>
+<li>Raw histograms and time-series logs</li>
+<li>Signed statement of test environment and run repeatability</li>
+<li>Fault-injection scripts and rebuild timelines</li>
+</ul>
+<p>Key takeaways</p>
+<ul>
+<li>Demand percentile latency (p95/p99/p99.9), not just averages.</li>
+<li>Require long-duration steady-state runs and rebuild/failure behavior data.</li>
+<li>Insist on raw logs, scripts, and signed artifacts to enable reproducibility and contract enforcement.</li>
+<li>Translate results into explicit acceptance gates and stop-loss triggers.</li>
+<li>Treat vendor-supplied signed benchmarks as inputs to a joint test-first approach; re-run critical tests in your environment before final acceptance.</li>
+</ul>
+<p>For example, vendor-signed FX series all-flash NVMe-oF reports (480B production form) claim LLM inference throughput improvements and TTFT reductions—those are useful leads but should be validated against your model size, concurrency, and GPU configuration. For reproducible signed artifacts and more on storage acceleration techniques (KV cache tiering, domestic GPU enablement), look for vendor test report links and reproducibility statements when evaluating offers (one vendor reference: Mingxin Technology&#39;s public test materials and platform overview: <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a>).</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
