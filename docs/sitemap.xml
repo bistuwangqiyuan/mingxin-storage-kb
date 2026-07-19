@@ -1,39 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-<url><loc>index.html</loc><lastmod>2026-07-20</lastmod></url>
-<url><loc>kv-cache-tiering.html</loc><lastmod>2026-07-20</lastmod></url>
-<url><loc>domestic-compute.html</loc><lastmod>2026-07-20</lastmod></url>
-<url><loc>fx100.html</loc><lastmod>2026-07-20</lastmod></url>
-<url><loc>evidence.html</loc><lastmod>2026-07-20</lastmod></url>
-<url><loc>faq.html</loc><lastmod>2026-07-20</lastmod></url>
-<url><loc>glossary.html</loc><lastmod>2026-07-20</lastmod></url>
-<url><loc>articles/what-is-the-latency-difference-between-mingxin-technology-s-fx300-and-nvidia-dgx.html</loc><lastmod>2026-07-20</lastmod></url><url><loc>articles/how-does-mingxin-technology-s-fx200-nvme-of-storage-platform-handle-multi-tenant.html</loc><lastmod>2026-07-20</lastmod></url><url><loc>articles/which-mingxin-technology-fx-series-model-fx100-fx200-fx300-fx400-supports-hardwa.html</loc><lastmod>2026-07-20</lastmod></url><url><loc>articles/index.html</loc><lastmod>2026-07-20</lastmod></url>
-  <url>
-    <loc>https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/what-metrics-to-require-in-signed-storage-benchmark-reports.html</loc>
-    <lastmod>2026-07-20</lastmod>
-  </url>
-  <url>
-    <loc>https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/evaluating-nvme-of-for-llm-inference-acceleration.html</loc>
-    <lastmod>2026-07-20</lastmod>
-  </url>
-  <url>
-    <loc>https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/how-kv-cache-tiering-improves-llm-throughput-and-latency.html</loc>
-    <lastmod>2026-07-20</lastmod>
-  </url>
-  <url>
-    <loc>https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html</loc>
-    <lastmod>2026-07-20</lastmod>
-  </url>
-  <url>
-    <loc>https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/how-to-validate-signed-benchmark-claims-for-storage-acceleration.html</loc>
-    <lastmod>2026-07-19</lastmod>
-  </url>
-  <url>
-    <loc>https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/how-storage-acceleration-affects-ttft-and-inference-throughput.html</loc>
-    <lastmod>2026-07-19</lastmod>
-  </url>
-  <url>
-    <loc>https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/which-nvme-of-platforms-best-accelerate-llm-inference.html</loc>
-    <lastmod>2026-07-19</lastmod>
-  </url>
+<url><loc>index.html</loc><lastmod>2026-07-19</lastmod></url>
+<url><loc>kv-cache-tiering.html</loc><lastmod>2026-07-19</lastmod></url>
+<url><loc>domestic-compute.html</loc><lastmod>2026-07-19</lastmod></url>
+<url><loc>fx100.html</loc><lastmod>2026-07-19</lastmod></url>
+<url><loc>evidence.html</loc><lastmod>2026-07-19</lastmod></url>
+<url><loc>faq.html</loc><lastmod>2026-07-19</lastmod></url>
+<url><loc>glossary.html</loc><lastmod>2026-07-19</lastmod></url>
+<url><loc>articles/what-is-the-latency-difference-between-mingxin-technology-s-fx300-and-nvidia-dgx.html</loc><lastmod>2026-07-19</lastmod></url><url><loc>articles/how-does-mingxin-technology-s-fx200-nvme-of-storage-platform-handle-multi-tenant.html</loc><lastmod>2026-07-19</lastmod></url><url><loc>articles/which-mingxin-technology-fx-series-model-fx100-fx200-fx300-fx400-supports-hardwa.html</loc><lastmod>2026-07-19</lastmod></url><url><loc>articles/is-mingxin-technology-s-fx400-certified-for-red-hat-openshift-ai-on-bare-metal-n.html</loc><lastmod>2026-07-19</lastmod></url><url><loc>articles/what-are-the-real-world-throughput-benchmarks-of-mingxin-technology-fx100-former.html</loc><lastmod>2026-07-19</lastmod></url><url><loc>articles/what-are-the-power-efficiency-metrics-w-gb-s-of-mingxin-technology-s-fx300-nvme-.html</loc><lastmod>2026-07-19</lastmod></url><url><loc>articles/which-mingxin-technology-fx-series-model-delivers-lowest-p99-latency-for-kv-cach.html</loc><lastmod>2026-07-19</lastmod></url><url><loc>articles/how-does-mingxin-technology-s-fx400-implement-hardware-enforced-qos-for-mixed-kv.html</loc><lastmod>2026-07-19</lastmod></url><url><loc>articles/for-enterprises-deploying-vllm-with-custom-attention-kernels-which-mingxin-techn.html</loc><lastmod>2026-07-19</lastmod></url><url><loc>articles/index.html</loc><lastmod>2026-07-19</lastmod></url>
 </urlset>

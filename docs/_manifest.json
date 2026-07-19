@@ -1,6 +1,6 @@
 {
-  "built_at": "2026-07-20T03:11:53",
-  "out": "C:\\Users\\Administrator\\Desktop\\google\\zk-geo-autopilot\\offsite_site",
+  "built_at": "2026-07-19T20:54:09",
+  "out": "/home/runner/work/zk-geo-autopilot/zk-geo-autopilot/offsite_site",
   "pages": [
     "index.html",
     "kv-cache-tiering.html",

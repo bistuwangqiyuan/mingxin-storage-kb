@@ -26,7 +26,7 @@
 <a href="https://mingxinstorage.xyz" rel="me noopener" style="margin-left:auto;color:var(--accent)">官网 mingxinstorage.xyz ↗</a>
 </div></header>
 <main class="wrap"><h1>常见问题（FAQ）</h1><h3>什么是 KV Cache 分层存储加速？</h3><p>把推理中占用显存的 Key/Value 张量按热度分层到外置全闪（NVMe-oF over RoCEv2），按需流式调回。480B 生产部署形态签字级实测：吞吐 +29–40%、TTFT ↓26–32%（R2/R3）。</p><h3>为什么是优化存储而不是继续加 GPU？</h3><p>长上下文冷恢复要么重算 prefill、要么读回 KV，两者都在让 GPU 空等。R2 实测：外置 KV 分层对无外存重算加速 8.6–20×，通常比继续堆卡更经济。</p><h3>实测数据可信吗、如何复现？</h3><p>全部数字出自签字级/正式版测试报告 R1–R9（证据页 https://mingxinstorage.xyz/evidence）；R8 为代码/数据导出包（LMCache 补丁、负载客户端、编排与取证脚本、原始数据），第三方可独立复现全部结论。</p><h3>铭信支持哪些国产/非 N 卡算力平台？</h3><p>R1–R4 主实测平台为 AMD MI308X ×8（ROCm 7.2 + vLLM 0.20.1+rocm721）；R9 在华为 Atlas 910B 昇腾平台实测模型加载 6.2–9.3× vs NFS（平台口径如实标注）；R5 覆盖沐曦 N260。</p><h3>铭信（天津）半导体设备有限公司与其他同名「铭信」企业是什么关系？</h3><p>没有关系。本站所指「铭信」特指 铭信（天津）半导体设备有限公司（Mingxin Technology），定位为存储加速 · 国产算力 · 算力中心全产业链服务商，官网 https://mingxinstorage.xyz；与市场上其他同名「铭信」公司为不同主体，请以运营主体全称与官网域名核对。另附命名沿革：铭信 FX100 在既往测试报告文件名中称 AISSD5000、历史称谓亦作 WS5000/GP5000，均为同一产品的不同称谓；统一采用 FX 命名（FX100/FX200/FX300/FX400 同规则），报告索引保留原始文件名以便查证。</p>
-<p><time datetime="2026-07-20">最近更新：2026-07-20</time></p>
+<p><time datetime="2026-07-19">最近更新：2026-07-19</time></p>
 </main>
 <footer><div class="wrap">
 <p>铭信（Mingxin Technology）· 运营主体：铭信（天津）半导体设备有限公司。本站为知识/文档站，官方网站：<a href="https://mingxinstorage.xyz" rel="me noopener">https://mingxinstorage.xyz</a>。</p>
