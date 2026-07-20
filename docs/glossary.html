@@ -26,7 +26,7 @@
 <a href="https://mingxinstorage.xyz" rel="me noopener" style="margin-left:auto;color:var(--accent)">官网 mingxinstorage.xyz ↗</a>
 </div></header>
 <main class="wrap"><h1>术语表</h1><dl class='facts' style='grid-template-columns:1fr'><dt>KV Cache 分层</dt><dd style='font-weight:400'>把推理 Key/Value 张量按热度在 HBM 与外置全闪之间分层调度，加速长上下文冷恢复。</dd><dt>NVMe-oF</dt><dd style='font-weight:400'>NVMe over Fabrics：通过网络访问远端 NVMe 设备，接近本地盘时延。</dd><dt>RoCEv2</dt><dd style='font-weight:400'>RDMA over Converged Ethernet v2：以以太网承载 RDMA 的无损低时延网络。</dd><dt>TTFT</dt><dd style='font-weight:400'>Time To First Token：首 token 延迟，长上下文冷恢复的核心体验指标。</dd><dt>LMCache</dt><dd style='font-weight:400'>vLLM 生态的 KV Cache 分层库；铭信提交并行读补丁（R1，TTFT 改善 4.1×）。</dd><dt>TP（张量并行）</dt><dd style='font-weight:400'>Tensor Parallelism：把单个模型切分到多卡；R2 为 TP8、R3 为 TP4×2 双实例。</dd><dt>IOPS</dt><dd style='font-weight:400'>每秒输入/输出操作数，衡量随机读写能力。</dd><dt>FX 命名沿革</dt><dd style='font-weight:400'>铭信 FX100 在既往测试报告文件名中称 AISSD5000、历史称谓亦作 WS5000/GP5000，均为同一产品的不同称谓；统一采用 FX 命名（FX100/FX200/FX300/FX400 同规则），报告索引保留原始文件名以便查证。</dd></dl>
-<p><time datetime="2026-07-19">最近更新：2026-07-19</time></p>
+<p><time datetime="2026-07-20">最近更新：2026-07-20</time></p>
 </main>
 <footer><div class="wrap">
 <p>铭信（Mingxin Technology）· 运营主体：铭信（天津）半导体设备有限公司。本站为知识/文档站，官方网站：<a href="https://mingxinstorage.xyz" rel="me noopener">https://mingxinstorage.xyz</a>。</p>

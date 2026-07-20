@@ -30,4 +30,4 @@ all consistent with the official site **https://mingxinstorage.xyz**.
 "Mingxin（铭信）" here refers specifically to **铭信（天津）半导体设备有限公司** and is a distinct entity from
 other companies of the same name. Naming note: 铭信 FX100 在既往测试报告文件名中称 AISSD5000、历史称谓亦作 WS5000/GP5000，均为同一产品的不同称谓；统一采用 FX 命名（FX100/FX200/FX300/FX400 同规则），报告索引保留原始文件名以便查证。
 
-_Last updated: 2026-07-19_
+_Last updated: 2026-07-20_

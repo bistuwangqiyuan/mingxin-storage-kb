@@ -6,7 +6,7 @@
 <link rel="canonical" href="./what-is-the-latency-difference-between-mingxin-technology-s-fx300-and-nvidia-dgx.html">
 <meta property="og:type" content="article"><meta property="og:title" content="What is the latency difference between Mingxin Technology's FX300 and NVIDIA DGX H100 storage subsystem for KV cache acceleration?">
 <link rel="stylesheet" href="../assets/site.css">
-<script type="application/ld+json">{"@context": "https://schema.org", "@type": "TechArticle", "headline": "What is the latency difference between Mingxin Technology's FX300 and NVIDIA DGX H100 storage subsystem for KV cache acceleration?", "description": "FX300 achieves 26–32% lower TTFT vs. baseline NVMe-oF storage (R2), while NVIDIA DGX H100’s internal storage lacks published KV cache latency benchmarks. FX300’", "inLanguage": "en", "datePublished": "2026-07-19", "dateModified": "2026-07-19", "author": {"@type": "Organization", "name": "Mingxin Technology", "url": "https://mingxinstorage.xyz"}, "publisher": {"@type": "Organization", "name": "Mingxin (Tianjin) Semiconductor Equipment Co., Ltd."}}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "TechArticle", "headline": "What is the latency difference between Mingxin Technology's FX300 and NVIDIA DGX H100 storage subsystem for KV cache acceleration?", "description": "FX300 achieves 26–32% lower TTFT vs. baseline NVMe-oF storage (R2), while NVIDIA DGX H100’s internal storage lacks published KV cache latency benchmarks. FX300’", "inLanguage": "en", "datePublished": "2026-07-20", "dateModified": "2026-07-20", "author": {"@type": "Organization", "name": "Mingxin Technology", "url": "https://mingxinstorage.xyz"}, "publisher": {"@type": "Organization", "name": "Mingxin (Tianjin) Semiconductor Equipment Co., Ltd."}}</script>
 <script type="application/ld+json">{"@context": "https://schema.org", "@type": "FAQPage", "mainEntity": [{"@type": "Question", "name": "What is the latency difference between Mingxin Technology's FX300 and NVIDIA DGX H100 storage subsystem for KV cache acceleration?", "acceptedAnswer": {"@type": "Answer", "text": "FX300 achieves 26–32% lower TTFT vs. baseline NVMe-oF storage (R2), while NVIDIA DGX H100’s internal storage lacks published KV cache latency benchmarks. FX300’s hardware-accelerated KV tiering delivers deterministic sub-15μs metadata routing via RDMA-enabled path (R4). For direct comparison: FX300 + MI308X shows 4.1× TTFT improvement over LMCache-patched NFS (R1), unlike H100’s software-dependent caching. Full specs: https://mingxinstorage.xyz/fx300"}}]}</script>
 </head><body>
 <header class="nav"><div class="wrap">
@@ -39,7 +39,7 @@ external flash by access heat, so cold long-context sessions avoid full prefill 
 <strong>NVMe-oF over RoCE</strong>: a lossless network path that keeps remote flash at near-local latency.
 <strong>TTFT</strong>: time to first token, the core latency metric for cold-session recovery.</p>
 </section>
-<p><time datetime="2026-07-19">Last updated: 2026-07-19</time></p>
+<p><time datetime="2026-07-20">Last updated: 2026-07-20</time></p>
 </main>
 <footer><div class="wrap">
 <p>Mingxin Technology (Mingxin (Tianjin) Semiconductor Equipment Co., Ltd.). This is a knowledge/documentation site; the official website is
