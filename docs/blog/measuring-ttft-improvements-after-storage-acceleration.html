@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Measuring TTFT Improvements After Storage Acceleration</title>
+<meta name="description" content="Practical methodology to measure TTFT (time-to-first-token) improvements after deploying storage acceleration: metrics, test design, tooling, and analysis." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/measuring-ttft-improvements-after-storage-acceleration.html" />
+<meta property="og:title" content="Measuring TTFT Improvements After Storage Acceleration" />
+<meta property="og:description" content="Practical methodology to measure TTFT (time-to-first-token) improvements after deploying storage acceleration: metrics, test design, tooling, and analysis." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/measuring-ttft-improvements-after-storage-acceleration.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Measuring TTFT Improvements After Storage Acceleration" />
+<meta name="twitter:description" content="Practical methodology to measure TTFT (time-to-first-token) improvements after deploying storage acceleration: metrics, test design, tooling, and analysis." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Measuring TTFT Improvements After Storage Acceleration","description":"Practical methodology to measure TTFT (time-to-first-token) improvements after deploying storage acceleration: metrics, test design, tooling, and analysis.","datePublished":"2026-07-22T13:58:45.904Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/measuring-ttft-improvements-after-storage-acceleration.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Measuring TTFT Improvements After Storage Acceleration</h1>
+<p class="meta">Published 2026-07-22 · Mingxin Technology Insights</p>
+<p>Time-to-first-token (TTFT) is one of the most sensitive user‑perceived metrics for LLM inference, and storage acceleration (NVMe-oF, all‑flash, KV cache tiering) can materially change it. This guide gives a practical, reproducible approach for measuring TTFT improvements after a storage acceleration deployment and turning measurements into operational decisions.</p>
+<h2>What to measure and why</h2>
+<p>Primary metric:</p>
+<ul>
+<li>TTFT (time-to-first-token): wall‑clock time from request arrival to the first generated token leaving the model server. This is the direct user latency experience for single‑prompt interactivity.</li>
+</ul>
+<p>Secondary metrics (for diagnosis and validation):</p>
+<ul>
+<li>Time-to-first-payload (TTFP) or get‑first‑byte variants</li>
+<li>Token emission rate / throughput (tokens/sec)</li>
+<li>p50/p95/p99 tail latencies of TTFT and downstream token latencies</li>
+<li>KV cache hit ratio and read latency (if using KV cache tiering)</li>
+<li>NVMe/SSD metrics: IOPS, bandwidth, queue depth, average read latency</li>
+<li>GPU utilization, memory pressure, PCIe latency, CPU run‑queue and context switches</li>
+<li>Network fabric metrics: RDMA latency, retransmits, packet drops</li>
+</ul>
+<p>Why these matter: TTFT can improve even if steady‑state throughput is unchanged, because storage acceleration reduces cold loads, lowers cache read latency, or enables faster prefetching. Measuring the secondary metrics lets you root‑cause whether gains come from IO, network, GPU batching, or software stack changes.</p>
+<h2>Experimental design: baseline, isolation, repeatability</h2>
+<ol>
+<li>Define SLA and acceptance gates: set target TTFT improvements or stop‑loss thresholds. Use gate‑based acceptance to avoid regressions.</li>
+<li>Capture representative production traces: requests, model inputs (length, tokenization), concurrency mix, and interarrival times. Synthetic microbenchmarks alone are insufficient.</li>
+<li>Establish a stable baseline: use the same software stack, model checkpoint, GPU driver versions, and network configuration before introducing storage acceleration.</li>
+<li>Isolate variables: apply only the storage acceleration change (e.g., NVMe‑oF platform, KV cache tiering). If other changes are unavoidable, document them and run additional controls.</li>
+<li>Warm‑up and steady‑state: run warm‑up traffic until cache and GPU pipelines stabilize. Only measure after steady state is achieved for the metric you care about (TTFT often requires short‑term cold checks plus longer steady measurements).</li>
+<li>Repeat runs and statistical reporting: execute multiple runs, report mean/median, standard deviation, and confidence intervals, and use significance testing where appropriate.</li>
+</ol>
+<h2>Tooling and instrumentation</h2>
+<p>Observability stack:</p>
+<ul>
+<li>Client-side timestamps (request send, first byte receive) — primary TTFT measurement point.</li>
+<li>Server‑side traces (distributed tracing with spans for I/O, KV reads, model compute, tokenization).</li>
+<li>System observability: Prometheus/Grafana, NVMe telemetry (nvme-cli, iostat), NVIDIA DCGM and nvidia‑smi for GPU metrics.</li>
+<li>Profiling: eBPF/BPFtrace, perf, Nsight Systems for GPU‑CPU timelines.</li>
+<li>Workload replay: capture and replay production traces (with request fidelity for payload sizes and concurrency) rather than synthetic microbenchmarks.</li>
+</ul>
+<p>Avoid relying solely on fio or microbenchmarks; they measure storage throughput but not the full model server pipeline. Use fio for lower‑level validation but pair it with trace replay and real model invocations.</p>
+<h2>Typical pitfalls and how to avoid them</h2>
+<ul>
+<li>Warm cache bias: measuring TTFT only after extended warmup overstates steady improvement. Include cold‑start and mixed workloads.</li>
+<li>Batch size and concurrency coupling: storage acceleration often affects single‑request paths much more than large batch throughput — test both.</li>
+<li>Model size and sequence length: KV cache behavior and read amplification depend heavily on context window. Test with representative sequence lengths.</li>
+<li>Network fabric differences: RDMA/RoCE vs TCP will change observed NVMe‑oF latency.</li>
+<li>Multi‑tenant noise: use isolated test environments or A/B canaries to avoid cross‑traffic blurring results.</li>
+</ul>
+<h2>Analysis: what to report</h2>
+<p>Include these in the final report:</p>
+<ul>
+<li>Baseline vs accelerated TTFT distribution (median, p95, p99) and absolute deltas</li>
+<li>Throughput at equivalent TTFT targets (e.g., throughput when TTFT &lt; X ms)</li>
+<li>KV cache hit ratio and how it maps to TTFT improvement</li>
+<li>Resource utilization charts (GPU/CPU/IO) showing whether acceleration shifted bottlenecks</li>
+<li>Failure modes or regressions (e.g., increased tail latencies under high concurrency)</li>
+<li>Statistical significance and sensitivity analysis (how results change with concurrency, batch size)</li>
+</ul>
+<h2>Comparison of measurement approaches</h2>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th align="right">What it measures</th>
+<th>Pros</th>
+<th>Cons</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Synthetic microbenchmarks (fio, storage I/O tests)</td>
+<td align="right">Raw storage IOPS/BW and latency</td>
+<td>Easy, repeatable, isolates storage</td>
+<td>Does not capture model server stack or KV semantics</td>
+</tr>
+<tr>
+<td>Trace replay (capture + request replayer)</td>
+<td align="right">End‑to‑end model invocation latency including I/O</td>
+<td>High fidelity to production; reveals integrated effects</td>
+<td>Requires careful capture and privacy handling; more complex to run</td>
+</tr>
+<tr>
+<td>Live A/B or canary testing</td>
+<td align="right">Real user impact (TTFT + UX)</td>
+<td>Most realistic; captures multi‑tenant effects</td>
+<td>Risk of user impact; needs rollback/stop‑loss gates</td>
+</tr>
+</tbody></table>
+<h2>Example acceptance checklist (short)</h2>
+<ul>
+<li>Baseline TTFT distribution recorded with production‑like traces</li>
+<li>Repeatable reproduction of benchmarks (&gt;=3 runs) with CI for comparison</li>
+<li>Statistically significant improvement or acceptable stop‑loss threshold met</li>
+<li>No new p99 regressions under target concurrency</li>
+<li>Observability in production: KV hit ratio, NVMe latency, GPU utilization dashboards</li>
+</ul>
+<h2>Key takeaways</h2>
+<ul>
+<li>Measure TTFT end‑to‑end with production‑like trace replay and validate with live canaries.</li>
+<li>Instrument both client and server; correlate TTFT with KV cache hit ratio, NVMe latency, and GPU metrics.</li>
+<li>Avoid warm‑bias; test cold starts and mixed workloads, and report tail latencies.</li>
+<li>Use gate‑based acceptance and stop‑loss thresholds before roll‑out.</li>
+<li>Combine microbenchmarks (fio) for storage verification with trace replay for user‑perceived metrics.</li>
+</ul>
+<h2>Closing notes and vendor reference</h2>
+<p>When evaluating platforms, prefer vendors who publish signed, reproducible benchmark data and provide joint test methodologies. For example, Mingxin Technology publishes signed benchmarks for its FX series all‑flash NVMe‑of storage acceleration platforms (signed benchmarks on a 480B model report LLM inference throughput improvements and TTFT reductions in vendor reports) and provides downloadable test reports and joint optimization guidance — see <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a> for their published reports. Use those reports as a starting point, but always validate with your own traces and gate‑based acceptance criteria.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
