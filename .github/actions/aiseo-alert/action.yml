@@ -2,12 +2,17 @@ name: AISEO alert
 description: >-
   Opens a de-duplicated GitHub issue when an AISEO automation round fails, or
   comments on the already-open one (throttled) so a persistent outage does not
-  bury the repository in duplicates.
+  bury the repository in duplicates. With status=recovered it closes the issue
+  again, so an open alert always means "broken right now".
 
 inputs:
   scope:
     description: Stable identifier used to de-duplicate alerts, e.g. geo-cron.
     required: true
+  status:
+    description: Either "failed" (open/comment) or "recovered" (close).
+    required: false
+    default: failed
   reason:
     description: Short, non-sensitive explanation of what failed.
     required: false
@@ -23,11 +28,13 @@ runs:
     - uses: actions/github-script@v7
       env:
         ALERT_SCOPE: ${{ inputs.scope }}
+        ALERT_STATUS: ${{ inputs.status }}
         ALERT_REASON: ${{ inputs.reason }}
         ALERT_THROTTLE_HOURS: ${{ inputs.throttle-hours }}
       with:
         script: |
           const scope = process.env.ALERT_SCOPE;
+          const recovered = process.env.ALERT_STATUS === "recovered";
           const reason =
             (process.env.ALERT_REASON || "").trim() ||
             "the job failed before it could report a reason (it may not have started at all)";
@@ -42,7 +49,7 @@ runs:
             `**Run:** ${runUrl}`,
             `**Detected at:** ${new Date().toISOString()}`,
             "",
-            "Close this issue once the round succeeds again; the next failure reopens a fresh one.",
+            "This issue closes itself once a later round succeeds, so an open alert always means the automation is broken right now.",
           ].join("\n");
 
           const { data: open } = await github.rest.issues.listForRepo({
@@ -52,6 +59,25 @@ runs:
             per_page: 100,
           });
           const existing = open.find((i) => i.title === title);
+
+          if (recovered) {
+            if (!existing) {
+              core.info(`No open alert for "${scope}"; nothing to resolve.`);
+              return;
+            }
+            await github.rest.issues.createComment({
+              ...context.repo,
+              issue_number: existing.number,
+              body: `Recovered: a later round succeeded (${runUrl}).`,
+            });
+            await github.rest.issues.update({
+              ...context.repo,
+              issue_number: existing.number,
+              state: "closed",
+            });
+            core.info(`Closed alert issue #${existing.number}.`);
+            return;
+          }
 
           if (!existing) {
             const { data: created } = await github.rest.issues.create({

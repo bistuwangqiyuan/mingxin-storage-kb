@@ -96,3 +96,10 @@ jobs:
           scope: watchdog
           reason: ${{ steps.inspect.outputs.reason }}
           throttle-hours: "24"
+
+      - name: Clear the alert once the output is healthy again
+        if: success()
+        uses: ./.github/actions/aiseo-alert
+        with:
+          scope: watchdog
+          status: recovered

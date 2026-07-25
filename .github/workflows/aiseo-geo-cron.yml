@@ -80,3 +80,10 @@ jobs:
         with:
           scope: geo-cron
           reason: ${{ steps.geo.outputs.reason }}
+
+      - name: Clear the alert once a round succeeds
+        if: success()
+        uses: ./.github/actions/aiseo-alert
+        with:
+          scope: geo-cron
+          status: recovered
