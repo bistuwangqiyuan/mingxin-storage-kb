@@ -1,0 +1,88 @@
+name: AISEO alert
+description: >-
+  Opens a de-duplicated GitHub issue when an AISEO automation round fails, or
+  comments on the already-open one (throttled) so a persistent outage does not
+  bury the repository in duplicates.
+
+inputs:
+  scope:
+    description: Stable identifier used to de-duplicate alerts, e.g. geo-cron.
+    required: true
+  reason:
+    description: Short, non-sensitive explanation of what failed.
+    required: false
+    default: ""
+  throttle-hours:
+    description: Minimum hours between repeat comments on an already-open alert.
+    required: false
+    default: "12"
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/github-script@v7
+      env:
+        ALERT_SCOPE: ${{ inputs.scope }}
+        ALERT_REASON: ${{ inputs.reason }}
+        ALERT_THROTTLE_HOURS: ${{ inputs.throttle-hours }}
+      with:
+        script: |
+          const scope = process.env.ALERT_SCOPE;
+          const reason =
+            (process.env.ALERT_REASON || "").trim() ||
+            "the job failed before it could report a reason (it may not have started at all)";
+          const throttleMs =
+            Number(process.env.ALERT_THROTTLE_HOURS || "12") * 3600 * 1000;
+
+          const title = `[aiseo-alert] ${scope}: automation round failed`;
+          const runUrl = `${process.env.GITHUB_SERVER_URL}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+          const body = [
+            `**Scope:** \`${scope}\``,
+            `**Reason:** ${reason}`,
+            `**Run:** ${runUrl}`,
+            `**Detected at:** ${new Date().toISOString()}`,
+            "",
+            "Close this issue once the round succeeds again; the next failure reopens a fresh one.",
+          ].join("\n");
+
+          const { data: open } = await github.rest.issues.listForRepo({
+            ...context.repo,
+            state: "open",
+            labels: "aiseo-alert",
+            per_page: 100,
+          });
+          const existing = open.find((i) => i.title === title);
+
+          if (!existing) {
+            const { data: created } = await github.rest.issues.create({
+              ...context.repo,
+              title,
+              body,
+              labels: ["aiseo-alert"],
+            });
+            core.info(`Opened alert issue #${created.number}.`);
+            return;
+          }
+
+          const { data: comments } = await github.rest.issues.listComments({
+            ...context.repo,
+            issue_number: existing.number,
+            per_page: 100,
+          });
+          const lastAt = new Date(
+            comments.length
+              ? comments[comments.length - 1].created_at
+              : existing.created_at,
+          ).getTime();
+          if (Date.now() - lastAt < throttleMs) {
+            core.info(
+              `Alert issue #${existing.number} was updated less than ${process.env.ALERT_THROTTLE_HOURS}h ago; not commenting again.`,
+            );
+            return;
+          }
+          await github.rest.issues.createComment({
+            ...context.repo,
+            issue_number: existing.number,
+            body,
+          });
+          core.info(`Commented on alert issue #${existing.number}.`);

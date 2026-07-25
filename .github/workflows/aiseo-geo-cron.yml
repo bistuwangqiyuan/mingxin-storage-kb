@@ -1,0 +1,82 @@
+name: AISEO GEO autopilot (every 4 hours)
+
+# Runs from this repository rather than the aiseoauto one on purpose: Actions
+# minutes are free for public repositories, so a lapsed billing state on the
+# private platform repo can no longer stop the content engine.
+
+on:
+  schedule:
+    - cron: "0 */4 * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: aiseo-geo-cron
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out alert action
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github
+          sparse-checkout-cone-mode: false
+
+      - name: Run one GEO round and validate its output
+        id: geo
+        env:
+          AISEO_BASE_URL: ${{ vars.AISEO_BASE_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -uo pipefail
+          base="${AISEO_BASE_URL:-https://www.clawyes.pw}"
+          base="${base%/}"
+
+          code=$(curl -sS --max-time 600 -o body.json -w '%{http_code}' \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            "${base}/api/cron/geo") || code="000"
+          echo "HTTP ${code}"
+
+          # Safe to print: the payload carries keywords, titles and public URLs only.
+          jq . body.json 2>/dev/null || cat body.json 2>/dev/null || true
+
+          fail() {
+            echo "reason=$(printf '%s' "$1" | tr '\n' ' ' | cut -c1-500)" >> "$GITHUB_OUTPUT"
+            echo "::error::$1"
+            exit 1
+          }
+
+          [ "${code}" = "200" ] || fail "the GEO endpoint returned HTTP ${code}"
+
+          if [ "$(jq -r '.skipped // false' body.json)" = "true" ]; then
+            echo "::notice::Round intentionally skipped: $(jq -r '.reason // "unknown"' body.json)"
+            exit 0
+          fi
+
+          # HTTP 200 alone is not success: the pipeline swallows per-article
+          # errors, so assert that a round actually produced a live article.
+          reason=$(jq -r '
+            if (.ok != true) then "the pipeline reported ok=false"
+            elif ((.articles // []) | length) == 0 then "the round produced no article"
+            elif ([.articles[] | select(.error != null)] | length) > 0 then
+              "article generation failed: " + ([.articles[] | select(.error != null) | .error] | join(" | "))
+            elif ([.articles[] | select((.blogUrl // "") == "")] | length) > 0 then
+              "an article was recorded without a blog URL"
+            else "" end' body.json)
+          [ -z "${reason}" ] || fail "${reason}"
+
+          published=$(jq -r '[.articles[].blogUrl] | join(", ")' body.json)
+          echo "::notice::Published ${published}"
+
+      - name: Alert on failure
+        if: failure()
+        uses: ./.github/actions/aiseo-alert
+        with:
+          scope: geo-cron
+          reason: ${{ steps.geo.outputs.reason }}
