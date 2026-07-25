@@ -1,0 +1,98 @@
+name: AISEO watchdog (daily)
+
+# Covers the failure mode the pipeline cannot report on itself: a round that
+# never starts produces no logs, no HTTP call and therefore no alert. This job
+# judges the system by its output instead of its execution.
+
+on:
+  schedule:
+    - cron: "37 3 * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: aiseo-watchdog
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Path-limited `git log` needs real history to find the last commit
+          # that touched docs/blog.
+          fetch-depth: 0
+
+      - name: Inspect published output
+        id: inspect
+        env:
+          BLOG_ORIGIN: ${{ vars.AISEO_BLOG_ORIGIN }}
+          FRESHNESS_HOURS: ${{ vars.AISEO_FRESHNESS_HOURS }}
+        run: |
+          set -uo pipefail
+          origin="${BLOG_ORIGIN:-https://bistuwangqiyuan.github.io/mingxin-storage-kb}"
+          origin="${origin%/}"
+          # The loop publishes every 4 hours, so 8 tolerates exactly one miss.
+          max_age="${FRESHNESS_HOURS:-8}"
+
+          problems=""
+          add() {
+            problems="${problems}${problems:+ | }$1"
+            echo "::warning::$1"
+          }
+
+          last_commit=$(git log -1 --format=%ct -- docs/blog)
+          if [ -z "${last_commit}" ]; then
+            add "no commit has ever touched docs/blog"
+          else
+            age_h=$(( ( $(date +%s) - last_commit ) / 3600 ))
+            echo "Last docs/blog commit: ${age_h}h ago (threshold ${max_age}h)."
+            if [ "${age_h}" -gt "${max_age}" ]; then
+              add "no new article for ${age_h}h (threshold ${max_age}h) — the GEO loop looks stalled"
+            fi
+          fi
+
+          newest=$(git log -100 --name-only --format= -- 'docs/blog/*.html' \
+            | grep -v '^$' | grep -v '/index\.html$' | head -n 1)
+          if [ -z "${newest}" ]; then
+            add "could not identify the newest article under docs/blog"
+          else
+            url="${origin}/blog/$(basename "${newest}")"
+            echo "Newest article: ${url}"
+
+            # Pages serves from /docs; a change to that layout (it happened once)
+            # silently orphans every article we publish.
+            code=$(curl -sS -L --max-time 60 -o /dev/null -w '%{http_code}' "${url}") || code="000"
+            echo "Article HTTP ${code}"
+            [ "${code}" = "200" ] || add "the newest article is not reachable (HTTP ${code} at ${url})"
+
+            index_code=$(curl -sS -L --max-time 60 -o /dev/null -w '%{http_code}' "${origin}/blog/index.html") || index_code="000"
+            echo "Index HTTP ${index_code}"
+            [ "${index_code}" = "200" ] || add "the blog index is not reachable (HTTP ${index_code})"
+
+            if [ -f docs/sitemap.xml ]; then
+              grep -qF "<loc>${url}</loc>" docs/sitemap.xml \
+                || add "the newest article is missing from docs/sitemap.xml"
+            else
+              add "docs/sitemap.xml is missing"
+            fi
+          fi
+
+          if [ -n "${problems}" ]; then
+            echo "reason=$(printf '%s' "${problems}" | tr '\n' ' ' | cut -c1-500)" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+          echo "::notice::Output is fresh, reachable and indexed."
+
+      - name: Alert on failure
+        if: failure()
+        uses: ./.github/actions/aiseo-alert
+        with:
+          scope: watchdog
+          reason: ${{ steps.inspect.outputs.reason }}
+          throttle-hours: "24"
