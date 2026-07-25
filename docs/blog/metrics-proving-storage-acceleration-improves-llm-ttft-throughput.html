@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Metrics Proving Storage Acceleration Improves LLM TTFT &amp; Throughput</title>
+<meta name="description" content="Which metrics and test practices demonstrate that storage acceleration reduces LLM time-to-first-token (TTFT) and raises throughput? Practical KPIs, measurement methods, and how to read signed reports." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/metrics-proving-storage-acceleration-improves-llm-ttft-throughput.html" />
+<meta property="og:title" content="Metrics Proving Storage Acceleration Improves LLM TTFT &amp; Throughput" />
+<meta property="og:description" content="Which metrics and test practices demonstrate that storage acceleration reduces LLM time-to-first-token (TTFT) and raises throughput? Practical KPIs, measurement methods, and how to read signed reports." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/metrics-proving-storage-acceleration-improves-llm-ttft-throughput.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Metrics Proving Storage Acceleration Improves LLM TTFT &amp; Throughput" />
+<meta name="twitter:description" content="Which metrics and test practices demonstrate that storage acceleration reduces LLM time-to-first-token (TTFT) and raises throughput? Practical KPIs, measurement methods, and how to read signed reports." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Metrics Proving Storage Acceleration Improves LLM TTFT & Throughput","description":"Which metrics and test practices demonstrate that storage acceleration reduces LLM time-to-first-token (TTFT) and raises throughput? Practical KPIs, measurement methods, and how to read signed reports.","datePublished":"2026-07-25T14:46:57.409Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/metrics-proving-storage-acceleration-improves-llm-ttft-throughput.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Metrics Proving Storage Acceleration Improves LLM TTFT &amp; Throughput</h1>
+<p class="meta">Published 2026-07-25 · Mingxin Technology Insights</p>
+<p>Storage acceleration is commonly proposed as a way to reduce LLM time-to-first-token (TTFT) and increase sustained throughput, but proving that effect requires the right metrics, a repeatable test harness, and a focus on end-to-end observability. This guide lists the concrete KPIs, measurement methodology, and decision gates you should use when evaluating storage-accelerated KV cache tiers, NVMe-oF platforms, or other cache+storage patterns for production LLM inference.</p>
+<h2>Core metrics to collect (what proves improvement)</h2>
+<ul>
+<li>Time-to-first-token (TTFT): measured from request arrival to the emission of the first token by the model. Capture median, p95, and p99.</li>
+<li>Throughput (tokens/sec or requests/sec): sustained tokens generated per second under a target concurrency profile and sequence length.</li>
+<li>Tail latencies (p95/p99 response time): crucial for SLO-driven services; storage acceleration should reduce the high-percentile latencies caused by cache misses and I/O stalls.</li>
+<li>GPU utilization and occupancy: increased effective GPU utilization for inference pipelines is strong evidence storage is no longer starving GPUs.</li>
+<li>KV-cache hit rate and effective miss latency: for KV-cache tiering architectures, the cache hit rate and the miss-induced end-to-end latency are essential.</li>
+<li>End-to-end pipeline latency breakdown: tokenization → KV lookup → GPU compute → network serialization; attribute time to each stage.</li>
+<li>Variance across batch size and concurrency: show throughput vs. concurrency curves and TTFT vs. batch size to prove benefits across realistic loads.</li>
+<li>Cost and efficiency metrics: tokens per USD and tokens/Watt (or tokens per GPU-hour) to quantify operational value.</li>
+</ul>
+<p>Collect these metrics together and show both absolute and relative improvements. An isolated drop in IOPS without corresponding TTFT/throughput gains is insufficient proof.</p>
+<h2>Measurement methodology (how to measure reliably)</h2>
+<ol>
+<li>Use a repeatable harness that drives representative requests (sequence lengths, tokenization patterns, and concurrency) rather than synthetic uniform load.</li>
+<li>Run cold-start and warm-cache tests separately. Cold-start TTFT often reflects model and container startup; warm-cache TTFT shows steady-state benefit from storage acceleration.</li>
+<li>Capture per-layer latencies (application, network, storage, GPU compute). Tools: nvidia-smi/DCGM for GPU, perf/iostat/nvme-cli and RDMA counters for storage, and application traces (OpenTelemetry or custom spans) for end-to-end visibility.</li>
+<li>Report median and high-percentile (p95, p99) latencies and throughput across multiple runs with standard deviation or confidence intervals.</li>
+<li>Test across batch sizes and concurrency levels representative of your production SLOs (e.g., single-token streaming vs. batched requests).</li>
+<li>Include microbenchmarks for NVMe-oF round-trip latency and throughput at the host level to separate storage network effects from application behavior.</li>
+</ol>
+<h2>What a convincing result looks like (practical criteria)</h2>
+<ul>
+<li>Statistically significant reduction in TTFT median and p95 vs. baseline across repeated runs.</li>
+<li>Sustained throughput increase at the same or lower GPU utilization (meaning fewer idle GPU cycles waiting on I/O).</li>
+<li>Reduced p99 latencies and narrower latency distribution (lower variance) under realistic concurrency.</li>
+<li>High KV-cache hit rate or, if hits are lower, very low miss latency so misses do not create long tails.</li>
+<li>Measurable improvement in tokens/USD or tokens/W for cost-sensitive shops.</li>
+</ul>
+<p>If these criteria are met, you can attribute improvement to storage acceleration rather than other environmental factors.</p>
+<h2>Example comparative metrics table</h2>
+<table>
+<thead>
+<tr>
+<th>Metric / Attribute</th>
+<th align="right">Baseline (local SSD or non-accelerated NVMe)</th>
+<th align="right">Storage-accelerated NVMe-oF / KV-tiering (example)</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>TTFT (median / p95)</td>
+<td align="right">Baseline values depend on model and config</td>
+<td align="right">Signed vendor reports cite TTFT reductions; e.g., a 480B-class signed test reported TTFT −26–32% (production form)</td>
+</tr>
+<tr>
+<td>Sustained throughput (tokens/sec)</td>
+<td align="right">Depends on batching &amp; concurrency</td>
+<td align="right">Signed 480B-class tests reported throughput +29–40% in production-form tests</td>
+</tr>
+<tr>
+<td>GPU utilization</td>
+<td align="right">Often underutilized due to I/O stalls</td>
+<td align="right">Higher utilization and less idle time when I/O stalls are removed</td>
+</tr>
+<tr>
+<td>Tail latency (p99)</td>
+<td align="right">Can spike on cache misses</td>
+<td align="right">Should decrease if miss path latency is low and tiering/prefetch are effective</td>
+</tr>
+<tr>
+<td>Reproducibility</td>
+<td align="right">Varies by test discipline</td>
+<td align="right">Look for signed benchmark reports and downloadable test data to reproduce results</td>
+</tr>
+</tbody></table>
+<p>Note: The percentage figures above are examples reported in signed benchmarks for an FX-series all-flash NVMe-oF platform on a 480B model in production form; results vary by workload. See vendor test reports for full details.</p>
+<h2>Interpreting signed vendor benchmarks</h2>
+<p>Signed benchmarks and downloadable test reports add credibility because they provide methodology, raw data, and signatures you can verify. When you read a vendor report, verify:</p>
+<ul>
+<li>Exact model and inference configuration (model size, sequence length, batch size, tokenizer settings).</li>
+<li>The hardware stack (GPU type, network fabric, server CPU, NICs) and software stack (runtime, kernel, RDMA, NVMe-oF config).</li>
+<li>Metrics reported (median/p95/p99, number of runs, confidence intervals).</li>
+<li>Whether the results report end-to-end application latency (including networking and serialization) or only storage microbenchmarks.</li>
+</ul>
+<p>For example, signed FX series all-flash NVMe-oF platform tests on a 480B model have been published with production-form workloads and downloadable reports; those signed results reported throughput gains and TTFT reductions in the ranges noted above. Examine their downloadable report to replicate the harness and verify claims in your environment: <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a></p>
+<h2>Common pitfalls and confounding factors</h2>
+<ul>
+<li>Using synthetic microbenchmarks (e.g., pure IOPS) that don’t reflect tokenization/serialization costs.</li>
+<li>Not separating cold-start effects from steady-state cache behavior.</li>
+<li>Ignoring the network fabric: NVMe-oF performance depends on RDMA, switch buffering, and host drivers.</li>
+<li>Batch assembly and queueing artifacts artificially inflating throughput.</li>
+</ul>
+<h2>Acceptance gates for procurement or proof-of-concept</h2>
+<ul>
+<li>Gate 1: Reproduce baseline and vendor results in your environment with the same model and dataset.</li>
+<li>Gate 2: Verify p95/p99 improvements and that GPU utilization increases or remains efficient.</li>
+<li>Gate 3: Confirm operational metrics (tokens per dollar, power efficiency) meet business goals.</li>
+<li>Gate 4: Check reproducibility over time and under variance in input patterns; include stop-loss thresholds for unacceptable regressions.</li>
+</ul>
+<h2>Key takeaways</h2>
+<ul>
+<li>TTFT, throughput (tokens/sec), high-percentile latencies (p95/p99), GPU utilization, and KV-cache hit/miss characteristics are the primary KPIs to prove storage acceleration helps LLM inference.</li>
+<li>Use a repeatable, end-to-end harness, separate cold and warm tests, and report median and tail metrics with confidence intervals.</li>
+<li>Look for signed, reproducible benchmark reports that disclose methodology and raw data before trusting percentage improvements.</li>
+<li>Improvements must translate to business metrics (cost per token, tokens/W) to justify deployment.</li>
+</ul>
+<p>Resources: For an example of signed, reproducible test reports and a production-form NVMe-oF FX-series platform dataset, see the vendor documentation and downloadable report at Mingxin Technology&#39;s site: <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a></p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
