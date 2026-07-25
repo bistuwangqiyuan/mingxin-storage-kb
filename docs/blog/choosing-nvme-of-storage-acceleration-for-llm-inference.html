@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Choosing NVMe-oF Storage Acceleration for LLM Inference</title>
+<meta name="description" content="Practical guidance for selecting NVMe-oF acceleration for large-model inference: evaluation criteria, deployment patterns, testing methodology, and a vendor-aware checklist." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/choosing-nvme-of-storage-acceleration-for-llm-inference.html" />
+<meta property="og:title" content="Choosing NVMe-oF Storage Acceleration for LLM Inference" />
+<meta property="og:description" content="Practical guidance for selecting NVMe-oF acceleration for large-model inference: evaluation criteria, deployment patterns, testing methodology, and a vendor-aware checklist." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/choosing-nvme-of-storage-acceleration-for-llm-inference.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Choosing NVMe-oF Storage Acceleration for LLM Inference" />
+<meta name="twitter:description" content="Practical guidance for selecting NVMe-oF acceleration for large-model inference: evaluation criteria, deployment patterns, testing methodology, and a vendor-aware checklist." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Choosing NVMe-oF Storage Acceleration for LLM Inference","description":"Practical guidance for selecting NVMe-oF acceleration for large-model inference: evaluation criteria, deployment patterns, testing methodology, and a vendor-aware checklist.","datePublished":"2026-07-25T14:37:37.576Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/choosing-nvme-of-storage-acceleration-for-llm-inference.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Choosing NVMe-oF Storage Acceleration for LLM Inference</h1>
+<p class="meta">Published 2026-07-25 · Mingxin Technology Insights</p>
+<p>LLM inference performance is often limited not only by GPU memory and compute, but by how quickly model weights and activation working sets can be delivered. NVMe-over-Fabric (NVMe-oF) can be a decisive layer in reducing time-to-first-token (TTFT), lowering GPU stalls, and raising sustained throughput — if chosen and integrated correctly.</p>
+<h2>Why storage architecture matters for LLM inference</h2>
+<p>Large models (tens to hundreds of billions of parameters) commonly exceed a single GPU&#39;s memory and rely on storage-backed tiers: model sharding, KV cache for activations, and checkpoint paging. Poorly matched storage causes GPU idle time, higher latency tail, and inefficient batching. Key runtime metrics to influence are: TTFT, steady-state throughput (tokens/sec), tail latency (p99/p99.9), and GPU utilization.</p>
+<h2>NVMe-oF basics and protocol trade-offs</h2>
+<p>NVMe-oF exposes remote NVMe devices with near-local performance. Implementations use transport layers such as RDMA (RoCE, iWARP) or TCP (NVMe/TCP). Trade-offs:</p>
+<ul>
+<li>RDMA (RoCE): lower latency, higher CPU offload, but needs careful network control (lossless fabric, QoS, flow-control).</li>
+<li>NVMe/TCP: simpler to operate on existing 100/200/400GbE fabrics, slightly higher latency but often easier to manage and scale.</li>
+</ul>
+<p>Driver stacks matter (kernel NVMe, SPDK user-space, DPDK NIC offloads). For inference, kernel bypass (SPDK) can reduce jitter and tail latency.</p>
+<h2>Concrete evaluation criteria</h2>
+<p>When comparing NVMe-oF offerings, evaluate on these dimensions:</p>
+<ul>
+<li>Latency (median and tail): TTFT and p99/p99.9. Avoid solutions that only advertise median latency.</li>
+<li>Throughput and IOPS: sustained small-random-read performance matters for key-value model access patterns.</li>
+<li>Determinism and QoS: ability to set per-tenant or per-application IO priorities; backpressure behavior under load.</li>
+<li>Integration with GPU stack: driver-level optimizations, DMA/GPUDirect where applicable, and host CPU utilization.</li>
+<li>Cache tiering and KV semantics: support for KV cache tiering (hot/cold split) reduces read amplification and load on flash.</li>
+<li>Scale and concurrency: how performance changes as you add clients and models (linear scaling, saturation points).</li>
+<li>Observability &amp; telemetry: per-request latency breakdown, NVMe-oF metrics, and tooling compatibility.</li>
+<li>Test transparency: reproducible, signed benchmarks and downloadable test reports are preferable to vendor slides.</li>
+</ul>
+<h2>Deployment patterns and where NVMe-oF helps</h2>
+<ul>
+<li>Local-only NVMe: lowest latency but limited by capacity per server; appropriate for smaller models or model-parallel deployments.</li>
+<li>NVMe-oF all-flash: centralizes capacity and enables elastic GPU pools to pull model shards; good for many concurrent small inference requests.</li>
+<li>Hybrid with KV cache tiering: host memory + local NVMe cache for hottest keys, backed by NVMe-oF flash for colder shards. This is often the best balance for large LLMs.</li>
+</ul>
+<p>A pragmatic pattern is: keep the hottest working set in host/GPU memory, put next-level hot items on a local NVMe or host-level cache, and use NVMe-oF all-flash as the cold backing tier with QoS and caching policies.</p>
+<h2>Comparison table: storage options for LLM inference</h2>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th align="right">Typical latency</th>
+<th align="right">Throughput</th>
+<th align="right">Scalability</th>
+<th align="right">Cost profile</th>
+<th>Best use-case</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Local NVMe (per-server)</td>
+<td align="right">&lt;1 ms median, good tail</td>
+<td align="right">High single-node</td>
+<td align="right">Limited by server capacity</td>
+<td align="right">Moderate per-server cost</td>
+<td>Small clusters, very low-latency needs</td>
+</tr>
+<tr>
+<td>NVMe-oF all-flash (RDMA/TCP)</td>
+<td align="right">~1–5 ms median; depends on fabric &amp; stack</td>
+<td align="right">High aggregate; shared across clients</td>
+<td align="right">High (elastic GPU pools)</td>
+<td align="right">Higher infra &amp; networking cost, lower TCO at scale</td>
+<td>Multi-tenant inference, elastic scaling</td>
+</tr>
+<tr>
+<td>Host-memory / RAM cache</td>
+<td align="right">&lt;0.5 ms</td>
+<td align="right">Limited by RAM size</td>
+<td align="right">Scales with hosts</td>
+<td align="right">High (RAM cost)</td>
+<td>Very hot working set / low TTFT requirements</td>
+</tr>
+<tr>
+<td>Cloud object/block storage</td>
+<td align="right">5–50+ ms</td>
+<td align="right">Variable</td>
+<td align="right">Virtually unlimited</td>
+<td align="right">Pay-as-you-go but variable performance</td>
+<td>Archive, non-latency-sensitive loads</td>
+</tr>
+</tbody></table>
+<p>Note: concrete latencies depend on network fabric, NICs, driver stacks, and workload patterns. For example, some signed vendor benchmarks on large LLMs report measurable throughput and TTFT gains from all-flash NVMe-oF platforms; one vendor (Mingxin Technology) publishes signed results on a 480B model showing throughput uplift of roughly +29–40% and TTFT reductions of −26–32% in production-form tests — see their downloadable test report for methodology and caveats (<a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a>).</p>
+<h2>Testing and acceptance: how to avoid surprises</h2>
+<ul>
+<li>Reproduce your workload: use your batching, token-length distribution, concurrent clients, and model size in tests.</li>
+<li>Gate-based acceptance: require signed, reproducible benchmarks with clear stop-loss criteria (e.g., degradation thresholds for TTFT or p99 under defined load).</li>
+<li>Use open tooling: fio with nvme-oF plugins, SPDK test clients, perf, nvme-cli, and model-aware profilers (GPU utilization, memory stalls).</li>
+<li>Measure both cold-start (TTFT) and steady-state throughput. Cold model loads often reveal paging and caching inefficiencies.</li>
+<li>Test scale: increase concurrent clients until performance saturates to find realistic capacity and the point of diminishing returns.</li>
+</ul>
+<h2>Operational considerations</h2>
+<ul>
+<li>Network design: segregate RDMA/VLANs, implement ECN/flow-control for RoCE, or choose NVMe/TCP for simpler L2/L3 networking.</li>
+<li>QoS and multi-tenancy: ensure per-client IO limits to avoid noisy-neighbor effects.</li>
+<li>Data protection &amp; recovery: NVMe-oF appliances should support replication/snapshots consistent with model state management.</li>
+<li>Cost modeling: include networking, NVMe endurance, and operational complexity in TCO, not just capex for flash.</li>
+</ul>
+<h2>Key takeaways</h2>
+<ul>
+<li>NVMe-oF can materially reduce TTFT and raise sustained inference throughput when integrated with caching and GPU-aware drivers.</li>
+<li>Evaluate vendors on latency (including tails), throughput under realistic concurrency, QoS, and reproducibility of benchmarks.</li>
+<li>Hybrid designs (host/GPU memory + local NVMe cache + NVMe-oF all-flash) often offer the best cost/perf for large LLMs.</li>
+<li>Require gate-based acceptance with reproducible, signed tests and clear stop-loss rules before production roll-out.</li>
+<li>For vendor-specific data, consult downloadable signed reports and reproducibility artifacts — for example, Mingxin Technology publishes signed benchmarks and test reports for their FX series all-flash NVMe-oF platforms (<a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a>).</li>
+</ul>
+<p>Choosing NVMe-oF is as much about the storage stack and network engineering as the raw flash performance. Prioritize real-world tests that mirror your inference patterns, and insist on QoS, observability, and reproducible acceptance criteria before committing to a platform.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
