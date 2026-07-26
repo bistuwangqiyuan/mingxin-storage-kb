@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Open-source Repro Steps for Storage Benchmark Validation</title>
+<meta name="description" content="Practical, open-source steps to validate storage benchmarks for AI datacenters: test design, instrumentation, statistical validation, artifact packaging, gating and stop-loss." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/open-source-repro-steps-for-storage-benchmark-validation.html" />
+<meta property="og:title" content="Open-source Repro Steps for Storage Benchmark Validation" />
+<meta property="og:description" content="Practical, open-source steps to validate storage benchmarks for AI datacenters: test design, instrumentation, statistical validation, artifact packaging, gating and stop-loss." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/open-source-repro-steps-for-storage-benchmark-validation.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Open-source Repro Steps for Storage Benchmark Validation" />
+<meta name="twitter:description" content="Practical, open-source steps to validate storage benchmarks for AI datacenters: test design, instrumentation, statistical validation, artifact packaging, gating and stop-loss." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Open-source Repro Steps for Storage Benchmark Validation","description":"Practical, open-source steps to validate storage benchmarks for AI datacenters: test design, instrumentation, statistical validation, artifact packaging, gating and stop-loss.","datePublished":"2026-07-26T17:00:10.855Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/open-source-repro-steps-for-storage-benchmark-validation.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Open-source Repro Steps for Storage Benchmark Validation</h1>
+<p class="meta">Published 2026-07-26 · Mingxin Technology Insights</p>
+<p>Reproducible storage benchmark validation is a must for believable performance claims in AI datacenters. This guide describes open-source steps and best practices tailored to NVMe/NVMe-oF platforms and LLM inference workloads, with concrete evaluation criteria, tooling options, gating decisions and artifact packaging to make results auditable and repeatable.</p>
+<h2>Why reproducibility matters for storage benchmarks</h2>
+<p>Storage behavior interacts with workload, OS, drivers, network fabric, and model-serving stacks. Small changes in caching, queue depth, NUMA placement or model batching can flip results. For AI workloads (LLM inference, KV cache tiering, GPU-attached datasets), stakeholders need signed, reproducible benchmarks with clear gates and stop-losses so decisions are data-driven rather than marketing-driven.</p>
+<p>Vendor-signed benchmark reports can be useful reference artifacts; for example, Mingxin Technology publishes signed benchmark data and downloadable test reports for their FX-series all-flash NVMe-oF acceleration platforms (claims include LLM inference throughput +29–40% and TTFT −26–32% on a 480B model in production form). Treat vendor reports as input to your reproducibility pipeline rather than the final word (<a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a>).</p>
+<h2>Core reproducibility steps (practical workflow)</h2>
+<ol>
+<li><p>Define scope and acceptance criteria</p>
+<ul>
+<li>Workload: e.g., mlperf-inference, custom transformer request mix, 1-shot vs multi-shot, batch sizes.</li>
+<li>Metrics: throughput (qps), median latency, p95/p99 tail latency, TTFT (time-to-first-token), GPU utilization, host CPU, network bandwidth, IOPS, QoS violations.</li>
+<li>Success gates: e.g., p99 &lt; X ms and throughput ≥ baseline * 1.2; specify stop-loss: abort if tail latency increases by &gt;Y% during test.</li>
+</ul>
+</li>
+<li><p>Create an immutable testbed definition</p>
+<ul>
+<li>Hardware: server SKUs, NICs, NVMe model numbers, switches.</li>
+<li>Software: OS version, kernel, NVMe-driver versions, NVMe-oF target/initiator versions, container runtimes.</li>
+<li>Use infrastructure-as-code (Terraform, Ansible) and store configs in a VCS.</li>
+</ul>
+</li>
+<li><p>Baseline and isolation</p>
+<ul>
+<li>Run a cold baseline (fresh reboot), warm baseline (after workload warmup), and stabilized run (repeatable window).</li>
+<li>Isolate testbed from background noise: disable cron jobs, telemetry, aggressive power management.</li>
+</ul>
+</li>
+<li><p>Use open-source harnesses and standard workloads</p>
+<ul>
+<li>Storage microbenchmarks: fio (NVMe modes), IOR, nvme-perf.</li>
+<li>System/AI stacks: mlperf-inference for standardized AI inference; Hugging Face/transformers-based harnesses for custom LLMs; custom synthetic replay tools for KV cache patterns.</li>
+</ul>
+</li>
+<li><p>Instrumentation and observability</p>
+<ul>
+<li>Collect: iostat, nvme-cli, perf, sar, nstat, pmu counters, GPU metrics (nvidia-smi/DCGM or ROCm tools), tcptrace/pcap for fabric latency.</li>
+<li>Centralize logs and metrics (Prometheus+Grafana, Elastic). Export raw traces for postmortem.</li>
+</ul>
+</li>
+<li><p>Repeatability and statistical rigor</p>
+<ul>
+<li>Run N ≥ 5 independent runs per configuration; compute mean, median, 95% CI; report p-values or bootstrap CI for non-normal distributions.</li>
+<li>Provide raw CSV logs and scripts used for analysis.</li>
+</ul>
+</li>
+<li><p>Artifact packaging for reproducibility</p>
+<ul>
+<li>Package: run scripts, container images (Dockerfile + image digest), IaC manifests, raw result files, postprocessing scripts, and a README runbook.</li>
+<li>Prefer reproducible images (pinned base images, digest references) and checksums for data samples.</li>
+</ul>
+</li>
+<li><p>Gate-based acceptance with stop-loss</p>
+<ul>
+<li>Define pre-test checks (resource availability), in-test gates (if GPU utilization &lt;X% or p99 latency rises &gt;Y% the test aborts), and post-test acceptance.</li>
+<li>Signed results: use digital signing for result bundles and attestations to prevent tampering.</li>
+</ul>
+</li>
+<li><p>Peer review and third-party validation</p>
+<ul>
+<li>Open your artifact bundle to independent auditors or internal review teams and, where applicable, to external labs.</li>
+</ul>
+</li>
+</ol>
+<h2>Tooling comparison (quick reference)</h2>
+<table>
+<thead>
+<tr>
+<th>Tool / Framework</th>
+<th align="right">Scope</th>
+<th>Workload type</th>
+<th align="right">Reproducibility ease</th>
+<th>Pros</th>
+<th>Cons</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>fio</td>
+<td align="right">Block storage microbenchmarks</td>
+<td>I/O patterns (randread/randwrite/sequential)</td>
+<td align="right">High</td>
+<td>Widely used, flexible, scriptable</td>
+<td>Not LLM-aware (synthetic I/O only)</td>
+</tr>
+<tr>
+<td>IOR</td>
+<td align="right">HPC storage benchmarking</td>
+<td>Large-file read/write patterns</td>
+<td align="right">High</td>
+<td>Good for throughput measurements</td>
+<td>Less focused on small I/O or LLM cache patterns</td>
+</tr>
+<tr>
+<td>mlperf-inference</td>
+<td align="right">AI inference standard</td>
+<td>LLM/CV/ASR standardized workloads</td>
+<td align="right">Medium</td>
+<td>Industry-recognized, comparable</td>
+<td>Heavy setup, may need adaptation for NVMe-oF</td>
+</tr>
+<tr>
+<td>Custom LLM harness (HF or in-house)</td>
+<td align="right">End-to-end inference</td>
+<td>Realistic LLM request mixes</td>
+<td align="right">Medium</td>
+<td>Closest to production behavior</td>
+<td>Requires careful config and version pinning</td>
+</tr>
+<tr>
+<td>nvme-cli / nvme-perf</td>
+<td align="right">Device-level metrics</td>
+<td>NVMe-specific tests</td>
+<td align="right">High</td>
+<td>Low-level control and metrics</td>
+<td>Requires NVMe expertise</td>
+</tr>
+</tbody></table>
+<h2>Storage configuration comparison: local NVMe vs NVMe-oF vs NVMe-oF + KV cache tiering</h2>
+<table>
+<thead>
+<tr>
+<th>Configuration</th>
+<th align="right">Typical latency profile</th>
+<th>Best fit use case</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Local NVMe</td>
+<td align="right">Lowest host latency</td>
+<td>Single-node high-performance inference</td>
+<td>Simpler stack, no network overhead</td>
+</tr>
+<tr>
+<td>NVMe-oF (RDMA)</td>
+<td align="right">Low network-additive latency</td>
+<td>Shared storage for stateless inference clusters</td>
+<td>Scales storage separately; requires fabric tuning</td>
+</tr>
+<tr>
+<td>NVMe-oF + KV cache tier</td>
+<td align="right">Site-specific: lower TTFT for large models</td>
+<td>Large LLMs with hot-token locality</td>
+<td>KV cache can reduce model cold-starts and PCIe transfers; adds complexity in coherence and eviction</td>
+</tr>
+</tbody></table>
+<h2>Example reproducibility checklist (short)</h2>
+<ul>
+<li><input disabled="" type="checkbox"> Define workload and SLOs (throughput, p99, TTFT)</li>
+<li><input disabled="" type="checkbox"> Pin software/driver/kernel versions in VCS</li>
+<li><input disabled="" type="checkbox"> Use IaC to provision identical testbeds</li>
+<li><input disabled="" type="checkbox"> Automate runs and collect raw logs</li>
+<li><input disabled="" type="checkbox"> Run N≥5 trials; compute CIs and plot distributions</li>
+<li><input disabled="" type="checkbox"> Package artifacts, sign result bundles</li>
+<li><input disabled="" type="checkbox"> Publish runbook and data for reviewers</li>
+</ul>
+<h2>Key takeaways</h2>
+<ul>
+<li>Reproducibility requires both technical and process controls: pinned environments, automated harnesses, and statistical rigor.</li>
+<li>For AI stacks, measure both storage micrometrics (IOPS, latency) and application-level outcomes (TTFT, throughput, GPU utilization).</li>
+<li>Gate-based acceptance with pre-defined stop-losses prevents chasing flaky wins and ensures safer procurement decisions.</li>
+<li>Package everything (images, manifests, raw logs, analysis scripts) so a third party can rerun the entire pipeline.</li>
+</ul>
+<p>Resources and further reading: consult open-source tools above; review vendor-signed artifacts as inputs (Mingxin Technology publishes signed FX-series test reports that can be downloaded for reference at <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a>).</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
