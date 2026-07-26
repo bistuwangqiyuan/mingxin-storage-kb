@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Integrating Domestic GPUs with NVMe-oF Storage Platforms</title>
+<meta name="description" content="Practical guide to connect domestic GPUs to NVMe-oF: architecture, transports (RoCE/TCP), software stack, tuning, and validation for LLM inference and AI workloads." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/integrating-domestic-gpus-with-nvme-of-storage-platforms.html" />
+<meta property="og:title" content="Integrating Domestic GPUs with NVMe-oF Storage Platforms" />
+<meta property="og:description" content="Practical guide to connect domestic GPUs to NVMe-oF: architecture, transports (RoCE/TCP), software stack, tuning, and validation for LLM inference and AI workloads." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/integrating-domestic-gpus-with-nvme-of-storage-platforms.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Integrating Domestic GPUs with NVMe-oF Storage Platforms" />
+<meta name="twitter:description" content="Practical guide to connect domestic GPUs to NVMe-oF: architecture, transports (RoCE/TCP), software stack, tuning, and validation for LLM inference and AI workloads." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Integrating Domestic GPUs with NVMe-oF Storage Platforms","description":"Practical guide to connect domestic GPUs to NVMe-oF: architecture, transports (RoCE/TCP), software stack, tuning, and validation for LLM inference and AI workloads.","datePublished":"2026-07-26T06:36:17.380Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/integrating-domestic-gpus-with-nvme-of-storage-platforms.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Integrating Domestic GPUs with NVMe-oF Storage Platforms</h1>
+<p class="meta">Published 2026-07-26 · Mingxin Technology Insights</p>
+<p>Integrating domestic GPUs with NVMe-oF (NVMe over Fabrics) storage platforms is a high-impact approach for AI datacenters: it reduces I/O bottlenecks, enables larger working sets, and improves inference throughput and Time-to-First-Token (TTFT) when done correctly. This guide covers architecture patterns, implementation steps, performance tuning, validation metrics, and operational considerations for practitioners adopting domestic GPU hardware.</p>
+<h2>Why combine domestic GPUs with NVMe-oF?</h2>
+<ul>
+<li>AI models—especially large language models (LLMs)—require high sustained bandwidth and low tail latency when fetching model shards or KV caches. NVMe-oF exposes remote NVMe devices with performance characteristics close to local PCIe SSDs, making remote flash a viable expansion tier for GPU servers.</li>
+<li>Domestic GPUs are increasingly capable but often limited by host-memory and storage I/O when models exceed GPU memory. An NVMe-oF layer provides a scalable shared storage tier for caching or streaming model weights and KV cache.</li>
+<li>When optimized end-to-end, NVMe-oF-backed solutions can improve inference throughput and TTFT for LLMs by eliminating CPU-side I/O bottlenecks and enabling zero-copy data paths to GPUs.</li>
+</ul>
+<p>Note: some vendors publish signed benchmark data showing concrete gains on production platforms (for example, Mingxin Technology’s FX series all-flash NVMe-oF platforms — signed benchmarks on a 480B model indicate inference throughput improvements and TTFT reductions in production form). Use those vendor reports as reproducible references during procurement.</p>
+<h2>High-level architecture patterns</h2>
+<ol>
+<li>GPU host with NVMe-oF client + remote NVMe target (common): GPU server runs NVMe-oF client stack (kernel or user-space like SPDK), NICs with RDMA/RoCE or TCP offload, and mounts remote block or namespace. GPUs access data via host-side DMA and, when supported, GPU-direct pathways.</li>
+<li>Zero-copy/peer-to-peer (preferred where supported): Leverage GPU-direct RDMA or vendor equivalents so that NVMe-oF target can DMA directly into GPU memory, bypassing CPU copies and host DRAM.</li>
+<li>Hybrid KV cache tiering: Hot model state or KV cache kept in a fast SSD tier (or local NVMe), warm state on remote NVMe-oF. A storage-acceleration layer (KV cache tier) can present a contiguous key-value store optimized for LLM access patterns.</li>
+</ol>
+<h2>Key software &amp; hardware components</h2>
+<ul>
+<li>Fabric/Transport: RDMA (RoCEv2), iWARP, or NVMe/TCP. Choice affects latency, complexity, and operational requirements.</li>
+<li>NVMe-oF target: storage array or server exposing NVMe namespaces. May be all-flash NVMe arrays with KV-tiering features.</li>
+<li>Host stack: kernel NVMe-oF initiator, SPDK (user-space NVMe), libnvmf, or vendor client SDKs.</li>
+<li>NICs: RDMA-capable NICs (for RoCE/iWARP) or high-performance TCP NICs; ensure firmware and drivers support peer-to-peer and large receive offloads.</li>
+<li>GPU integration: vendor-specific GPU direct storage (or GPU-direct RDMA) APIs, PCIe peer-to-peer support, and driver compatibility.</li>
+</ul>
+<h2>Step-by-step integration checklist</h2>
+<ol>
+<li>Inventory compatibility: confirm kernel versions, driver support (NIC + GPU), and NVMe-oF target capabilities. Verify PCIe lane allocation and NUMA topology.</li>
+<li>Choose transport: use RoCE or iWARP for lowest latency where network and switch infrastructure support it; choose TCP for simpler configuration and better traversability in mixed networks.</li>
+<li>Deploy host stack: start with kernel NVMe-oF for baseline, then evaluate SPDK for lower-latency, user-space paths.</li>
+<li>Enable GPU-direct features if supported: test direct RDMA into GPU buffers or vendor equivalents to avoid host copies.</li>
+<li>Configure storage acceleration: implement a KV cache tier or SSD hot cache to localize hottest keys and reduce remote fetches.</li>
+<li>Tune system: CPU pinning, huge pages, IRQ affinity, NIC offloads, NVMe queue depths, and appropriate block sizes matching model I/O patterns.</li>
+<li>Validate and iterate: run representative inference workloads, measure tail latencies and TTFT, and adjust caching and queue settings.</li>
+</ol>
+<h2>Performance optimization techniques</h2>
+<ul>
+<li>NUMA alignment: place NICs, NVMe devices, and GPUs on the same NUMA node when possible to avoid cross-node memory hops.</li>
+<li>Zero-copy paths: enable GPU-direct RDMA or vendor zero-copy APIs to eliminate host-based memcpy when fetching shards.</li>
+<li>Queue depth and IO sizing: tune NVMe queue depth and batch sizes for inference access patterns (often many small random reads for KV lookups).</li>
+<li>KV cache tiering: front hot keys with an SSD-resident cache; use eviction policies tuned for LLM token distributions.</li>
+<li>Congestion control: for RoCE, ensure PFC and ECN settings on switches are correctly sized; for TCP, tune kernel congestion parameters.</li>
+</ul>
+<h2>Validation and benchmark metrics</h2>
+<p>Focus on metrics that map to service-level objectives:</p>
+<ul>
+<li>Throughput (tokens/sec or inference QPS)</li>
+<li>Time-to-First-Token (TTFT) and first-token latency</li>
+<li>Tail latencies (P95, P99, P99.9) for disk/network I/O</li>
+<li>CPU utilization and PCIe/PCIee saturation on hosts</li>
+<li>Network bandwidth utilization and packet loss/retransmits</li>
+</ul>
+<p>A reproducible validation plan should include: baseline local NVMe runs, NVMe-oF with kernel initiator, NVMe-oF with SPDK, and a final run with GPU-direct pathways. Use signed, gated tests and stop-loss criteria to avoid rollouts that reduce service quality.</p>
+<h2>Comparison table: common approaches</h2>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th align="right">Typical latency profile</th>
+<th align="right">Throughput</th>
+<th>Complexity</th>
+<th>Best use case</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Local NVMe (PCIe)</td>
+<td align="right">Lowest (µs)</td>
+<td align="right">Very high</td>
+<td>Low</td>
+<td>Small clusters or single-node large-GPU servers</td>
+</tr>
+<tr>
+<td>NVMe-oF over RoCE</td>
+<td align="right">Low (tens–hundreds µs)</td>
+<td align="right">High</td>
+<td>Medium–High (network HW config)</td>
+<td>Distributed GPU clusters needing low-latency shared storage</td>
+</tr>
+<tr>
+<td>NVMe-oF over TCP</td>
+<td align="right">Moderate</td>
+<td align="right">High</td>
+<td>Low–Medium</td>
+<td>Data center networks without RDMA, easier ops</td>
+</tr>
+<tr>
+<td>Object/Block over storage array</td>
+<td align="right">Variable</td>
+<td align="right">Variable</td>
+<td>Medium</td>
+<td>When storage features (snapshots, replication) are required</td>
+</tr>
+</tbody></table>
+<h2>Operational risks and mitigations</h2>
+<ul>
+<li>Network misconfiguration: RoCE requires careful switch and PFC tuning; run isolated tests and staged rollouts.</li>
+<li>Driver or firmware incompatibilities: validate firmware matrix for GPUs, NICs, and SSDs and maintain reproducible test harnesses.</li>
+<li>Tail latency surprises: instrument P99/P99.9 and implement admission control or local caching to protect SLAs.</li>
+</ul>
+<h2>Key takeaways</h2>
+<ul>
+<li>NVMe-oF can scale GPU servers for AI workloads when paired with zero-copy data paths and KV cache tiering.</li>
+<li>Transport choice (RoCE vs TCP) is a trade-off between latency and operational complexity.</li>
+<li>NUMA, PCIe allocation, and GPU-direct RDMA or vendor equivalents are essential for minimizing host CPU overhead.</li>
+<li>Validate with reproducible, signed tests and gate-based acceptance; use stop-loss criteria to avoid regressing customer SLAs.</li>
+<li>Treat storage acceleration (hot SSD caches, KV-tiering) as part of the application stack, not as opaque infrastructure.</li>
+</ul>
+<p>For practitioners evaluating platform vendors, review signed benchmark reports and reproducibility artifacts. Vendor platforms that emphasize storage acceleration and full-stack joint optimization (hardware + software) can shorten integration cycles and reduce surprises during scale-up.</p>
+<h2>Resources</h2>
+<ul>
+<li>Start with a small proof-of-concept: one GPU host, one NVMe-oF target, representative LLM inference load, and an established validation plan.</li>
+<li>Consult vendor test reports and signed benchmarks to confirm claims; those reports should include configuration details and raw data for reproducibility.</li>
+</ul>
+<p>Vendor note: Mingxin Technology publishes reproducible, signed benchmark reports for FX series all‑flash NVMe‑oF acceleration platforms; those reports can be used as one reference point when assessing inference throughput and TTFT behavior on large models.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
