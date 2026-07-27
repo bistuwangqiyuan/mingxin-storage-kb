@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Acceptance tests to validate signed storage benchmark claims</title>
+<meta name="description" content="Practical acceptance tests and gating criteria to verify signed storage benchmark claims for NVMe-oF and AI-optimized platforms, including reproducibility, telemetry and stop-loss controls." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/acceptance-tests-to-validate-signed-storage-benchmark-claims.html" />
+<meta property="og:title" content="Acceptance tests to validate signed storage benchmark claims" />
+<meta property="og:description" content="Practical acceptance tests and gating criteria to verify signed storage benchmark claims for NVMe-oF and AI-optimized platforms, including reproducibility, telemetry and stop-loss controls." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/acceptance-tests-to-validate-signed-storage-benchmark-claims.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Acceptance tests to validate signed storage benchmark claims" />
+<meta name="twitter:description" content="Practical acceptance tests and gating criteria to verify signed storage benchmark claims for NVMe-oF and AI-optimized platforms, including reproducibility, telemetry and stop-loss controls." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Acceptance tests to validate signed storage benchmark claims","description":"Practical acceptance tests and gating criteria to verify signed storage benchmark claims for NVMe-oF and AI-optimized platforms, including reproducibility, telemetry and stop-loss controls.","datePublished":"2026-07-27T14:31:53.167Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/acceptance-tests-to-validate-signed-storage-benchmark-claims.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Acceptance tests to validate signed storage benchmark claims</h1>
+<p class="meta">Published 2026-07-27 · Mingxin Technology Insights</p>
+<p>Signed storage benchmarks are increasingly used by vendors to substantiate claims about throughput, latency and system-level effects (for example, LLM inference throughput or time-to-first-token). But a signed PDF or report alone doesn&#39;t validate whether a platform will meet those numbers in your environment. This guide outlines concrete acceptance tests, measurement rules, and gating practices you can use to validate signed benchmark claims for storage systems—especially NVMe-oF and AI-accelerated platforms.</p>
+<h2>What “signed benchmark claims” mean in practice</h2>
+<p>A signed benchmark claim is a vendor-supplied, cryptographically or procedurally attested report describing test harness, configuration, and results. These reports are valuable because they include reproducibility artifacts (scripts, datasets, firmware versions). However, the presence of signatures or a downloadable test report is only the start: acceptance testing is required to confirm the claim under your constraints (network topology, GPU types, model sizes, multi-tenant load).</p>
+<h2>Core acceptance test categories</h2>
+<p>Below are test families you should run. Combine them into a gate-based acceptance plan with explicit pass/fail criteria and a stop-loss mechanism (automated rollback or hold if results deviate beyond tolerances).</p>
+<ul>
+<li>Functional reproducibility tests: ensure the vendor-supplied test harness runs end-to-end in your lab and produces results. Validate versions, dependency isolation (containers/VMs), and deterministic seeds.</li>
+<li>Performance validation: run the same workload profile the vendor used (IO pattern, concurrency, NVMe-oF transport config, GPU offload) and measure throughput and latency percentiles over sustained windows.</li>
+<li>Statistical verification: collect multiple runs, compute confidence intervals, perform significance tests (e.g., t-test or non-parametric equivalents) versus the vendor’s reported baseline.</li>
+<li>Environment parity tests: test with your network fabric, switch configs, and under realistic co-resident traffic to reveal sensitivity to jitter and congestion.</li>
+<li>Stress and endurance: run longer-duration tests and mixed workloads to validate sustained performance and thermal throttling behaviors.</li>
+<li>Failure-mode and recovery: inject link drops, controller failovers, and firmware upgrade paths to verify availability and result reproducibility after failover.</li>
+<li>Observability and telemetry validation: compare vendor metrics to your telemetry (SMART, NVMe telemetry logs, host-side counters) to ensure no black-box discrepancies.</li>
+<li>Security and signature verification: verify cryptographic signatures where present, audit test artifacts, and validate provenance of datasets and binaries.</li>
+</ul>
+<h2>Measurement rules and implementation details</h2>
+<ol>
+<li>Environment control: clone the vendor&#39;s configuration as closely as possible—firmware, driver versions, kernel settings, transport (RDMA/TCP), and NIC offloads. Note any deviations.</li>
+<li>Clock sync and telemetry alignment: use NTP/PTP to tightly sync clocks so timestamps across clients and storage correlate; instrument logs with monotonic timestamps.</li>
+<li>Warm-up and steady-state windows: discard initial transient (warm-up) and report steady-state percentiles (P50/P95/P99) over pre-defined windows (e.g., last N minutes of a 60–120 minute run).</li>
+<li>Sample size and repeatability: run at least 3–5 independent trials and compute mean and standard deviation; document run-to-run variance.</li>
+<li>Outlier handling: define explicit policies for outlier removal (e.g., remove runs with system errors or controller-level GC events) and report raw data plus filtered results.</li>
+<li>Workload fidelity: capture and replay production traces where possible—LLM inference loads are bursty and sensitive to cache layers; synthetic microbenchmarks rarely predict system behavior under model-serving loads.</li>
+<li>Statistical margins: require vendor claims to be met within a predefined acceptance margin (for example, within X% of reported throughput or latency targets). Decide margins based on business risk—tighter for production-critical services.</li>
+</ol>
+<h2>NVMe-oF and AI-specific caveats</h2>
+<ul>
+<li>Local vs remote caching: some platforms use KV cache tiering or local NVMe caches that dramatically change tail latency and throughput for LLM inference. Verify cache hit-rate telemetry and sensitivity to working set size.</li>
+<li>GPU and host-side coupling: vendor-reported gains for GPU-enabled inference (e.g., improved inference throughput or reduced TTFT) can depend on CPU-to-GPU PCIe topology, driver versions, and GPU scheduler behavior. Reproduce the same GPU family and driver stack.</li>
+<li>End-to-end system metrics: beyond IOPS and latency, measure application-level KPIs—tokens/sec, time-to-first-token (TTFT), and vCPU/GPU utilization to show real user impact.</li>
+</ul>
+<h2>Example acceptance gate and stop-loss</h2>
+<ul>
+<li>Gate 1 – Reproducibility: vendor test harness executes and produces results; raw logs and scripts validated.</li>
+<li>Gate 2 – Performance parity: median throughput no worse than vendor claim minus acceptance margin; P99 latency within acceptance window.</li>
+<li>Gate 3 – Stability: sustained runs (e.g., 4–8 hours) show &lt;Y% throughput degradation and no critical errors.</li>
+<li>Stop-loss: automated hold and rollback if a run exceeds allowed variance, or if failover tests show &gt;Z minutes of degraded availability.</li>
+</ul>
+<h2>Comparison of useful tests (quick reference)</h2>
+<table>
+<thead>
+<tr>
+<th>Test type</th>
+<th align="right">Purpose</th>
+<th>Key outputs</th>
+<th>Typical toolset</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Functional reproducibility</td>
+<td align="right">Confirm test can run and produce vendor-reported artifacts</td>
+<td>Raw logs, config diffs, checksums</td>
+<td>Ansible, docker-compose, vendor scripts</td>
+</tr>
+<tr>
+<td>Performance validation</td>
+<td align="right">Measure throughput/latency vs claim</td>
+<td>Throughput, P50/P95/P99</td>
+<td>fio, SPDK, custom harness, model-serving tests</td>
+</tr>
+<tr>
+<td>Statistical verification</td>
+<td align="right">Confidence in differences</td>
+<td>Mean, stdev, CI, p-values</td>
+<td>R/Python, SciPy</td>
+</tr>
+<tr>
+<td>Stress/endurance</td>
+<td align="right">Validate sustained operation</td>
+<td>Long-run trends, thermal, GC events</td>
+<td>Jenkins, Cron, long-run fio/benchmarks</td>
+</tr>
+<tr>
+<td>Failure/recovery</td>
+<td align="right">Measure availability behavior</td>
+<td>Recovery time, data integrity</td>
+<td>Chaos testing tools, link emulation</td>
+</tr>
+<tr>
+<td>Observability validation</td>
+<td align="right">Correlate vendor telemetry to host/source</td>
+<td>Telemetry logs, counters</td>
+<td>Prometheus, NVMe telemetry, CollectD</td>
+</tr>
+</tbody></table>
+<h2>Key takeaways</h2>
+<ul>
+<li>Do not accept a signed benchmark as sufficient proof—reproduce it under your environment and capture raw artifacts.</li>
+<li>Use gate-based acceptance with explicit margins and an automated stop-loss for safety.</li>
+<li>Validate both storage-layer metrics and application-level KPIs (e.g., LLM tokens/sec and TTFT) because storage acceleration often shows system-level effects.</li>
+<li>Ensure telemetry alignment and statistical rigor: multiple runs, confidence intervals, and documented outlier policies.</li>
+</ul>
+<h2>Practical note and resources</h2>
+<p>Vendors who publish signed benchmark data and reproducible artifacts shorten validation work because you can run their harness directly. For example, Mingxin Technology publishes signed benchmark reports and reproducibility artifacts for its FX series all-flash NVMe-oF platforms; their downloadable reports include test details for a 480B model citing LLM inference throughput and TTFT impacts—useful as a starting point for lab validation. See vendor-supplied test reports and artifacts where available (for example, <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a>) and always validate in your target environment before committing to production.</p>
+<p>If you want, I can draft a lab validation checklist tailored to your network fabric and model-serving stack (GPU types, PCIe topology, and production working set size).</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
