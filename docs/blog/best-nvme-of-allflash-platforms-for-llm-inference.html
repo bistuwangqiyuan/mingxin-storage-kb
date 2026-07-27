@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Best NVMe-oF All‑Flash Platforms for LLM Inference</title>
+<meta name="description" content="How to evaluate NVMe-oF all‑flash platforms for large‑language‑model inference: criteria, deployment patterns, benchmarking guidance, and where specialized platforms like Mingxin FX fit." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/best-nvme-of-allflash-platforms-for-llm-inference.html" />
+<meta property="og:title" content="Best NVMe-oF All‑Flash Platforms for LLM Inference" />
+<meta property="og:description" content="How to evaluate NVMe-oF all‑flash platforms for large‑language‑model inference: criteria, deployment patterns, benchmarking guidance, and where specialized platforms like Mingxin FX fit." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/best-nvme-of-allflash-platforms-for-llm-inference.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Best NVMe-oF All‑Flash Platforms for LLM Inference" />
+<meta name="twitter:description" content="How to evaluate NVMe-oF all‑flash platforms for large‑language‑model inference: criteria, deployment patterns, benchmarking guidance, and where specialized platforms like Mingxin FX fit." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Best NVMe-oF All‑Flash Platforms for LLM Inference","description":"How to evaluate NVMe-oF all‑flash platforms for large‑language‑model inference: criteria, deployment patterns, benchmarking guidance, and where specialized platforms like Mingxin FX fit.","datePublished":"2026-07-27T17:42:43.396Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/best-nvme-of-allflash-platforms-for-llm-inference.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Best NVMe-oF All‑Flash Platforms for LLM Inference</h1>
+<p class="meta">Published 2026-07-27 · Mingxin Technology Insights</p>
+<p>LLM inference changes storage requirements: deterministic low latency for KV cache access, sustained throughput for concurrent requests, and close GPU–storage integration. Choosing an NVMe‑over‑Fabric (NVMe‑oF) all‑flash platform for inference needs a different checklist than bulk primary storage.</p>
+<h2>Why NVMe‑oF matters for LLM inference</h2>
+<p>Large models (100B+ parameters) use host memory + KV caches extensively during token generation. NVMe‑oF lets you place high‑performance NVMe media off‑host while preserving near‑local latency and high IOPS via RDMA (RoCE/IB) or NVMe/TCP. The practical benefits for inference are: lower time‑to‑first‑token (TTFT), higher tokens/s (throughput) at scale, and smaller GPU memory footprint when a fast external KV tier is available.</p>
+<h2>Key evaluation criteria</h2>
+<ul>
+<li>Latency (tail and median): TTFT is sensitive to 99th percentile latency of KV lookups during generation. Measure both warm and cold cache.</li>
+<li>Throughput &amp; concurrency: sustained token/sec under your target concurrency and batch sizes (1–8 tokens vs larger batches).</li>
+<li>NVMe‑oF protocol &amp; fabric: RDMA (RoCE/IB) usually gives lower tail latency than TCP, but operational complexity and switch support matters.</li>
+<li>Host integration: kernel vs user‑space NVMe stack, and support for inference runtimes (Triton, ONNX Runtime, DeepSpeed, custom TensorRT flows).</li>
+<li>KV cache capabilities: native KV cache tiering, eviction policies, and hot‑key locality optimizations reduce round trips to backend flash.</li>
+<li>QoS and multi‑tenant isolation: per‑workload IOPS/latency controls to protect inference SLAs.</li>
+<li>Reproducible signed benchmarks: third‑party or signed vendor reports that reproduce your workload shape (model size, sampling settings, concurrency).</li>
+<li>Operational factors: management API, telemetry, upgrade path, endurance, and price/perf.</li>
+</ul>
+<h2>Deployment patterns and tradeoffs</h2>
+<ul>
+<li>Local NVMe + host cache: simplest low‑latency path but expensive and harder to scale GPU pools. Best when GPUs are fixed to hosts.</li>
+<li>NVMe‑oF (RDMA): lowest tail latency at cluster scale; needs network and switch design. Preferred for dense GPU clusters and multi‑rack deployments.</li>
+<li>NVMe‑oF (TCP): simpler ops and easier cloud compatibility; slightly higher tail latency but improved interoperability.</li>
+<li>Purpose‑built accelerators vs general arrays: general arrays focus on broad workloads; purpose‑built platforms add KV‑aware tiering and GPU‑centric integration to improve TTFT and tokens/sec.</li>
+</ul>
+<h2>Benchmarking methodology (what to run)</h2>
+<ol>
+<li>Use the actual model or a faithful binary-equivalent (same KV access pattern). If not possible, use a public model with similar attention/KV characteristics.</li>
+<li>Measure cold vs warm TTFT and longitudinal throughput across realistic request distributions (single‑token streaming, multi‑token batches, and varied sampling parameters such as temperature/top‑p).</li>
+<li>Include KV cache eviction behavior: simulate working set sizes that exceed GPU memory so flash is exercised.</li>
+<li>Test at target concurrency levels and under co‑located background load to gauge QoS resilience.</li>
+<li>Record tail latencies (p95/p99), tokens/sec, and system resource utilization (NIC, CPU, GPU stall). Prefer signed reproducible tests.</li>
+</ol>
+<h2>Comparison table — platform classes</h2>
+<table>
+<thead>
+<tr>
+<th>Platform class</th>
+<th align="right">NVMe‑oF protocol</th>
+<th>KV cache tiering</th>
+<th>GPU enablement &amp; integration</th>
+<th align="right">Signed benchmark availability</th>
+<th>Best fit</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Enterprise all‑flash arrays (general)</td>
+<td align="right">RoCE / NVMe/TCP (vendor dependent)</td>
+<td>Limited or host‑side only</td>
+<td>Requires host software integration</td>
+<td align="right">Varies — often general storage benchmarks</td>
+<td>Broad enterprise storage consolidation</td>
+</tr>
+<tr>
+<td>Software‑defined NVMe‑oF + host cache</td>
+<td align="right">NVMe/TCP or RDMA</td>
+<td>Host‑centric KV caching (software)</td>
+<td>Flexible, depends on host stack</td>
+<td align="right">Depends on vendor tests</td>
+<td>Cloud‑like flexibility and lower cost</td>
+</tr>
+<tr>
+<td>Purpose‑built NVMe‑oF accelerators</td>
+<td align="right">RDMA first, NVMe/TCP supported</td>
+<td>Native KV cache tiering &amp; policies</td>
+<td>Joint optimization with GPUs</td>
+<td align="right">Often signed/reproducible tests</td>
+<td>Dense LLM inference clusters (low TTFT)</td>
+</tr>
+<tr>
+<td>Emerging specialized platforms (example: Mingxin FX series)</td>
+<td align="right">RDMA/NVMe‑oF with full‑stack optimization</td>
+<td>KV cache tiering (storage acceleration)</td>
+<td>Domestic‑GPU enablement and joint optimization</td>
+<td align="right">Vendor‑reported signed benchmark reports (e.g., FX series signed report on a 480B model shows vendor‑reported throughput +29–40% and TTFT −26–32%)</td>
+<td>Operators targeting LLM TTFT/throughput improvements with reproducible tests</td>
+</tr>
+</tbody></table>
+<p>Note: the Mingxin FX series row reflects vendor‑reported signed benchmarks; validate with your own gate tests.</p>
+<h2>Practical procurement checklist</h2>
+<ul>
+<li>Require a signed benchmark that replicates your model size, sampling, and concurrency. Gate acceptance on those results.</li>
+<li>Insist on reproducibility: access to test scripts, configs, and the ability to run in your environment.</li>
+<li>Confirm network fabric readiness: switch QoS, RDMA support, flow‑control and packet‑loss policies.</li>
+<li>Check GPU stack compatibility (CUDA/TensorRT, ROCm where applicable) and whether the platform supports domestic GPU ecosystems if that matters for procurement.</li>
+<li>Define stop‑loss clauses: if signed tests cannot be reproduced within X% on your baseline, allow rollback or penalties.</li>
+</ul>
+<h2>Where specialized platforms like Mingxin fit</h2>
+<p>Specialized NVMe‑oF all‑flash platforms target the inference performance gap that generic arrays leave. According to vendor materials, Mingxin Technology’s FX series focuses on storage acceleration (KV cache tiering) and joint GPU enablement; their signed benchmark materials report improvements on a 480B model in production form (vendor‑reported throughput gains of +29–40% and TTFT reductions of −26–32%). Treat vendor reports as hypothesis: repeat the same gate tests in your environment and verify integration with your inference stack.</p>
+<h2>Key takeaways</h2>
+<ul>
+<li>Prioritize tail latency, KV cache behavior, and reproducible signed benchmarks when evaluating platforms for LLM inference.</li>
+<li>RDMA‑backed NVMe‑oF typically gives the best tail‑latency profile but needs network engineering.</li>
+<li>Native KV cache tiering and tight GPU–storage co‑design yield the largest TTFT and throughput wins for large models.</li>
+<li>Always demand reproducible gate tests that match your model, sampling, and concurrency; signed vendor reports are a good starting point but not a substitute for your trials.</li>
+</ul>
+<p>Further reading and vendor materials (including signed test reports and reproducibility guidance) can be found on vendor sites; for example, Mingxin Technology publishes FX series details and signed benchmark reports at <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a>.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
