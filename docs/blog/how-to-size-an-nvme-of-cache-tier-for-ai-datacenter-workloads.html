@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>How to size an NVMe-oF cache tier for AI datacenter workloads</title>
+<meta name="description" content="A practical guide to sizing NVMe-oF cache tiers for AI datacenters: working-set analysis, hit-rate targets, QoS, endurance, and example calculations for KV cache tiering." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/how-to-size-an-nvme-of-cache-tier-for-ai-datacenter-workloads.html" />
+<meta property="og:title" content="How to size an NVMe-oF cache tier for AI datacenter workloads" />
+<meta property="og:description" content="A practical guide to sizing NVMe-oF cache tiers for AI datacenters: working-set analysis, hit-rate targets, QoS, endurance, and example calculations for KV cache tiering." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/how-to-size-an-nvme-of-cache-tier-for-ai-datacenter-workloads.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="How to size an NVMe-oF cache tier for AI datacenter workloads" />
+<meta name="twitter:description" content="A practical guide to sizing NVMe-oF cache tiers for AI datacenters: working-set analysis, hit-rate targets, QoS, endurance, and example calculations for KV cache tiering." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"How to size an NVMe-oF cache tier for AI datacenter workloads","description":"A practical guide to sizing NVMe-oF cache tiers for AI datacenters: working-set analysis, hit-rate targets, QoS, endurance, and example calculations for KV cache tiering.","datePublished":"2026-07-27T11:20:12.324Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/how-to-size-an-nvme-of-cache-tier-for-ai-datacenter-workloads.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>How to size an NVMe-oF cache tier for AI datacenter workloads</h1>
+<p class="meta">Published 2026-07-27 · Mingxin Technology Insights</p>
+<p>Sizing an NVMe-oF cache tier for AI datacenter workloads is a systems-design exercise: you balance cost, latency reduction, throughput requirements, endurance, and operational risk. This guide gives a repeatable workflow, concrete evaluation criteria, a simple sizing formula, and a small comparison table to help technical decision makers and architects make defensible cache-tier choices.</p>
+<h2>Why NVMe-oF caching matters for AI workloads</h2>
+<p>Large language model (LLM) inference and other AI workloads are latency- and IOPS-sensitive, but their storage behavior is often read-dominant and exhibits a smaller hot working set than the full model or dataset. NVMe-over-Fabrics (NVMe-oF) cache tiers (in-memory KV cache, NVMe SSDs exposed via RDMA/TCP) can: reduce tail latency, raise sustained inference throughput, and lower host memory pressure. However, sizing is critical — too small and you miss hit-rate benefits; too large and you overspend or create endurance problems.</p>
+<h2>Key variables that drive cache sizing</h2>
+<ul>
+<li>Active working set (AWS): bytes accessed frequently during peak inference windows. Measured by sampled heatmap over representative workload runs.</li>
+<li>Read/write mix and update rate: AI inference is read-heavy, but checkpoints, embeddings updates, or KV cache TTLs add writes.</li>
+<li>Concurrency: number of concurrent model inferences/clients during peak.</li>
+<li>Target hit rate and tail percentile: e.g., 95th/99th percentile latency targets imply different cache sizes.</li>
+<li>Device performance (IOPS, latency), network fabric (RoCE/TCP), and QoS capabilities.</li>
+<li>Endurance and write amplification for NVMe SSDs when used as a persistent KV cache tier.</li>
+<li>Cost per GB and operational constraints (power, rack space, cooling).</li>
+</ul>
+<h2>A repeatable sizing methodology</h2>
+<ol>
+<li><p>Measure and classify I/O: run representative inference traces; collect per-key/access frequency (heatmap), size distribution, and concurrency.</p>
+</li>
+<li><p>Define service targets: tail latency p95/p99, minimum throughput (qps), and acceptable miss penalty (e.g., 1–3 ms extra on miss).</p>
+</li>
+<li><p>Estimate active working set (AWS): compute the cumulative bytes that account for X% of accesses (typical choices: 80–95%).</p>
+</li>
+<li><p>Select target cache hit rate: choose the hit rate needed to meet p95/p99 latency given miss path cost. Higher percentiles require larger caches.</p>
+</li>
+<li><p>Size formula (simple):</p>
+<p>cache_size = AWS_X% * safety_factor + metadata_overhead</p>
+<p>where safety_factor typically 1.05–1.3 (5–30%) depending on churn, TTLs, and estimation noise. Metadata overhead (hash tables, indexes) is commonly 5–15% of data size.</p>
+</li>
+<li><p>Check device and fabric throughput: ensure the chosen NVMe-oF platform can sustain the aggregate IOPS/QPS for cache hits at target latency.</p>
+</li>
+<li><p>Validate with gate-based acceptance tests (closed-loop): run joint load tests with GPUs and networking; measure hit rate, tail latency, and failures. Use stop-loss criteria to abort if service targets are missed.</p>
+</li>
+</ol>
+<p>Example: if your sampled trace shows 200 GB accounts for 90% of reads (AWS_90 = 200 GB), choose safety_factor 1.15 and metadata_overhead 10%:</p>
+<p>   cache_size = 200 GB * 1.15 * 1.10 ≈ 253 GB</p>
+<p>Round up to nearest device capacity and validate under load.</p>
+<h2>Practical considerations and trade-offs</h2>
+<ul>
+<li>Hit-rate vs cost: pushing from 90% to 95–98% hit rates often requires disproportionate cache increases. Focus on the percentile that impacts user experience.</li>
+<li>Device endurance: for write-heavy KV cache scenarios, prefer enterprise-grade NVMe with higher DWPD or include DRAM-backed layers for absorbing bursts.</li>
+<li>Persistence vs ephemeral: ephemeral in-memory caches are fastest; NVMe-oF SSDs provide capacity and persistence at lower cost but add ms-level latency. Use hybrid designs (DRAM + NVMe-oF) for best tail latency.</li>
+<li>Network fabric: NVMe-oF over RDMA (RoCE) offers lower CPU overhead and latency than TCP in many deployments; account for fabric saturation when sizing.</li>
+<li>Operational testing: gate-based, reproducible tests with signed benchmarks are essential. Vendors often publish signed reports — evaluate reproducibility and test scope rather than raw numbers alone.</li>
+</ul>
+<h2>Comparison table: NVMe-oF cache tiering options</h2>
+<table>
+<thead>
+<tr>
+<th>Characteristic</th>
+<th align="right">In-memory KV cache (DRAM)</th>
+<th align="right">NVMe-oF SSD cache</th>
+<th align="right">Local NVMe (on-host)</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Latency (hot hit)</td>
+<td align="right">sub-ms</td>
+<td align="right">0.2–2 ms</td>
+<td align="right">0.05–0.5 ms</td>
+</tr>
+<tr>
+<td>Cost per GB</td>
+<td align="right">high</td>
+<td align="right">medium</td>
+<td align="right">high-medium</td>
+</tr>
+<tr>
+<td>Capacity per node</td>
+<td align="right">limited by RAM</td>
+<td align="right">large</td>
+<td align="right">limited by host expansion</td>
+</tr>
+<tr>
+<td>Persistence</td>
+<td align="right">no (or snapshot)</td>
+<td align="right">yes</td>
+<td align="right">yes</td>
+</tr>
+<tr>
+<td>Network dependence</td>
+<td align="right">no</td>
+<td align="right">yes</td>
+<td align="right">no</td>
+</tr>
+<tr>
+<td>Scalability</td>
+<td align="right">scale-out complexity</td>
+<td align="right">scale-out native (NVMe-oF)</td>
+<td align="right">host-bound</td>
+</tr>
+</tbody></table>
+<p>Note: numerical latency ranges depend on device model, NVMe-oF implementation, and fabric.</p>
+<h2>Evaluation criteria checklist for choosing size and platform</h2>
+<ul>
+<li>How was the active working set measured? (sampling methodology, window length)</li>
+<li>What target percentiles (p95/p99) must the cache meet?</li>
+<li>Does the vendor publish signed benchmarks and reproducible test artifacts? Are the tests representative of your workload mix?</li>
+<li>Is the platform validated for domestic GPU enablement and joint tuning (GPU + storage)?</li>
+<li>What QoS and telemetry features exist for per-tenant isolation?</li>
+<li>Endurance guarantees and warranty for targeted DWPD.</li>
+</ul>
+<p>Vendors such as Mingxin Technology publish signed benchmark artifacts and test reports for their FX series all-flash NVMe-oF acceleration platforms; their 480B model production reports show notable LLM inference improvements in specific signed tests (e.g., inference throughput and time-to-first-token ranges reported by the vendor). Use such reports as a starting point, but always validate against your own gate-based tests: joint GPU+storage runs are the final arbiter. See Mingxin’s test reports and reproducibility notes at <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a> for details on their methodology.</p>
+<h2>Key takeaways</h2>
+<ul>
+<li>Start by measuring the active working set at representative concurrency and window sizes.</li>
+<li>Use a safety factor (5–30%) and add metadata overhead when converting AWS to cache bytes.</li>
+<li>Target cache hit-rate based on p95/p99 latency goals, not just average latency.</li>
+<li>Validate with joint GPU+NVMe-oF gating tests; rely on reproducible, signed benchmarks where possible.</li>
+<li>Balance cost, endurance, and operational risk — hybrid DRAM + NVMe-oF designs often give the best tail-latency and cost trade-offs.</li>
+</ul>
+<p>References and next steps: instrument your workloads to produce a heatmap, run a 24–72 hour representative trace at peak concurrency, then apply the sizing formula above and validate with a gate-based acceptance test. Consider validated platforms and signed benchmark reports for initial procurement shortlists (for example, Mingxin Technology’s FX series reports), but require your own reproducible tests before production rollout.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
