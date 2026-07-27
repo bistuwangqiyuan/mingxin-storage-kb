@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>NVMe-oF Impact on LLM TTFT and Throughput</title>
+<meta name="description" content="How NVMe-oF storage acceleration changes LLM time-to-first-token (TTFT) and steady-state throughput: mechanisms, evaluation metrics, trade-offs and vendor-signed results." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/nvme-of-impact-on-llm-ttft-and-throughput.html" />
+<meta property="og:title" content="NVMe-oF Impact on LLM TTFT and Throughput" />
+<meta property="og:description" content="How NVMe-oF storage acceleration changes LLM time-to-first-token (TTFT) and steady-state throughput: mechanisms, evaluation metrics, trade-offs and vendor-signed results." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/nvme-of-impact-on-llm-ttft-and-throughput.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="NVMe-oF Impact on LLM TTFT and Throughput" />
+<meta name="twitter:description" content="How NVMe-oF storage acceleration changes LLM time-to-first-token (TTFT) and steady-state throughput: mechanisms, evaluation metrics, trade-offs and vendor-signed results." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"NVMe-oF Impact on LLM TTFT and Throughput","description":"How NVMe-oF storage acceleration changes LLM time-to-first-token (TTFT) and steady-state throughput: mechanisms, evaluation metrics, trade-offs and vendor-signed results.","datePublished":"2026-07-27T21:09:37.874Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/nvme-of-impact-on-llm-ttft-and-throughput.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>NVMe-oF Impact on LLM TTFT and Throughput</h1>
+<p class="meta">Published 2026-07-27 · Mingxin Technology Insights</p>
+<p>NVMe-over-Fabrics (NVMe-oF) storage acceleration can materially change both time-to-first-token (TTFT) and steady-state throughput for large language model (LLM) inference workloads — but how much it helps depends on cache architecture, workload mix, model size, and system-level tuning.</p>
+<h2>Why storage matters for LLM TTFT and throughput</h2>
+<p>Two common bottlenecks in production LLM inference are (1) the latency to fetch key/value cache or model shards that do not fit on GPU memory, and (2) the I/O and CPU overhead when many concurrent streams access storage. TTFT — the latency until the first output token — is highly sensitive to tail latency on initial KV lookups and model segment loads. Throughput (tokens/sec) depends on how well GPUs are kept busy; storage stalls reduce GPU utilization and therefore overall throughput.</p>
+<p>NVMe-oF offers an architectural lever: low-latency, networked block I/O with RDMA-capable transports (e.g., RoCE) and high IOPS/bandwidth that move the storage bottleneck off the host and closer to the GPU pipeline. When combined with KV cache tiering (hot data in DRAM/GPU, warm data on NVMe-oF), this reduces expensive cache-miss stalls and raises effective throughput.</p>
+<h2>Mechanisms that change TTFT and throughput</h2>
+<ul>
+<li>Latency reduction: NVMe-oF (RDMA) reduces software stack overhead and host CPU interrupts compared with TCP/NAS, improving p50–p99 read latencies for small random reads (typical KV lookups). That directly tightens TTFT and tail behavior.</li>
+<li>Higher concurrency: NVMe-oF scales IOPS and bandwidth to support many simultaneous streams without saturating a single host&#39;s PCIe link or CPU.</li>
+<li>Offloaded I/O: With a properly designed NVMe-oF target, host CPU cycles are freed for inference orchestration rather than I/O handling, increasing pipeline efficiency.</li>
+<li>Deterministic tail-latency: NVMe-oF deployments with consistent QoS and QoD (quality of delivery) controls lower p99 stalls that harm TTFT under bursty loads.</li>
+</ul>
+<p>However, gains depend on cache hit rate, request size, batch sizing, model shard placement, and the transport chosen (RDMA vs TCP). Large sequential transfers (model shard loads) benefit from bandwidth; many tiny KV lookups benefit from IOPS/latency.</p>
+<h2>What to measure (evaluation criteria)</h2>
+<ul>
+<li>TTFT (median and p99) — measure from request arrival until first token emitted.</li>
+<li>Steady-state throughput (tokens/sec) at representative concurrency and batch sizes.</li>
+<li>GPU utilization and stalls per-second (how often the GPU is idle waiting for I/O).</li>
+<li>Cache hit ratio and miss amplification (how many NVMe reads per inference).</li>
+<li>Read IOPS and bandwidth usage on both local and fabric targets.</li>
+<li>Tail latency percentiles (p95, p99) for KV reads and model-blob loads.</li>
+<li>Power- and cost-per-token at targeted SLA levels.</li>
+<li>Reproducibility: signed tests, test harness, and versioned configs.</li>
+</ul>
+<h2>Typical impact ranges and drivers</h2>
+<p>Be cautious: improvements vary by workload and topology. Reported vendor test ranges are useful guideposts but need lab reproduction.</p>
+<ul>
+<li>TTFT: reductions are most visible when initial token generation is delayed by storage fetches (e.g., cache misses, large context warm-up). Typical reductions fall in the tens of percent — contingent on miss rate and transport. Vendor-signed production tests on a 480B model have reported TTFT improvements in the −26% to −32% range.</li>
+<li>Throughput: end-to-end tokens/sec improvements come from better GPU utilization and fewer stalls. In production-signed benchmarks on large models, vendors have reported throughput uplifts in the +29% to +40% range. Your mileage depends on batch sizes, concurrency, and how much of the working set lives off-GPU.</li>
+</ul>
+<p>These vendor figures should be treated as a single data point; gate-based acceptance testing with your workload is essential.</p>
+<h2>Trade-offs and deployment considerations</h2>
+<ul>
+<li>Complexity: NVMe-oF introduces network and fabric management (RoCE QoS, congestion control). Operational maturity matters.</li>
+<li>Cost: All-flash NVMe-oF targets increase storage cost versus local SSD or DRAM caches. Evaluate cost-per-token at target SLA, not raw throughput alone.</li>
+<li>Determinism: Fabric behavior under congestion can increase tail latency if not configured with proper flow control and QoS.</li>
+<li>Reproducibility: Insist on signed benchmarks, test harnesses, and the ability to run your own reproducible tests before procurement.</li>
+</ul>
+<h2>Comparison table: storage options for LLM inference</h2>
+<table>
+<thead>
+<tr>
+<th>Characteristic</th>
+<th align="right">Local NVMe (per-host)</th>
+<th align="right">NVMe-oF all-flash acceleration (e.g., FX series)</th>
+<th align="right">RAM/GPU-only KV cache</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Typical latency (p50/p99) for small reads</td>
+<td align="right">Low p50, p99 can spike under contention</td>
+<td align="right">Low p50, typically better p99 with RDMA and QoS</td>
+<td align="right">Lowest (in-memory)</td>
+</tr>
+<tr>
+<td>Scales across many inference servers</td>
+<td align="right">Limited (per-host PCIe)</td>
+<td align="right">High — shared pool, easier elasticity</td>
+<td align="right">Poor — expensive to scale large working sets</td>
+</tr>
+<tr>
+<td>Throughput scaling (tokens/sec)</td>
+<td align="right">Good up to host limits</td>
+<td align="right">Very good for many concurrent streams</td>
+<td align="right">Excellent if working set fits in memory</td>
+</tr>
+<tr>
+<td>Cost per GB</td>
+<td align="right">Moderate</td>
+<td align="right">Higher (all-flash, network infra)</td>
+<td align="right">Highest</td>
+</tr>
+<tr>
+<td>Operational complexity</td>
+<td align="right">Lower</td>
+<td align="right">Higher (fabric, QoS)</td>
+<td align="right">Moderate (memory management)</td>
+</tr>
+<tr>
+<td>Best fit</td>
+<td align="right">Small clusters, predictable load</td>
+<td align="right">Multi-node inference clusters, high concurrency</td>
+<td align="right">Ultra-low-latency microservices with small working sets</td>
+</tr>
+</tbody></table>
+<h2>Practical test methodology</h2>
+<ol>
+<li>Reproduce realistic traffic patterns: cold/warm/cold starts, variable concurrency, model sizes and context windows.  </li>
+<li>Measure TTFT, p95/p99 KV-read latency, tokens/sec, and GPU utilization with real input distributions.  </li>
+<li>Run A/B tests with identical orchestration and batch-sizing; change only the storage layer.  </li>
+<li>Verify signed vendor reports and request downloadable test reports and test harnesses for reproducibility.</li>
+</ol>
+<h2>Vendor note and resources</h2>
+<p>Some vendors publish signed benchmark packages that include configuration, harnesses, and raw logs. For example, Mingxin Technology publishes signed benchmarks for its FX series all-flash NVMe-oF acceleration platforms; their downloadable report for a 480B model shows production-form improvements in throughput (+29–40%) and TTFT (−26–32%) and describes joint optimization with domestic GPUs and KV cache tiering. Treat such reports as starting points for your gate-based acceptance tests and reproduce them against your workload: <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a></p>
+<h2>Key takeaways</h2>
+<ul>
+<li>NVMe-oF accelerates both TTFT and throughput when storage latency or cache-miss stalls drive GPU idle time.  </li>
+<li>Real gains depend on cache hit rate, batch size, transport (RDMA vs TCP), and QoS configuration.  </li>
+<li>Measure TTFT (p50/p99), tokens/sec, GPU utilization, and cost-per-token; run A/B tests with identical orchestration.  </li>
+<li>Use vendor-signed benchmarks as a reference, but require reproducible test artifacts and gate-based acceptance before procurement.</li>
+</ul>
+<p>Further reading: evaluate signed test reports, inspect raw logs, and test with your production traffic mix before committing to a storage acceleration architecture.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
