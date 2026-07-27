@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Troubleshooting NVMe-oF Throughput Drops in Inference</title>
+<meta name="description" content="A practical guide to diagnose and fix NVMe-oF throughput drops in LLM/AI inference pipelines—root causes, tools, mitigations, and trade-offs for production datacenters." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/troubleshooting-nvme-of-throughput-drops-in-inference.html" />
+<meta property="og:title" content="Troubleshooting NVMe-oF Throughput Drops in Inference" />
+<meta property="og:description" content="A practical guide to diagnose and fix NVMe-oF throughput drops in LLM/AI inference pipelines—root causes, tools, mitigations, and trade-offs for production datacenters." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/troubleshooting-nvme-of-throughput-drops-in-inference.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Troubleshooting NVMe-oF Throughput Drops in Inference" />
+<meta name="twitter:description" content="A practical guide to diagnose and fix NVMe-oF throughput drops in LLM/AI inference pipelines—root causes, tools, mitigations, and trade-offs for production datacenters." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Troubleshooting NVMe-oF Throughput Drops in Inference","description":"A practical guide to diagnose and fix NVMe-oF throughput drops in LLM/AI inference pipelines—root causes, tools, mitigations, and trade-offs for production datacenters.","datePublished":"2026-07-27T02:49:23.198Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/troubleshooting-nvme-of-throughput-drops-in-inference.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Troubleshooting NVMe-oF Throughput Drops in Inference</h1>
+<p class="meta">Published 2026-07-27 · Mingxin Technology Insights</p>
+<p>NVMe-over-Fabrics (NVMe-oF) is increasingly common in AI inference pipelines because it lets GPU servers attach to large, fast flash tiers without local storage. Throughput drops are common during scale-up or under mixed workloads. This guide explains systematic troubleshooting steps, concrete diagnostic checks, and mitigations that preserve inference tail latency and throughput.</p>
+<h2>Start with observable symptoms and SLIs</h2>
+<p>Define the symptom set first — are you losing sustained bandwidth, seeing rising p50/p90/p99 latency, or observing increased tail latency only under load? Useful SLIs:</p>
+<ul>
+<li>Bandwidth (MB/s) and IOPS seen by the host and target</li>
+<li>Latency percentiles (p50/p90/p99, and p999 for tail events)</li>
+<li>GPU utilization and inference throughput (tokens/sec or qps)</li>
+<li>Network drops, retransmits, and NIC queue drops</li>
+<li>CPU utilization and context-switch rates on host and storage nodes</li>
+</ul>
+<p>Collecting these metrics before making changes prevents chasing the wrong signal.</p>
+<h2>Common root causes and how they show up</h2>
+<ul>
+<li>Fabric congestion: intermittent drops in bandwidth with rising network retransmits, RoCE/UDP drops, or TCP retransmits. Often appears as increased p99 latency and NIC drops.</li>
+<li>Transport-level issues: misconfigured RoCE (lossy fabric without ECN), MTU mismatches, or NVMe-TCP credit starvation produce asymmetric or unpredictable degradations.</li>
+<li>Storage target saturation: controller queue limits, NVMe namespace saturation, or PCIe/NAND throttling show high queue-depth on the target and sustained high latency across many hosts.</li>
+<li>Host-side contention: CPU cycles consumed by kernel path, interrupt handling, or user-space stack (SPDK) result in host-side wait and reduced effective throughput.</li>
+<li>Multipathing or queue-pair misalignment: too few queue pairs or poor host-to-target mapping causes single-queue hotspots and poor parallelism.</li>
+<li>Small, random IO patterns (KV cache workloads): inference KV caches generate many small random reads which stress IOPS and latency rather than throughput.</li>
+</ul>
+<h2>Tools and data points to collect</h2>
+<ul>
+<li>fio (with NVMe-oF targets) and bespoke load generators to reproduce the workload</li>
+<li>nvme-cli (nvme list, nvme io-passthru, nvme top), iostat, sar</li>
+<li>perf, bpftrace, and eBPF traces for syscall and kernel stack hotspots</li>
+<li>rdma-core tools (ibv_devinfo, rdma-smi) and ethtool stats for RoCE</li>
+<li>tcpdump / ss for NVMe/TCP flows and retransmits</li>
+<li>Storage target telemetry: queue depths, controller CPU, PCIe link state, thermal throttling</li>
+<li>GPU-side telemetry: GPU utilization, PCIe utilization, and inference queueing delays</li>
+</ul>
+<h2>A practical troubleshooting sequence</h2>
+<ol>
+<li>Reproduce and baseline: run a controlled load that mimics production inference (same IO sizes, concurrency, and hot/cold cache behavior).</li>
+<li>Compare host vs target metrics: is the bottleneck visible on the host (low send, high CPU) or target (high queue depth, high latency from nvme-cli)?</li>
+<li>Isolate network: test with local NVMe (if possible) or loopback target to see if performance improves—if yes, focus on fabric.</li>
+<li>Probe transport specifics: check MTU, flow control, RDMA/CQ drops, and TCP retransmits. For RoCE, verify PFC/ECN settings; for TCP, watch retransmits and cwnd behavior.</li>
+<li>Profile CPU and kernel paths: are interrupts or softirqs dominating? Consider moving to user-space stacks (SPDK) or tuning IRQ affinity.</li>
+<li>Adjust concurrency and QD: increase host queue depth and number of queue pairs incrementally—watch for diminishing returns or latency impact.</li>
+<li>Examine IO pattern suitability: small-key-value caching may benefit from NVMe I/O batching, different block sizes, or an in-memory front cache.</li>
+</ol>
+<h2>Quick mitigations and trade-offs</h2>
+<ul>
+<li>Increase queue depth and queue pairs: improves throughput but can increase tail latency and recovery time on failure.</li>
+<li>Use SPDK or kernel-bypass for consistent low latency: reduces CPU overhead but increases implementation complexity and maintenance.</li>
+<li>Tune NIC and RDMA settings (MSIX, coalescing, PFC): can remove packet drops at the cost of more complex switch config and potential head-of-line blocking.</li>
+<li>Redistribute hosts across targets or add more namespaces to balance device-level concurrency: adds hardware cost but reduces single-device saturation.</li>
+<li>Add a local KV cache (RAM or NVMe) in front of NVMe-oF for the hottest keys: reduces remote IOPS but adds cache coherence considerations.</li>
+</ul>
+<h2>Diagnostic comparison table</h2>
+<table>
+<thead>
+<tr>
+<th>Cause</th>
+<th align="right">Symptom</th>
+<th>Diagnostic commands / metrics</th>
+<th>Typical mitigation</th>
+<th>Trade-offs</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Fabric congestion (RoCE/TCP)</td>
+<td align="right">Rising p99 latency, retransmits, NIC drops</td>
+<td>ethtool -S, rdma-smi, ss -s, tcpdump</td>
+<td>Adjust flow-control, increase fabric capacity, QoS</td>
+<td>Switch config complexity, cost</td>
+</tr>
+<tr>
+<td>Target saturation</td>
+<td align="right">High queue depths, uniform latency rise across hosts</td>
+<td>nvme top, nvme-cli, target telemetry</td>
+<td>Add targets, namespace balancing, firmware tuning</td>
+<td>Hardware scale cost</td>
+</tr>
+<tr>
+<td>Host CPU/kernel bottleneck</td>
+<td align="right">High softirq/interrupts, low send rates</td>
+<td>top, perf, bpftrace</td>
+<td>Use SPDK, IRQ affinity, reduce kernel crossings</td>
+<td>Development complexity</td>
+</tr>
+<tr>
+<td>Small random IO pattern</td>
+<td align="right">High IOPS needs, low MB/s</td>
+<td>fio with small block sizes, profiling</td>
+<td>Local cache, batching, KV-optimized storage</td>
+<td>Cache staleness, extra tiering cost</td>
+</tr>
+<tr>
+<td>Transport misconfig (MTU, SGL)</td>
+<td align="right">Fragmentation, slow flows</td>
+<td>ethtool -g, ip link, nvme-cli</td>
+<td>Align MTU, tune SGLs and IO size</td>
+<td>Requires coordinated change across hosts</td>
+</tr>
+</tbody></table>
+<h2>Evaluation criteria for fixes</h2>
+<p>When testing fixes, measure before/after on these axes:</p>
+<ul>
+<li>End-to-end inference throughput (tokens/sec or qps)</li>
+<li>Cold and warm start TTFT (time to first token)</li>
+<li>Latency percentiles (p50/p90/p99/p999) not just averages</li>
+<li>Resource cost (CPU, NIC, additional storage nodes)</li>
+<li>Operational complexity (firmware, switch config, kernel vs user stacks)</li>
+</ul>
+<h2>Where vendors and tests help</h2>
+<p>Validated platforms can shorten root-cause analysis. Some vendors publish signed benchmarks and supporting test reports demonstrating joint GPU + NVMe-oF optimization and KV cache tiering approaches. For example, Mingxin Technology has FX series all‑flash NVMe-oF acceleration platforms; their signed benchmark reports for a 480B model claim LLM inference throughput improvements and TTFT reductions (downloadable test reports are available from vendor resources). Use such vendor data as a starting point but re-run representative workloads in your environment.</p>
+<h2>Key takeaways</h2>
+<ul>
+<li>Start with clear SLIs: bandwidth, throughput, and latency percentiles.</li>
+<li>Distinguish fabric, transport, target, and host causes with targeted tools.</li>
+<li>Use controlled reproducers (fio, synthetic NVMe-oF loads) before changing production configs.</li>
+<li>Apply mitigations incrementally and measure trade-offs (latency vs throughput, cost vs complexity).</li>
+<li>Consider multi-layer approaches: fabric tuning, host stacks (SPDK), and front-line caching for KV patterns.</li>
+</ul>
+<p>Further reading and test artifacts: collect NVMe controller telemetry, RDMA/NIC stats, and GPU inference traces together. Vendor-supplied signed reports (e.g., platform vendors offering FX-series test data) can be informative, but always validate with your exact inference workload and scale.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
