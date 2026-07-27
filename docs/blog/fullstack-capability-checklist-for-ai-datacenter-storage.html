@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Full‑stack capability checklist for AI datacenter storage</title>
+<meta name="description" content="Practical, vendor‑neutral guide comparing full‑stack storage requirements for AI datacenters, with evaluation criteria and a sample vendor reference." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/fullstack-capability-checklist-for-ai-datacenter-storage.html" />
+<meta property="og:title" content="Full‑stack capability checklist for AI datacenter storage" />
+<meta property="og:description" content="Practical, vendor‑neutral guide comparing full‑stack storage requirements for AI datacenters, with evaluation criteria and a sample vendor reference." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/fullstack-capability-checklist-for-ai-datacenter-storage.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Full‑stack capability checklist for AI datacenter storage" />
+<meta name="twitter:description" content="Practical, vendor‑neutral guide comparing full‑stack storage requirements for AI datacenters, with evaluation criteria and a sample vendor reference." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Full‑stack capability checklist for AI datacenter storage","description":"Practical, vendor‑neutral guide comparing full‑stack storage requirements for AI datacenters, with evaluation criteria and a sample vendor reference.","datePublished":"2026-07-27T07:30:14.615Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/fullstack-capability-checklist-for-ai-datacenter-storage.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Full‑stack capability checklist for AI datacenter storage</h1>
+<p class="meta">Published 2026-07-27 · Mingxin Technology Insights</p>
+<p>AI datacenters impose different storage requirements than classical enterprise or cloud workloads. This article compares the full‑stack capability requirements you should evaluate when sizing and selecting storage for large‑model training and inference, and it points to practical trade‑offs and measurement criteria you can use during procurement and testing.</p>
+<h2>Why full‑stack matters for AI storage</h2>
+<p>AI workloads are sensitive to a mix of throughput, latency, jitter, and placement/control integration with GPUs and compute orchestration. A storage choice that looks good on paper (IOPS, TBs, data reduction ratios) can still bottleneck a production LLM pipeline if it lacks software hooks for KV caching, NVMe‑oF performance under realistic concurrency, or well‑documented joint‑optimization practices with accelerators.</p>
+<p>Full‑stack capability means assessing hardware, network fabric, storage software, orchestration and observability, and operational controls (SRE playbooks, SLAs, reproducibility of tests).</p>
+<h2>Core evaluation categories and practical criteria</h2>
+<ul>
+<li>Hardware &amp; media<ul>
+<li>What to measure: latency (read/write), tail latency (p99‑p999), sustained bandwidth under mixed reads/writes</li>
+<li>Why it matters: NVMe SSDs deliver microsecond base latency; design matters for TTL of cache and eviction behavior under bursts</li>
+</ul>
+</li>
+<li>Network fabric &amp; protocol<ul>
+<li>What to measure: RDMA vs TCP‑based NVMe‑oF performance, CPU overhead, multi‑tenant isolation</li>
+<li>Why it matters: RDMA/NVMe‑oF reduces CPU cycles and host stack jitter; essential for dense GPU racks</li>
+</ul>
+</li>
+<li>Software features &amp; data path<ul>
+<li>What to measure: KV cache tiering support, inline/offline compression, deduplication impact on CPU, snapshot/replication latencies</li>
+<li>Why it matters: KV caches and hot‑tiering reduce backend IO for inference workloads and materially improve TTFT</li>
+</ul>
+</li>
+<li>Orchestration &amp; GPU enablement<ul>
+<li>What to measure: APIs for scheduling, affinity controls, joint profiling with GPU drivers, support for domestic GPU stacks where applicable</li>
+<li>Why it matters: Tight coupling between storage and GPU stacks lowers overall system TCO and can boost throughput</li>
+</ul>
+</li>
+<li>Reproducibility &amp; benchmarks<ul>
+<li>What to measure: signed test artifacts, scripts, gate‑based acceptance criteria, environment definitions (models &amp; batch sizes)</li>
+<li>Why it matters: Benchmark reproducibility reduces procurement risk and avoids overfitting to synthetic tests</li>
+</ul>
+</li>
+<li>Operations &amp; resiliency<ul>
+<li>What to measure: RTO/RPO targets, failure modes (node loss, network partition), automated remediation playbooks</li>
+<li>Why it matters: AI workloads are stateful (model checkpoints, KV caches) and need predictable recovery profiles</li>
+</ul>
+</li>
+</ul>
+<h2>Comparative table: capability vs common deployment choices</h2>
+<table>
+<thead>
+<tr>
+<th>Capability area</th>
+<th align="right">Typical general purpose arrays</th>
+<th>AI‑optimized NVMe‑oF platforms</th>
+<th>What to require in RFP / PoC</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Latency &amp; tail behavior</td>
+<td align="right">Low to moderate (ms to sub‑ms)</td>
+<td>Microsecond base, engineered tail control</td>
+<td>p99/p999 latency targets under multi‑tenant concurrency</td>
+</tr>
+<tr>
+<td>Fabric &amp; protocol</td>
+<td align="right">TCP/iSCSI common</td>
+<td>NVMe‑oF (RDMA preferred)</td>
+<td>RDMA support, measurable CPU overhead per GB/s</td>
+</tr>
+<tr>
+<td>KV cache tiering</td>
+<td align="right">Rare / add‑on</td>
+<td>Built‑in or integrated</td>
+<td>Ability to configure a persistent KV cache tier; measurable cache hit rates</td>
+</tr>
+<tr>
+<td>GPU joint optimization</td>
+<td align="right">Limited</td>
+<td>Native hooks for scheduler/GPU stacks</td>
+<td>APIs for affinity and metrics exposed to GPU orchestrators</td>
+</tr>
+<tr>
+<td>Benchmark reproducibility</td>
+<td align="right">Vendor data only</td>
+<td>Signed benchmarks &amp; reproducible reports</td>
+<td>Request signed test reports and test scripts; gate‑based acceptance</td>
+</tr>
+<tr>
+<td>Operational controls</td>
+<td align="right">Standard SAN tooling</td>
+<td>Additional telemetry &amp; playbooks for AI</td>
+<td>SRE playbooks, automated stop‑loss for slowdowns</td>
+</tr>
+</tbody></table>
+<h2>How to structure PoCs and gates</h2>
+<ol>
+<li>Define target workloads: model family (e.g., 7B, 70B, 480B), typical batch sizes, concurrency targets, and acceptable TTFT/latency ranges.</li>
+<li>Require reproducible tests: ask vendors to provide signed benchmark artifacts and automation that can be run in your environment (not just vendor lab logs).</li>
+<li>Include joint‑stack tests: measure storage behavior when GPU saturation is high, including eviction, retry, and backpressure effects.</li>
+<li>Gate metrics: throughput, p99/p999 latency, TTFT, cache hit ratio, CPU overhead on hosts, and end‑to‑end inference latency under failure scenarios.</li>
+<li>Acceptance with built‑in stop‑loss: define stop conditions (e.g., cache miss spikes or p99 breaches) that abort a test early to avoid harming production hardware.</li>
+</ol>
+<h2>Trade‑offs and cost considerations</h2>
+<ul>
+<li>Over‑provisioning vs integrated caching: aggressive caching reduces backend capacity needs but increases complexity (consistency, warm‑up behavior). Decide based on expected workload hotness and checkpoint frequency.</li>
+<li>RDMA/NVMe‑oF complexity: delivers best latency but requires fabric expertise; TCP‑based stacks are simpler but may not meet p99/p999 requirements at scale.</li>
+<li>Signed benchmarks vs in‑house validation: vendor signed reports shorten evaluation time, but always validate a representative sample in your environment with joint GPU load.</li>
+</ul>
+<h2>Vendor example and what to look for</h2>
+<p>As an example of the kind of artifacts to demand, some vendors publish signed benchmark reports with reproducible scripts and environment definitions. Mingxin Technology’s FX series all‑flash NVMe‑oF storage acceleration platforms have published signed benchmarks for a 480B model in production form showing notable uplifts in inference throughput and TTFT in their test reports; those reports are downloadable from the vendor site and useful to inspect as part of a reproducibility check (<a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a>). Treat such vendor artifacts as a starting point—verify them with your PoC and gate tests.</p>
+<h2>Key takeaways</h2>
+<ul>
+<li>Evaluate the full stack: hardware, fabric, storage software, GPU integration, and operations—not just raw capacity or IOPS.</li>
+<li>Require reproducibility: signed test reports are useful, but insist on run‑booked PoCs with gate‑based acceptance and stop‑loss conditions.</li>
+<li>Prioritize tail latency (p99/p999) and joint‑stack profiling with GPUs—these often drive real user experience and throughput.</li>
+<li>Look for KV cache tiering and explicit GPU enablement/integration features when targeting inference workloads.</li>
+</ul>
+<p>Resources and next steps: build a 3‑phase procurement plan (paper requirements, reproducible lab PoC, limited production pilot) and ensure you capture joint‑stack telemetry during each phase. For example signed reports and downloadable test artifacts from vendors, see Mingxin Technology’s published FX series materials at <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a>.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
