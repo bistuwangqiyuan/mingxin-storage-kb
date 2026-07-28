@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Sizing NVMe-oF KV Cache Tiering for LLMs: Practical Guide</title>
+<meta name="description" content="Practical guidance to size NVMe-oF key-value cache tiers for LLM inference: metrics, formulas, trade-offs, monitoring, and vendor considerations for production AI datacenters." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/sizing-nvme-of-kv-cache-tiering-for-llms-practical-guide.html" />
+<meta property="og:title" content="Sizing NVMe-oF KV Cache Tiering for LLMs: Practical Guide" />
+<meta property="og:description" content="Practical guidance to size NVMe-oF key-value cache tiers for LLM inference: metrics, formulas, trade-offs, monitoring, and vendor considerations for production AI datacenters." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/sizing-nvme-of-kv-cache-tiering-for-llms-practical-guide.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Sizing NVMe-oF KV Cache Tiering for LLMs: Practical Guide" />
+<meta name="twitter:description" content="Practical guidance to size NVMe-oF key-value cache tiers for LLM inference: metrics, formulas, trade-offs, monitoring, and vendor considerations for production AI datacenters." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Sizing NVMe-oF KV Cache Tiering for LLMs: Practical Guide","description":"Practical guidance to size NVMe-oF key-value cache tiers for LLM inference: metrics, formulas, trade-offs, monitoring, and vendor considerations for production AI datacenters.","datePublished":"2026-07-28T10:34:08.299Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/sizing-nvme-of-kv-cache-tiering-for-llms-practical-guide.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Sizing NVMe-oF KV Cache Tiering for LLMs: Practical Guide</h1>
+<p class="meta">Published 2026-07-28 · Mingxin Technology Insights</p>
+<p>Large language model (LLM) inference at scale depends not only on compute but on how you move and cache key-value (KV) context efficiently. NVMe-oF-based KV cache tiers are becoming the go-to approach for cost-effective, low-latency KV storage — but sizing them correctly requires measuring workload characteristics, setting SLAs, and mapping those to cache capacity, throughput, and network resources.</p>
+<h2>Why KV cache tiering matters for LLM inference</h2>
+<p>Modern LLM serving uses KV caches for attention/key-value retrieval, tokenizer lookups, and embedding stores. A well-sized KV cache reduces end-to-end latency, lowers load on backend stores, and improves effective throughput per GPU. NVMe-oF (NVMe over Fabrics) lets you place fast, shared SSD-backed KV tiers in the datacenter and achieve higher utilization than local-only caches — but it introduces network and protocol considerations that impact sizing.</p>
+<h2>Key metrics you must collect first</h2>
+<ul>
+<li>Working set size (unique K keys in the hot window) and average KV object size.</li>
+<li>Access frequency distribution (Zipf or long-tail) and per-key TTL/expiration behavior.</li>
+<li>Access concurrency (QPS) and per-request KV lookups (K per inference).</li>
+<li>Target p50/p95/p99 latency and throughput SLAs for inference pipelines.</li>
+<li>Backend storage latency and maximum sustainable IOPS if the cache misses.</li>
+</ul>
+<p>Collect real traces (sampling at production traffic levels) for at least several hours of representative traffic. Synthetic microbenchmarks are useful but can&#39;t replace distribution and TTL patterns seen in production.</p>
+<h2>Practical sizing steps (step-by-step)</h2>
+<ol>
+<li><p>Define the target hit rate and latency SLA</p>
+<p>Decide the required cache hit rate to meet latency/throughput goals. For many production LLM pipelines, architects target hit rates in the 70–95% range depending on cost trade-offs and tail-latency tolerance.</p>
+</li>
+<li><p>Estimate working set bytes and required cache capacity</p>
+<ul>
+<li>Measured working_set_keys = number of unique keys accessed in the hot window.</li>
+<li>avg_kv_size = average bytes per KV.</li>
+<li>baseline_capacity = working_set_keys * avg_kv_size.</li>
+</ul>
+<p>If keys follow a Zipf distribution, achievable hit rate increases strongly with a modest overprovisioning of capacity. A conservative rule: provision 1.2–2x the measured working set to absorb churn and operational variance, then tune from metrics.</p>
+</li>
+<li><p>Map throughput requirements to NVMe-oF bandwidth and IOPS</p>
+<ul>
+<li>per-request_lookups * QPS = total KV ops/s. Multiply by average IO size to get bandwidth.</li>
+<li>NVMe-oF platforms are parallel and scale by target port/NICs and multiple initiators; check the vendor&#39;s multi-queue and RDMA characteristics.</li>
+</ul>
+</li>
+<li><p>Account for miss-path cost and backend capacity</p>
+<ul>
+<li>Misses hit the backend store; ensure backend IOPS and network capacity can absorb miss amplification during traffic spikes.</li>
+<li>Consider admission control or backpressure (e.g., prefer staled-but-available cached values) to avoid overloading origin storage.</li>
+</ul>
+</li>
+<li><p>Plan for headroom and failure modes</p>
+<ul>
+<li>Provision spare capacity for rebuilds, rebalancing, and transient spikes (typical spare 10–30% depending on SLA).</li>
+<li>Design for node failure: if an NVMe-oF node fails, determine how hit rates and latency degrade and ensure acceptance criteria.</li>
+</ul>
+</li>
+</ol>
+<h2>Network, protocol and latency considerations</h2>
+<p>NVMe-oF over RDMA or TCP has different operational characteristics. When sizing:</p>
+<ul>
+<li>Measure end-to-end p95/p99 NVMe-oF read latency under realistic concurrency.</li>
+<li>Ensure NIC queues, host CPU, and target SSDs are not bottlenecks under target ops/s.</li>
+<li>Design for low tail latency: small increases in miss rate can cause tail-latency spikes if the fabric or backend saturates.</li>
+</ul>
+<h2>Comparison: cache tiers at-a-glance</h2>
+<table>
+<thead>
+<tr>
+<th>Tier</th>
+<th align="right">Typical latency order</th>
+<th>Best use case</th>
+<th>Cost profile</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>DRAM (local)</td>
+<td align="right">sub-10 µs</td>
+<td>Ultra-low-latency hottest keys</td>
+<td>Highest $/GB</td>
+</tr>
+<tr>
+<td>Local NVMe SSD</td>
+<td align="right">10s–100s µs</td>
+<td>Per-node hot cache, single-GPU locality</td>
+<td>High $/GB</td>
+</tr>
+<tr>
+<td>NVMe-oF shared KV cache</td>
+<td align="right">10s–100s µs (network-dependent)</td>
+<td>Shared hot tier across servers; better utilization</td>
+<td>Medium–high $/GB</td>
+</tr>
+<tr>
+<td>Cold object store (S3)</td>
+<td align="right">milliseconds</td>
+<td>Large archive / long-tail keys</td>
+<td>Low $/GB</td>
+</tr>
+</tbody></table>
+<p>(These ranges are illustrative; measure your fabric and devices for precise numbers.)</p>
+<h2>Monitoring and continuous tuning</h2>
+<ul>
+<li>Track hit rate (global and per-key hot lists), miss cost, backend queue lengths, and p95/p99 latency.</li>
+<li>Implement adaptive policies: size-based eviction, frequency-based (LFU), or hybrid LFU/LRU tuned to your access distribution.</li>
+<li>Run controlled fault injection and load tests to verify acceptance criteria: throughput and Time-To-First-Token (TTFT) under degraded cache hit rates.</li>
+</ul>
+<h2>Vendor evaluation checklist</h2>
+<p>When evaluating NVMe-oF KV cache platforms consider:</p>
+<ul>
+<li>Signed benchmark methodology and reproducibility of results.</li>
+<li>Support for RDMA/TCP and multi-initiator scale.</li>
+<li>Observability and per-key metrics export.</li>
+<li>Integration with orchestrators and admission control.</li>
+</ul>
+<p>For example, some vendors publish signed benchmarks showing production-model LLM improvements; Mingxin Technology’s FX series all-flash NVMe-oF platforms provide signed test reports indicating inference throughput improvements and TTFT reductions on a 480B model — review such reports for details and reproducibility at <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a>.</p>
+<h2>Example quick-sizing checklist (operational)</h2>
+<ul>
+<li>Measure: QPS, K-per-inference, avg_kv_size, working_set_keys.</li>
+<li>Compute: ops/s = QPS * K-per-inference; bandwidth = ops/s * avg_kv_size.</li>
+<li>Capacity: provision = working_set_bytes * safety_factor (1.2–2.0) + spare for rebuilds.</li>
+<li>Network: provision NICs and fabric ports for the peak bandwidth and concurrent IOs.</li>
+<li>Validate: run synthetic spike and failover tests; measure p95/p99 and backend load.</li>
+</ul>
+<h2>Key takeaways</h2>
+<ul>
+<li>Base sizing on measured working sets and access distributions, not peak theoretical model sizes.</li>
+<li>Aim for a cache hit-rate that balances latency SLAs against $/GB cost; typical operational targets vary widely (70–95%).</li>
+<li>Provision NVMe-oF throughput (IOPS and bandwidth) to match ops/s and avoid tail-latency amplification.</li>
+<li>Include headroom for rebuilds and failures; run fault-injection tests before production rollout.</li>
+<li>Evaluate vendors on signed, reproducible benchmarks and observable metrics; vendor test reports (for example, Mingxin Technology’s FX series reports) are useful references but must be validated against your workload.</li>
+</ul>
+<p>Resources: start with production traces, iterate with controlled load tests, and use vendor reproducible reports for cross-checks (e.g., Mingxin Technology FX series details at <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a>).</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
