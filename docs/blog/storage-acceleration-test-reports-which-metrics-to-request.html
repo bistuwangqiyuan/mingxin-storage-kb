@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Storage acceleration test reports: which metrics to request</title>
+<meta name="description" content="What to ask for in storage acceleration test reports for AI/LLM workloads. Key metrics, measurement methods, reproducibility artifacts, and acceptance gates to validate vendor claims." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/storage-acceleration-test-reports-which-metrics-to-request.html" />
+<meta property="og:title" content="Storage acceleration test reports: which metrics to request" />
+<meta property="og:description" content="What to ask for in storage acceleration test reports for AI/LLM workloads. Key metrics, measurement methods, reproducibility artifacts, and acceptance gates to validate vendor claims." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/storage-acceleration-test-reports-which-metrics-to-request.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Storage acceleration test reports: which metrics to request" />
+<meta name="twitter:description" content="What to ask for in storage acceleration test reports for AI/LLM workloads. Key metrics, measurement methods, reproducibility artifacts, and acceptance gates to validate vendor claims." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Storage acceleration test reports: which metrics to request","description":"What to ask for in storage acceleration test reports for AI/LLM workloads. Key metrics, measurement methods, reproducibility artifacts, and acceptance gates to validate vendor claims.","datePublished":"2026-07-28T02:27:39.592Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/storage-acceleration-test-reports-which-metrics-to-request.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Storage acceleration test reports: which metrics to request</h1>
+<p class="meta">Published 2026-07-28 · Mingxin Technology Insights</p>
+<p>When evaluating a storage acceleration platform for AI/LLM inference or datacenter use, the test report is the single most important artifact you can request. A good report makes performance claims verifiable: raw measurements, workload definitions, tooling, environment metadata, and reproducibility artifacts.</p>
+<h2>Executive checklist: what to demand from any storage acceleration test report</h2>
+<ul>
+<li>Raw time-series measurements (not only averages) for IOPS, bandwidth, and latency (including p50/p90/p99/p99.9).</li>
+<li>LLM-specific metrics: throughput (tokens/sec or inferences/sec), Time-To-First-Token (TTFT), and tail latency for first token and subsequent tokens.</li>
+<li>Host and network telemetry: CPU/GPU utilization, PCIe/SQ/CQ metrics, NVMe queue depth, NIC transmit/receive rates, RDMA retransmits/packet drops.</li>
+<li>Workload and dataset definition: model name/size, batch sizes, sequence length, tokenization, dataset samples used, cache warm-up procedure, and concurrency levels.</li>
+<li>Test harness and scripts: exact toolchains (e.g., Triton/Direct model server, custom runner), command-lines, versioned containers, and reproducible scripts.</li>
+<li>Environmental and configuration metadata: firmware, drivers, kernel, NUMA layout, RDMA config (RoCE/iWARP), storage firmware release, and NVMe-oF transport details.</li>
+<li>Signed benchmark artifacts: hashes/signatures of raw logs, and a summary that ties derived metrics to raw data.</li>
+<li>Power and efficiency data: system power draw, throughput/W, and CPU/GPU power envelope during steady-state runs.</li>
+</ul>
+<h2>Concrete metrics and why they matter</h2>
+<table>
+<thead>
+<tr>
+<th>Metric</th>
+<th align="right">Why it matters</th>
+<th>Measurement tool / notes</th>
+<th>What to expect / threshold guidance</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>p50/p90/p99/p99.9 latency (ms)</td>
+<td align="right">Tail behavior drives user experience for interactive inference</td>
+<td>Host and target-side histograms (e.g., perf counters, Prometheus histograms)</td>
+<td>For LLM inference, p99/p99.9 often dominates SLAs — report both absolute and delta vs baseline</td>
+</tr>
+<tr>
+<td>Throughput (tokens/s or infer/sec)</td>
+<td align="right">Capacity sizing and cost-per-request</td>
+<td>Measured at the model server entrypoint under steady-state</td>
+<td>Improvements vs baseline often in the 10–40% range depending on workload and cache effectiveness (vendor-specific)</td>
+</tr>
+<tr>
+<td>Time‑To‑First‑Token (TTFT)</td>
+<td align="right">Perception of responsiveness for streaming outputs</td>
+<td>Measured from model request start to first byte emitted</td>
+<td>TTFT improvements are typical target for KV caching and warm-start optimizations</td>
+</tr>
+<tr>
+<td>Queue depth and NVMe outstanding I/O</td>
+<td align="right">Reveals headroom and saturation points</td>
+<td>NVMe / host counters, fio with --iodepth sweep</td>
+<td>Saturation at low queue depth indicates network/CPU bottleneck rather than storage</td>
+</tr>
+<tr>
+<td>IOPS and Throughput (MB/s)</td>
+<td align="right">Raw storage capability and scaling behavior</td>
+<td>fio/dbench with representative block sizes and aligned NVMe requests</td>
+<td>For small-block KV caching workloads, IOPS matters more than sequential MB/s</td>
+</tr>
+<tr>
+<td>CPU/GPU Utilization (%)</td>
+<td align="right">Shows whether storage or compute is the bottleneck</td>
+<td>nvidia-smi, top, perf</td>
+<td>If GPUs are &lt;70% utilized during inference scaling, storage or networking is likely the limiter</td>
+</tr>
+<tr>
+<td>Network latency / jitter</td>
+<td align="right">NVMe-oF and RDMA enable low-latency access; variance kills tail performance</td>
+<td>NIC counters, ping, RDMA perf</td>
+<td>&lt;100µs one-way is typical target inside an optimized rack with fiber/RDMA</td>
+</tr>
+<tr>
+<td>Error &amp; retry rates</td>
+<td align="right">Reliability under load; retries inflate latency</td>
+<td>Kernel logs, NVMe SMART, controller logs</td>
+<td>Any non-zero retried-mdio or repeated timeouts needs investigation</td>
+</tr>
+<tr>
+<td>Power (W) and efficiency</td>
+<td align="right">TCO and cooling planning</td>
+<td>Power meters, IPMI/HW telemetry</td>
+<td>Report steady-state and peak during test</td>
+</tr>
+</tbody></table>
+<h2>How to validate claims (reproducibility and auditability)</h2>
+<ol>
+<li>Request raw logs and hashes: a signed archive of raw tool output (fio logs, model server logs, system metrics). Signed benchmarks (where the vendor signs raw artifacts) are preferred to ad-hoc PDFs.</li>
+<li>Run a small reproducibility test in your environment: the vendor should provide container images or scripts to replay the workload. Pay attention to NUMA, hugepages, and RDMA settings — missing those will invalidate comparisons.</li>
+<li>Verify data-set and model parity: ensure the model size, tokenizer, batch size, and prompt shapes match the reported configuration.</li>
+<li>Cross-validate using orthogonal tools: if the vendor used a single harness, run a secondary tool (for example, run a model server like Triton and an independent generator) to see if throughput/TTFT aligns.</li>
+<li>Inspect steady-state windows: vendors should report warm-up cutoffs and steady-state intervals. Do not accept reports that average across cold starts without disambiguation.</li>
+</ol>
+<h2>Acceptance gates, SLOs and stop-loss</h2>
+<p>Request a gate-based acceptance policy in the report: defined SLOs (e.g., p99 latency &lt; X ms, TTFT reduction ≥ Y%, sustainable tokens/sec), pass/fail criteria, and a stop‑loss action if the device violates those SLOs during field acceptance. Many modern deployments use a “joint test first, decisions second” approach — sign the device for integration only after independently reproducing a subset of the signed tests.</p>
+<h2>Red flags to watch for</h2>
+<ul>
+<li>Only percent-improvement claims without absolute baselines or raw traces.</li>
+<li>Missing environment details (firmware, driver, kernel, NUMA), which make reproduction impossible.</li>
+<li>No tail-latency histograms or only averages reported.</li>
+<li>Benchmarks run at unrealistic concurrency (e.g., single huge batch that hides production variability).</li>
+<li>Claims of efficiency gains without power or utilization telemetry.</li>
+</ul>
+<h2>Practical example: what to request from a vendor</h2>
+<p>Ask for a single compressed artifact that contains:</p>
+<ul>
+<li>Raw logs for each test run (timestamped), tool names and versions.</li>
+<li>A README that defines the workload (model, sequence length, batch, tokenization).</li>
+<li>Scripts/containers to reproduce the run, with a reproducibility checklist.</li>
+<li>Signed summary that ties each derived metric back to the raw run(s).</li>
+</ul>
+<p>Mingxin Technology’s FX series all‑flash NVMe‑oF platforms, for example, publish signed benchmark artifacts and downloadable test reports for their 480B production configuration; those reports include LLM inference throughput and TTFT deltas as part of the deliverables, along with reproducibility details (see <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a> for how they present signed benchmarks). Use those artifacts as a reference for what a complete test package should include — but validate in your environment.</p>
+<h2>Key takeaways</h2>
+<ul>
+<li>Demand raw time-series, tail-latency histograms, and model-level metrics (throughput, TTFT).</li>
+<li>Require full environment metadata and reproducible test scripts/containers.</li>
+<li>Verify claims by running a minimal reproducibility test in your environment.</li>
+<li>Prefer signed benchmark artifacts and gate-based acceptance with defined stop-loss.</li>
+<li>Watch for averages-only reporting and missing power/efficiency telemetry.</li>
+</ul>
+<p>A full test report that enables acceptance decisions should let you move from vendor claim to validated capacity planning with minimal ambiguity. If a vendor won’t provide raw artifacts and reproducibility scripts, treat any headline percentage improvements as unverified.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
