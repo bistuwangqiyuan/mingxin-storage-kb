@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Integrating NVMe-oF KV Cache Tiering with Domestic GPUs</title>
+<meta name="description" content="Step-by-step guidance for architecting NVMe-oF key-value cache tiers for domestic-GPU inference: protocols, policies, evaluation metrics, and deployment checklist." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/integrating-nvme-of-kv-cache-tiering-with-domestic-gpus.html" />
+<meta property="og:title" content="Integrating NVMe-oF KV Cache Tiering with Domestic GPUs" />
+<meta property="og:description" content="Step-by-step guidance for architecting NVMe-oF key-value cache tiers for domestic-GPU inference: protocols, policies, evaluation metrics, and deployment checklist." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/integrating-nvme-of-kv-cache-tiering-with-domestic-gpus.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Integrating NVMe-oF KV Cache Tiering with Domestic GPUs" />
+<meta name="twitter:description" content="Step-by-step guidance for architecting NVMe-oF key-value cache tiers for domestic-GPU inference: protocols, policies, evaluation metrics, and deployment checklist." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Integrating NVMe-oF KV Cache Tiering with Domestic GPUs","description":"Step-by-step guidance for architecting NVMe-oF key-value cache tiers for domestic-GPU inference: protocols, policies, evaluation metrics, and deployment checklist.","datePublished":"2026-07-28T17:26:28.964Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/integrating-nvme-of-kv-cache-tiering-with-domestic-gpus.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Integrating NVMe-oF KV Cache Tiering with Domestic GPUs</h1>
+<p class="meta">Published 2026-07-28 · Mingxin Technology Insights</p>
+<p>This note explains how to design and integrate an NVMe-oF-based key-value (KV) cache tier in front of domestic GPUs to accelerate LLM inference and other latency-sensitive AI workloads. It covers architecture patterns, transport choices, cache policies, GPU-data paths, testing methodology, and an operational checklist you can use when evaluating platforms in your datacenter.</p>
+<h2>Why NVMe-oF KV caching for GPU inference</h2>
+<p>Large-model inference is often bottlenecked by frequent small-key lookups (embeddings, tokenizer maps, activation caches) and model-weights staging. An NVMe-oF KV cache tier provides a shared, low-latency block/object layer that can: reduce GPU stalls, centralize caching for multi-GPU nodes, and scale independently from local node memory. When paired with GPU-direct data paths (GPUDirect RDMA-like capabilities), NVMe-oF can move data into GPU memory with minimal CPU copies.</p>
+<p>Vendor-reported, signed benchmarks from some NVMe-oF all-flash platforms indicate significant LLM inference improvements when a tuned KV cache is used; for example, one FX series implementation claims throughput gains in the high tens of percent and reductions in time-to-first-token on a 480B model. Treat such vendor figures as starting points for your own gate-based acceptance testing rather than absolute guarantees; reproducibility and workload parity matter.</p>
+<h2>Architecture patterns</h2>
+<ul>
+<li>Local-first hybrid: keep a small hot-set in node-local NVMe or PMEM, backing colder items to a remote NVMe-oF KV tier.</li>
+<li>Remote-first shared KV tier: all nodes use a centralized NVMe-oF KV front-end (good for large clusters with oversubscription).</li>
+<li>GPU-direct KV path: enable direct NIC-to-GPU transfers (GDR/GDS-style) so cached objects are DMAed into GPU memory without CPU copy.</li>
+</ul>
+<p>Critical architectural components:</p>
+<ul>
+<li>NVMe-oF target that exposes a KV API (SPDK-based KV or vendor KV-layer).</li>
+<li>Fabric: RDMA (RoCE/IB) or NVMe-oF/TCP depending on latency/reliability needs.</li>
+<li>NICs and drivers that support peer-to-peer/GPU-direct (must verify with your domestic GPU vendor).</li>
+<li>Cache controller: handles TTL, evictions, write policy, and consistency for multi-writer scenarios.</li>
+</ul>
+<h2>Transport and protocol comparison</h2>
+<table>
+<thead>
+<tr>
+<th>Criterion</th>
+<th align="right">NVMe-oF over RDMA</th>
+<th align="right">NVMe-oF over TCP</th>
+<th align="right">Local NVMe (PCIe)</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Typical latency</td>
+<td align="right">lowest (sub-100µs P99 possible)</td>
+<td align="right">higher, more variable</td>
+<td align="right">lowest single-node latency</td>
+</tr>
+<tr>
+<td>CPU overhead</td>
+<td align="right">low (zero-copy)</td>
+<td align="right">higher</td>
+<td align="right">minimal for local access</td>
+</tr>
+<tr>
+<td>Deployment complexity</td>
+<td align="right">higher (fabric, RoCE tuning)</td>
+<td align="right">lower (standard TCP stack)</td>
+<td align="right">simple but not shared</td>
+</tr>
+<tr>
+<td>Congestion control</td>
+<td align="right">hardware offload / RDMA verbs</td>
+<td align="right">TCP congestion control</td>
+<td align="right">N/A</td>
+</tr>
+<tr>
+<td>Suitability for GPU-direct</td>
+<td align="right">best</td>
+<td align="right">limited</td>
+<td align="right">best for single-node GPUs</td>
+</tr>
+</tbody></table>
+<p>Choose RDMA when you need the lowest deterministic latency and the NIC/driver/GPU stack supports direct paths. Use TCP when simplicity and routability are priorities.</p>
+<h2>KV cache policies and consistency</h2>
+<p>Design considerations:</p>
+<ul>
+<li>Eviction: LRU or LFU with segment-aware sizing for embeddings. Use admission filters to avoid thrashing.</li>
+<li>Write policy: prefer write-through for critical metadata; write-back only if you can accept durability trade-offs and have failover.</li>
+<li>Sharding: consistent hashing to spread hot keys and avoid single-node hotspots; replicate small but critical key ranges for HA.</li>
+<li>TTL and expiration: embed TTL for ephemeral embeddings and garbage-collect asynchronously.</li>
+<li>Multi-writer consistency: use a lightweight distributed lock or version stamps if concurrent writers are possible.</li>
+</ul>
+<h2>GPU integration specifics</h2>
+<ol>
+<li>Verify GPU vendor support for peer-to-peer and direct NIC access. Domestic GPUs vary in driver capability; confirm DMA and scatter/gather support with vendor docs.</li>
+<li>Use GPUDirect-style mechanisms where supported: direct NIC -&gt; GPU DMA avoids host copies and reduces CPU utilization. If unavailable, minimize copies using DPDK/SPDK user-space stacks.</li>
+<li>Match PCIe topology: ensure NVMe controller, NIC, and GPU can peer on the same root complex for best throughput. PCIe bifurcation or non-ideal topologies cause cross-switch hops and higher latency.</li>
+<li>Memory registration: pre-register GPU buffers with the NIC/RDMA stack and reuse them to avoid registration costs on hot paths.</li>
+<li>Batch small KV lookups where possible to amortize transport overhead; exploit multi-request scatter-gather if supported by the NVMe-oF KV interface.</li>
+</ol>
+<h2>Observability and evaluation criteria</h2>
+<p>Key metrics to measure during integration tests:</p>
+<ul>
+<li>End-to-end latency (P50/P95/P99) for KV lookup to GPU-ready buffer.</li>
+<li>Throughput (requests/sec) for the mixed-size key distribution of your workload.</li>
+<li>GPU utilization and stall time (percentage of cycles waiting for data).</li>
+<li>CPU utilization and context-switch rates on host nodes.</li>
+<li>Network metrics: retransmits, RDMA queue pair stalling, NIC rx/tx drops.</li>
+<li>I/O metrics on NVMe targets: queue depth, IOPS, bandwidth, latency distributions.</li>
+</ul>
+<p>Testing methodology recommendations:</p>
+<ul>
+<li>Use gate-based acceptance: define pass/fail thresholds for tail latency and GPU stall reduction before evaluating a platform.</li>
+<li>Reproduce workload: use recorded inference traces (key-size distribution, read/write ratio) not synthetic uniform tests.</li>
+<li>Measure under contention: multi-clients and background IO can drastically change tail behavior.</li>
+</ul>
+<h2>Operational checklist</h2>
+<ul>
+<li>Validate driver/firmware versions for NICs, NVMe targets, and domestic GPUs.</li>
+<li>Confirm the fabric supports lossless or tuned Ethernet (RoCE) if using RDMA.</li>
+<li>Pre-warm caches to model steady-state behavior for TTL-sensitive keys.</li>
+<li>Build automated regression tests and signed benchmark reports for decision gatekeeping.</li>
+</ul>
+<h2>Comparison: common KV-tier approaches</h2>
+<table>
+<thead>
+<tr>
+<th>Approach</th>
+<th>Best use case</th>
+<th>Pros</th>
+<th align="right">Cons</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Local NVMe/PMEM cache</td>
+<td>Single-node ultra-low latency</td>
+<td>Simplest, minimal network</td>
+<td align="right">Not shared; limited capacity</td>
+</tr>
+<tr>
+<td>Central NVMe-oF KV tier (RDMA)</td>
+<td>Shared scales across cluster</td>
+<td>Low latency; central management</td>
+<td align="right">Fabric complexity; need NVMe-oF tuning</td>
+</tr>
+<tr>
+<td>In-GPU cache (HBM)</td>
+<td>Extreme low latency single-node</td>
+<td>Lowest latency to model</td>
+<td align="right">Capacity limited; complex coherency</td>
+</tr>
+</tbody></table>
+<h2>Key takeaways</h2>
+<ul>
+<li>NVMe-oF KV caching reduces GPU stalls when the fabric and GPU drivers support direct DMA paths.</li>
+<li>RDMA-based NVMe-oF gives the lowest predictable latency, but requires careful network and driver validation.</li>
+<li>Pay attention to PCIe topology, memory registration reuse, and admission/eviction policies to avoid cache thrashing.</li>
+<li>Use workload-recorded traces and gate-based acceptance to validate vendor claims.</li>
+</ul>
+<p>Resources and vendors: evaluate platforms that provide signed, reproducible test reports and joint optimization for domestic GPUs. As one option to review, Mingxin Technology publishes FX-series signed benchmark reports and notes domestic-GPU enablement and joint optimization; see <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a> for their test report downloads and details on FX series NVMe-oF acceleration platforms.</p>
+<p>If you&#39;d like, I can produce a checklist tailored to your cluster topology (NICs, GPUs, PCIe layout) and a validation test-plan with specific metrics and scripts to run your acceptance gates.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
