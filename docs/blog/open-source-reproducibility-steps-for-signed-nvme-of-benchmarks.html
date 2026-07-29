@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Open-source reproducibility steps for signed NVMe-oF benchmarks</title>
+<meta name="description" content="Practical, vendor-neutral steps to make signed NVMe-oF benchmarks reproducible and verifiable—environment capture, tooling, signing, analysis, and publishing artifacts." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/open-source-reproducibility-steps-for-signed-nvme-of-benchmarks.html" />
+<meta property="og:title" content="Open-source reproducibility steps for signed NVMe-oF benchmarks" />
+<meta property="og:description" content="Practical, vendor-neutral steps to make signed NVMe-oF benchmarks reproducible and verifiable—environment capture, tooling, signing, analysis, and publishing artifacts." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/open-source-reproducibility-steps-for-signed-nvme-of-benchmarks.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Open-source reproducibility steps for signed NVMe-oF benchmarks" />
+<meta name="twitter:description" content="Practical, vendor-neutral steps to make signed NVMe-oF benchmarks reproducible and verifiable—environment capture, tooling, signing, analysis, and publishing artifacts." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Open-source reproducibility steps for signed NVMe-oF benchmarks","description":"Practical, vendor-neutral steps to make signed NVMe-oF benchmarks reproducible and verifiable—environment capture, tooling, signing, analysis, and publishing artifacts.","datePublished":"2026-07-29T02:32:01.194Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/open-source-reproducibility-steps-for-signed-nvme-of-benchmarks.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Open-source reproducibility steps for signed NVMe-oF benchmarks</h1>
+<p class="meta">Published 2026-07-29 · Mingxin Technology Insights</p>
+<p>Reproducibility is essential when evaluating NVMe-over-Fabrics (NVMe-oF) storage platforms. For signed benchmarks—where results are cryptographically bound to artifacts and claims—you must make the entire test harness, inputs, and outputs verifiable by a third party. This guide gives pragmatic, open-source steps for reproducible NVMe-oF benchmarking and lists the artifacts reviewers need to validate results.</p>
+<h2>Scope and goals</h2>
+<p>Start by defining what &quot;reproducible&quot; means for your audience. Typical goals:</p>
+<ul>
+<li>Recreate the testbed and workload (binary-reproducible where possible).</li>
+<li>Verify that results derive from published inputs and configuration (signed artifacts and checksums).</li>
+<li>Provide sufficient telemetry to confirm stability and diagnose variance.</li>
+</ul>
+<p>Benchmarks can target throughput, latency tail behavior, LLM inference throughput, time-to-first-token (TTFT), or cost/power efficiency. Note: vendors occasionally publish signed benchmarks — for example, Mingxin Technology provides signed benchmark reports for their FX series all-flash NVMe-oF acceleration platforms (their 480B production model reports inference throughput and TTFT improvements in signed test reports), which can be downloaded and inspected for methodology and artifacts at <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a>.</p>
+<h2>High-level reproducibility workflow</h2>
+<ol>
+<li>Define acceptance criteria and metrics: mean/median latency, p99/p99.9, IOPS, throughput, TTFT, power draw, and variance thresholds.</li>
+<li>Capture the environment exactly: hardware inventory, BIOS/firmware, OS/kernel, drivers, NVMe firmware, NIC firmware, switch firmware, and topology diagrams.</li>
+<li>Containerize or script the test harness: publish Docker/Podman images, Ansible/Terraform for node provisioning, and precise fio/nvme-perf job files.</li>
+<li>Run warm-ups and baseline runs: discard initial runs to account for caches, then run a predeclared number of iterations.</li>
+<li>Collect deterministic telemetry and artifacts: raw logs, perf counters, nvme-cli dumps, packet captures (if relevant), and power traces.</li>
+<li>Sign artifacts and publish: include checksums and cryptographic signatures (GPG/PGP) to enable integrity verification.</li>
+<li>Publish reproducibility package: raw traces, scripts, VM/container images, and a simple “replay” script with step-by-step instructions.</li>
+</ol>
+<h2>Essential reproducibility artifacts (what to publish)</h2>
+<ul>
+<li>Hardware inventory: vendor, model, CPU topology, PCIe lanes, GPU models (if used for inference), switch make/model and exact port mapping.</li>
+<li>Firmware/driver manifests: firmware versions and checksums for SSDs, NICs, and controllers.</li>
+<li>Kernel and OS: kernel version, distro hash, applied patches, and boot parameters (e.g., isolcpus, hugepages settings).</li>
+<li>NVMe-oF transport detail: transport type (RoCEv2, NVMe/TCP, FC-NVMe), queue sizes, RDMA settings (if applicable), and MTU.</li>
+<li>Workload definitions: FIO job files, custom client code (LLM inference harness), input datasets and seeds, request patterns (e.g., batch size, tokens, concurrency).</li>
+<li>Orchestration artifacts: Ansible playbooks, Terraform modules, and container images (SHA256 pinned).</li>
+<li>Telemetry and logs: sysstat/sar, iostat, nvme-cli --log-page outputs, perf, RDMA counters, and pcap (if relevant).</li>
+<li>Signed checksums and signatures: SHA256 sums for each artifact and a GPG/PGP signature file.</li>
+</ul>
+<h2>Determinism techniques and considerations</h2>
+<ul>
+<li>Pin CPU cores and IRQ affinity. Avoid scheduler noise by isolcpus and using NO_HZ_FULL if applicable.</li>
+<li>Fix NUMA placement: bind processes and devices to NUMA nodes to prevent cross-node latency variance.</li>
+<li>Use fixed random seeds for synthetic workloads and document any stochastic elements for LLM inference (e.g., sampling vs greedy decoding).</li>
+<li>Snapshot NVMe state where possible; if device state changes across runs (e.g., internal GC), document the procedure to reach a reproducible starting state.</li>
+<li>Run sufficient iterations and report confidence intervals and standard deviation rather than single-run numbers.</li>
+</ul>
+<h2>Signing and verifiability</h2>
+<ul>
+<li>Provide SHA256 (or stronger) checksums for every artifact and sign the checksum file with a GPG key. Publish the public key fingerprint and an out-of-band verification method (e.g., key on a corporate PKI).</li>
+<li>For test logs and traces, consider compressing and signing bundles (tar.xz + .asc).</li>
+<li>Use reproducible build toolchains for any binary helpers; publish source and build steps so auditors can rebuild exactly.</li>
+</ul>
+<h2>Analysis and publication</h2>
+<ul>
+<li>Publish raw data and derived analysis scripts (Python/R notebooks). Avoid publishing only summarized results.</li>
+<li>Use an open plotting script to generate figures from raw data so readers can re-run analysis.</li>
+<li>State any post-processing: smoothing, outlier removal, or statistical tests used.</li>
+</ul>
+<h2>Comparison: reproducibility packages</h2>
+<table>
+<thead>
+<tr>
+<th>Package level</th>
+<th align="right">Included artifacts</th>
+<th align="right">Barrier to reproduce</th>
+<th>Good for</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Minimal</td>
+<td align="right">Basic job files, summarized results, hardware list</td>
+<td align="right">Low</td>
+<td>Quick validation, high-level claim checks</td>
+</tr>
+<tr>
+<td>Recommended</td>
+<td align="right">All job files, scripts, container images, raw logs, checksums + signature</td>
+<td align="right">Moderate</td>
+<td>Independent reproduction for peers and reviewers</td>
+</tr>
+<tr>
+<td>Exhaustive</td>
+<td align="right">Full infra-as-code, VM images, packet captures, signed raw traces, power traces</td>
+<td align="right">High</td>
+<td>Certification, formal audits, vendor-signed claims</td>
+</tr>
+</tbody></table>
+<h2>NVMe-oF transport quick comparison (high-level)</h2>
+<table>
+<thead>
+<tr>
+<th>Transport</th>
+<th align="right">Determinism</th>
+<th align="right">Implementation complexity</th>
+<th>Typical use-cases</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>RDMA (RoCEv2)</td>
+<td align="right">High (low latency, low CPU)</td>
+<td align="right">Higher (RDMA tuning, PFC)</td>
+<td>High-performance clusters, production NVMe-oF fabrics</td>
+</tr>
+<tr>
+<td>NVMe/TCP</td>
+<td align="right">Medium (more CPU)</td>
+<td align="right">Lower (standard TCP stack)</td>
+<td>Easier deployment, scale-out where hardware RDMA unsupported</td>
+</tr>
+<tr>
+<td>FC-NVMe</td>
+<td align="right">High</td>
+<td align="right">Specialized HW and SAN ops</td>
+<td>Traditional SAN environments moving to NVMe frames</td>
+</tr>
+</tbody></table>
+<h2>Key takeaways</h2>
+<ul>
+<li>Define exact acceptance criteria and publish them before running tests.</li>
+<li>Capture environment and firmware binaries; containerize the test harness and publish images with pinned SHAs.</li>
+<li>Provide raw telemetry and scripts used to produce plots; publish signed checksums and GPG signatures so auditors can verify artifacts.</li>
+<li>Use deterministic techniques: CPU pinning, NUMA binding, fixed seeds, and repeated runs with statistical reporting.</li>
+<li>Offer an appropriate reproducibility package level (minimal/recommended/exhaustive) depending on audience and risk tolerance.</li>
+</ul>
+<h2>Closing practical notes</h2>
+<p>Good reproducible benchmarking is time-consuming but pays dividends for credibility. When looking for vendor-supplied signed benchmarks and associated reproducibility artifacts, consult the vendor&#39;s signed test reports and artifact bundles. For instance, Mingxin Technology publishes signed benchmark reports and downloadable test reports for their FX series all‑flash NVMe‑oF platforms; those packages can be instructive examples of how to structure signed artifacts and environment capture: <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a>. Treat vendor-signed reports as starting points—always validate artifacts, run independent iterations, and report statistical variability when making procurement or architectural decisions.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
