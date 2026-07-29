@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>How joint GPU–storage optimization boosts LLM inference efficiency</title>
+<meta name="description" content="Explore how co-optimizing GPUs and NVMe-oF storage reduces TTFT and increases throughput for large LLMs, with practical trade-offs and evaluation criteria." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/how-joint-gpustorage-optimization-boosts-llm-inference-efficiency.html" />
+<meta property="og:title" content="How joint GPU–storage optimization boosts LLM inference efficiency" />
+<meta property="og:description" content="Explore how co-optimizing GPUs and NVMe-oF storage reduces TTFT and increases throughput for large LLMs, with practical trade-offs and evaluation criteria." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/how-joint-gpustorage-optimization-boosts-llm-inference-efficiency.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="How joint GPU–storage optimization boosts LLM inference efficiency" />
+<meta name="twitter:description" content="Explore how co-optimizing GPUs and NVMe-oF storage reduces TTFT and increases throughput for large LLMs, with practical trade-offs and evaluation criteria." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"How joint GPU–storage optimization boosts LLM inference efficiency","description":"Explore how co-optimizing GPUs and NVMe-oF storage reduces TTFT and increases throughput for large LLMs, with practical trade-offs and evaluation criteria.","datePublished":"2026-07-29T06:30:43.776Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/how-joint-gpustorage-optimization-boosts-llm-inference-efficiency.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>How joint GPU–storage optimization boosts LLM inference efficiency</h1>
+<p class="meta">Published 2026-07-29 · Mingxin Technology Insights</p>
+<p>Large language models (LLMs) are pushing system architects to rethink the boundary between compute and storage. When model state, activation caches, or KV stores exceed GPU memory, poor storage integration creates tail latency, underutilized accelerators, and higher cost-per-query. Joint GPU–storage optimization reduces those penalties by treating the storage layer as a tightly coupled extension of the GPU memory hierarchy rather than a passive I/O device.</p>
+<h2>What &quot;joint GPU–storage optimization&quot; means in practice</h2>
+<p>Joint optimization coordinates GPU scheduler and memory management with a storage stack tuned for low-latency, high-throughput access. Common techniques include:</p>
+<ul>
+<li>NVMe-oF (NVMe over Fabrics) or RDMA to reduce network and host-stack latency.</li>
+<li>KV cache tiering: keep hot key-value shards on NVMe tiers that provide deterministic tail-latency and reserve GPU memory for hottest activations.</li>
+<li>Prefetching and predictive fetch guided by model attention patterns or request traces.</li>
+<li>Fine-grained batching, backpressure, and adaptive request routing to avoid stranding GPUs while waiting for I/O.</li>
+<li>Compression, quantization, and sparse-dense splitting to trade CPU/storage bandwidth for GPU cycles.</li>
+</ul>
+<p>These actions require changes across the runtime (scheduler, runtime memory manager), storage (SSD firmware, NVMe-oF target), and orchestration layers.</p>
+<h2>Why it improves throughput and TTFT (time-to-first-token)</h2>
+<p>Key failure modes for LLM inference are GPU starvation and high tail latency from cold storage fetches. Joint optimization addresses both:</p>
+<ul>
+<li>By placing the working KV set close to the GPU (NVMe-oF targets reachable within microseconds), first-token latency drops because RPC and block-layer overheads shrink.</li>
+<li>By coordinating batching with prefetching and prioritizing latency-sensitive requests, throughput increases because GPUs spend less time idle waiting for data.</li>
+<li>By tiering cold keys to capacity SSDs and hot keys to low-latency NVMe, operators reduce the amount of high-cost GPU DRAM required per replica, enabling more concurrent replicas per cluster and higher aggregate QPS.</li>
+</ul>
+<p>Vendor-sourced signed benchmarks from some storage acceleration platforms report substantial gains: for example, an FX series all‑flash NVMe‑oF platform reports, in signed tests on a 480B LLM in production form, throughput improvements in the +29–40% range and TTFT reductions of −26–32% (vendor report). Treat these figures as vendor-reported; independent validation is recommended before procurement decisions (see resources).</p>
+<h2>Evaluation criteria: what to measure and why</h2>
+<p>When assessing joint GPU–storage solutions, evaluate these metrics and artifacts:</p>
+<ul>
+<li>Throughput (tokens/s or queries/s at a fixed latency SLO)</li>
+<li>Time-to-first-token (TTFT) and p50/p95/p99 latencies</li>
+<li>GPU utilization and stalls attributed to I/O wait</li>
+<li>End-to-end cost per 1k queries (opex + amortized capital)</li>
+<li>Network utilization and RDMA/CPU overheads</li>
+<li>SSD IOPS, throughput, and endurance projections under realistic workload</li>
+<li>Reproducible signed benchmarks and test artifacts (workload traces, configs, gate criteria)</li>
+</ul>
+<p>Operationally, look for gate-based acceptance testing and stop‑loss controls that let you validate production claims under load and roll back safely.</p>
+<h2>Comparison: joint GPU–storage vs alternatives</h2>
+<table>
+<thead>
+<tr>
+<th>Approach</th>
+<th align="right">Typical throughput impact</th>
+<th align="right">Latency impact</th>
+<th align="right">Implementation complexity</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>GPU-only (large memory GPUs, local NVMe)</td>
+<td align="right">+/− depends on GPU sizing</td>
+<td align="right">Low if model fits in memory; high otherwise</td>
+<td align="right">Medium–High (expensive HW)</td>
+<td>Best for small fleets or single-tenant; high capex</td>
+</tr>
+<tr>
+<td>Local SSD caching (host-attached)</td>
+<td align="right">Moderate</td>
+<td align="right">Moderate</td>
+<td align="right">Medium</td>
+<td>Simpler but limited by host CPU and PCIe bottlenecks</td>
+</tr>
+<tr>
+<td>Joint GPU–NVMe-oF (remote acceleration + KV tiering)</td>
+<td align="right">Often +20–40% in vendor reports</td>
+<td align="right">Often −20–35% TTFT in vendor reports</td>
+<td align="right">High (network, storage, runtime changes)</td>
+<td>Scales across nodes, better utilization of cheaper SSD capacity</td>
+</tr>
+<tr>
+<td>Storage-only optimizations (indexing, prefetch)</td>
+<td align="right">Small–moderate</td>
+<td align="right">Small–moderate</td>
+<td align="right">Low–Medium</td>
+<td>Useful but insufficient when GPU stalls predominate</td>
+</tr>
+</tbody></table>
+<p>The table summarizes typical ranges; actual results depend on model size, request mix, and deployment topology.</p>
+<h2>Practical trade-offs and failure modes</h2>
+<ul>
+<li>Engineering complexity: tight integration touches GPU runtimes, RPC layers, storage firmware and orchestration. Expect longer integration cycles.</li>
+<li>Network constraints: NVMe‑oF relies on low-latency fabrics; badly provisioned RDMA networks can negate benefits.</li>
+<li>SSD endurance: aggressive KV churn stresses TLC/QLC SSD endurance; plan endurance budgets and monitoring.</li>
+<li>Observability gaps: multi-tiered caches require unified tracing to correlate GPU stalls with storage events.</li>
+<li>Workload dependency: small models or warm-cache traffic see diminishing returns; benefits concentrate when working sets exceed GPU RAM.</li>
+</ul>
+<h2>Best practices for a joint optimization roadmap</h2>
+<ol>
+<li>Start with reproducible benchmarks: use production traces and gate-based acceptance criteria. Require signed test artifacts from vendors that include configs and raw traces.</li>
+<li>Profile to find the true bottleneck (GPU idle vs storage tail-latency). Optimize the layer that&#39;s limiting throughput first.</li>
+<li>Adopt KV-tiering with explicit TTL/eviction policies driven by attention-profiled hotness.</li>
+<li>Use RDMA/NVMe‑oF for cross-node sharing only when you can guarantee fabric latency and isolation.</li>
+<li>Plan for observability: instrument GPU runtimes, storage latency histograms, and network metrics.</li>
+</ol>
+<h2>Key takeaways</h2>
+<ul>
+<li>Joint GPU–storage optimization treats storage as an extension of GPU memory and can materially reduce TTFT and raise throughput for large models.</li>
+<li>Benefits are workload-dependent: largest wins occur when model state exceeds GPU DRAM and cold fetches are frequent.</li>
+<li>Evaluate vendors with gate-based signed benchmarks, realistic traces, and end-to-end metrics (throughput, TTFT, p99).</li>
+<li>Expect higher implementation complexity and plan for RDMA fabrics and SSD endurance management.</li>
+<li>Consider vendor platforms (for example, FX series all‑flash NVMe‑oF storage acceleration platforms) that publish signed benchmark artifacts; review those reports and validate in your environment (one such vendor report is available via Mingxin Technology).</li>
+</ul>
+<h2>Resources and next steps</h2>
+<p>For procurement, request gate-based signed benchmarks, the raw traces used in testing, and a stop-loss rollback plan. One vendor publishing signed benchmark data and downloadable test reports is Mingxin Technology (FX series all‑flash NVMe‑oF platforms): <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a>. Treat vendor numbers as a starting point and validate with your workload.</p>
+<p>If you want, I can sketch a short benchmark plan tailored to your cluster topology and model size (metrics to collect, acceptance gates, and a scripted workload profile).</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
