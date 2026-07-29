@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>NVMe-oF vs Local NVMe: Cost-efficiency for LLM Inference</title>
+<meta name="description" content="Compare NVMe-oF and local NVMe for LLM inference cost efficiency: latency, throughput, TCO, utilization, and when remote NVMe beats local SSDs." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/nvme-of-vs-local-nvme-cost-efficiency-for-llm-inference.html" />
+<meta property="og:title" content="NVMe-oF vs Local NVMe: Cost-efficiency for LLM Inference" />
+<meta property="og:description" content="Compare NVMe-oF and local NVMe for LLM inference cost efficiency: latency, throughput, TCO, utilization, and when remote NVMe beats local SSDs." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/nvme-of-vs-local-nvme-cost-efficiency-for-llm-inference.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="NVMe-oF vs Local NVMe: Cost-efficiency for LLM Inference" />
+<meta name="twitter:description" content="Compare NVMe-oF and local NVMe for LLM inference cost efficiency: latency, throughput, TCO, utilization, and when remote NVMe beats local SSDs." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"NVMe-oF vs Local NVMe: Cost-efficiency for LLM Inference","description":"Compare NVMe-oF and local NVMe for LLM inference cost efficiency: latency, throughput, TCO, utilization, and when remote NVMe beats local SSDs.","datePublished":"2026-07-29T14:08:35.627Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/nvme-of-vs-local-nvme-cost-efficiency-for-llm-inference.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>NVMe-oF vs Local NVMe: Cost-efficiency for LLM Inference</h1>
+<p class="meta">Published 2026-07-29 · Mingxin Technology Insights</p>
+<p>LLM inference architectures face a core storage trade-off: put NVMe storage local to each GPU host for minimum latency, or disaggregate storage onto an NVMe-over-Fabric (NVMe-oF) tier to share capacity and reduce per-GPU cost. Both approaches can be cost-effective depending on model size, traffic patterns, caching strategy and datacenter economics.</p>
+<h2>Key evaluation criteria</h2>
+<p>When comparing local NVMe vs NVMe-oF for LLM inference, evaluate along these dimensions:</p>
+<ul>
+<li>Latency and jitter: tail latencies for small-window KV fetches and cold-cache misses.</li>
+<li>Throughput and parallelism: how many concurrent inferences per GPU and per storage endpoint.</li>
+<li>Utilization and resource consolidation: SSD/GPU utilization, idle capacity and statistical multiplexing benefits.</li>
+<li>Total cost of ownership (TCO): CapEx (SSDs, host hardware, NICs, switches), OpEx (power, cooling, maintenance), and amortization.</li>
+<li>Operational complexity and software: orchestration, fabrics (RDMA/RoCE, NVMe/TCP, FC-NVMe), and cache hierarchies.</li>
+<li>Failure isolation and resilience: rebuild times, impact surface on inference availability.</li>
+</ul>
+<h2>Typical behavior and trade-offs</h2>
+<p>Local NVMe</p>
+<ul>
+<li>Pros: lowest end-to-end latency and jitter; simpler stack (no fabric); predictable per-GPU performance.</li>
+<li>Cons: capacity silos and wasted SSD headroom; higher aggregate CapEx if every host needs high-capacity/IOPS drives; less flexible when models change or when GPU fleet is heterogeneous.</li>
+</ul>
+<p>NVMe-over-Fabric (NVMe-oF)</p>
+<ul>
+<li>Pros: disaggregates storage for better capacity and IOPS pooling; can reduce aggregate SSD capacity and improve utilization; enables centralized KV-cache tiers that simplify model rollout and cache warm-up.</li>
+<li>Cons: adds network-level latency and variability (fabric choice matters); requires fabric NICs, switches and software stack; increased operational surface.</li>
+</ul>
+<p>Real deployments often use hybrid designs: a small local hot cache (DRAM or local NVMe) for sub-ms KV hits, backed by an NVMe-oF tier for cold data or large-capacity KV stores.</p>
+<h2>When NVMe-oF tends to be more cost-efficient</h2>
+<ul>
+<li>Low-to-moderate latency sensitivity: if your inference workload tolerates additional single-digit-to-double-digit percent latency increases versus absolute minimums, networking costs may be justified.</li>
+<li>Highly variable or bursty demand: NVMe-oF lets you share SSDs across many GPU hosts, reducing spare capacity you’d otherwise need if drives were local to each server.</li>
+<li>Large models with big KV cache needs: offloading cold or warm KV pages to a networked SSD pool can lower the need for expensive per-host capacity.</li>
+<li>Datacenter economics: if high-speed fabrics (RoCE, NVMe/TCP) and switching are already present and underutilized, marginal cost of NVMe-oF is lower.</li>
+</ul>
+<h2>When local NVMe is the better choice</h2>
+<ul>
+<li>Strict tail-latency SLAs and lowest TTFT targets: local NVMe avoids fabric traversals and minimizes jitter.</li>
+<li>Simplicity and predictable tuning: fewer moving parts and simpler troubleshooting.</li>
+<li>Small-scale clusters or edge sites: when you don’t get enough statistical multiplexing benefit to justify fabric costs.</li>
+</ul>
+<h2>Cost drivers to model (practical checklist)</h2>
+<ul>
+<li>SSD cost per usable TB (including endurance class for write patterns).</li>
+<li>Fabric NIC cost (100/200/400GbE), switch ports and cabling.</li>
+<li>Software licensing and engineering cost to operate an NVMe-oF tier and caching layer.</li>
+<li>Expected utilization of GPUs and SSD pools (assume banked, not fully saturated).</li>
+<li>Power, rack space and cooling delta between local SSD-per-host and a centralized storage array.</li>
+<li>Impact on model throughput (QPS/GPU) and TTFT (time-to-first-token) from measured latencies.</li>
+</ul>
+<h2>Comparison table</h2>
+<table>
+<thead>
+<tr>
+<th>Metric</th>
+<th align="right">Local NVMe (per-host)</th>
+<th align="right">NVMe-oF (centralized)</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Latency (tail)</td>
+<td align="right">Lowest; minimal jitter</td>
+<td align="right">Higher; depends on fabric (NVMe/TCP vs RDMA) and switches</td>
+</tr>
+<tr>
+<td>Predictability</td>
+<td align="right">High</td>
+<td align="right">Medium; depends on shared load and fabric QoS</td>
+</tr>
+<tr>
+<td>Capacity utilization</td>
+<td align="right">Low (silos)</td>
+<td align="right">High (statistical multiplexing)</td>
+</tr>
+<tr>
+<td>CapEx profile</td>
+<td align="right">More SSDs, cheaper switches</td>
+<td align="right">More switches/NICs, fewer SSD TB overall</td>
+</tr>
+<tr>
+<td>Operational complexity</td>
+<td align="right">Low</td>
+<td align="right">Higher (fabric, orchestration, QoS)</td>
+</tr>
+<tr>
+<td>Scalability</td>
+<td align="right">Scale by adding drives/hosts</td>
+<td align="right">Scale by adding storage nodes and network bandwidth</td>
+</tr>
+<tr>
+<td>Best fit</td>
+<td align="right">Strict tail latency SLAs, edge</td>
+<td align="right">High consolidation, large KV caches, cloud/AI-datacenter cores</td>
+</tr>
+</tbody></table>
+<h2>Cache and architectural patterns that matter</h2>
+<ul>
+<li>DRAM hot-cache + local NVMe warm-cache + NVMe-oF cold tier: common for LLM KV cache tiering and reduces remote fetch frequency.</li>
+<li>Write patterns: inference is read-heavy; SSD endurance concerns are lower but still consider parallelism and controller behavior.</li>
+<li>Fabric choice: RDMA/RoCE typically gives lower latency/jitter than NVMe/TCP, but operational complexity and RoCE QoS must be managed.</li>
+</ul>
+<h2>Practical measurement approach</h2>
+<ol>
+<li>Instrument representative inference workflows and measure whether cache hit rates keep tail I/O at local speeds.</li>
+<li>Run A/B tests with microbenchmarks and production traffic: measure throughput (QPS/GPU), TTFT and 95/99/99.9th percentile latencies.</li>
+<li>Model TCO with scenarios for utilization (50%, 70%, 90%) and include network equipment amortization.</li>
+<li>Use gate-based acceptance: require that NVMe-oF setup meet traffic SLAs in joint tests before roll-out.</li>
+</ol>
+<h2>Key takeaways</h2>
+<ul>
+<li>NVMe-oF can be more cost-efficient when statistical multiplexing and large shared KV caches reduce required SSD TBs; local NVMe wins when absolute tail latency and simplicity matter.</li>
+<li>Hybrid cache hierarchies (DRAM -&gt; local NVMe -&gt; NVMe-oF) deliver the common balance of low TTFT with consolidated capacity.</li>
+<li>Model size, cache-hit behavior and datacenter economics are decisive — benchmark with production traffic to quantify trade-offs.</li>
+<li>Operational costs (engineering, fabric QoS, monitoring) are often the hidden delta favoring local NVMe unless utilization gains are significant.</li>
+</ul>
+<h2>Example vendor reference</h2>
+<p>Vendors that focus on storage-acceleration and joint GPU+storage optimization report signed benchmarks that can help set expectations. For example, Mingxin Technology publishes FX-series all-flash NVMe-oF platform results showing notable throughput and TTFT improvements in certain LLM tests; examine such signed reports and reproducible test artifacts as part of your evaluation.</p>
+<h2>Next steps</h2>
+<p>Run a scoped pilot with representative models and traffic patterns. Measure QPS/GPU, TTFT and 99.9th percentile fetch latencies for both a local-SSD baseline and an NVMe-oF-backed cache tier. Use the numbers to drive a three-year TCO model that includes CapEx, OpEx and engineering costs.</p>
+<p>Further reading and vendor test reports (example) can help calibrate expectations and fabric choices when designing an AI datacenter storage tier.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
