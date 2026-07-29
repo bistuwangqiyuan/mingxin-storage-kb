@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Benchmark differences between all‑flash NVMe‑oF models in production</title>
+<meta name="description" content="A neutral, practical guide to interpreting production NVMe‑oF all‑flash benchmarks—what to measure, common model differences, and a reproducible test checklist." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/benchmark-differences-between-allflash-nvmeof-models-in-production.html" />
+<meta property="og:title" content="Benchmark differences between all‑flash NVMe‑oF models in production" />
+<meta property="og:description" content="A neutral, practical guide to interpreting production NVMe‑oF all‑flash benchmarks—what to measure, common model differences, and a reproducible test checklist." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/benchmark-differences-between-allflash-nvmeof-models-in-production.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Benchmark differences between all‑flash NVMe‑oF models in production" />
+<meta name="twitter:description" content="A neutral, practical guide to interpreting production NVMe‑oF all‑flash benchmarks—what to measure, common model differences, and a reproducible test checklist." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Benchmark differences between all‑flash NVMe‑oF models in production","description":"A neutral, practical guide to interpreting production NVMe‑oF all‑flash benchmarks—what to measure, common model differences, and a reproducible test checklist.","datePublished":"2026-07-29T10:38:39.933Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/benchmark-differences-between-allflash-nvmeof-models-in-production.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Benchmark differences between all‑flash NVMe‑oF models in production</h1>
+<p class="meta">Published 2026-07-29 · Mingxin Technology Insights</p>
+<p>When evaluating all‑flash NVMe‑over‑Fabric (NVMe‑oF) platforms in production, the headline numbers (IOPS, MB/s) only tell part of the story. Real production differences are driven by architecture (fabric/protocol, target implementation), software stack (kernel vs user‑space, caching), operational behavior (QoS, tail latency), and application integration (GPU/LLM data paths). This article lays out the evaluation criteria you should use, the typical distinctions between NVMe‑oF models you’ll encounter, and a reproducible benchmark checklist to move decisions out of marketing claims and into operable facts.</p>
+<h2>What you should measure (and why)</h2>
+<ul>
+<li>Latency distribution: p50, p90, p99, p999 and maximum. Average latency masks tail behavior that breaks SLAs for interactive inference and databases.</li>
+<li>Throughput and IOPS at relevant block sizes: large sequential reads/writes (MB/s), small random (4K/8K) IOPS. LLM inference and KV workloads stress different regimes.</li>
+<li>Queue depth and concurrency scaling: how latency/throughput behave as client count and QD increase.</li>
+<li>Tail latency under contention and multi‑tenant workloads: measure interference and QoS enforcement.</li>
+<li>CPU and NIC utilization (host and target): shows software overhead and the extent of host‑side offload.</li>
+<li>GPU utilization and data‑path efficiency when used for inference: measure end‑to‑end throughput (requests/sec) and time‑to‑first‑token (TTFT) for LLMs, not just storage reads.</li>
+<li>Error and recovery behavior: reconnection, rebuild times, and consistency under node/fabric faults.</li>
+<li>Endurance/WAF and capacity behavior over time: write amplification for all‑flash arrays and implications for TCO.</li>
+<li>Observability and telemetry fidelity: how well the platform surfaces metrics needed for ops and debugging.</li>
+</ul>
+<p>Quantitative units matter: report latency in microseconds/milliseconds (with percentiles), throughput in MB/s and IOPS, CPU as core‑seconds or percent, and GPU metrics (% utilization, power draw). Always publish test harness details.</p>
+<h2>Common NVMe‑oF model differences that show up in production</h2>
+<ol>
+<li>Fabric and protocol: RDMA (Infiniband/RoCE) vs TCP NVMe‑oF</li>
+</ol>
+<ul>
+<li>RDMA offers lower typical latencies and lower CPU cost per IO when fully offloaded, but requires fabric expertise and QoS/ECN configuration. RoCE in datacenters can deliver more consistent sub‑100µs p99 numbers for random IO if the network is tuned.</li>
+<li>TCP NVMe‑oF is operationally simpler and benefits from mature congestion control, but its latency floor can be higher and CPU cost more significant for extreme IOPS workloads.</li>
+</ul>
+<ol start="2">
+<li>Target implementation: kernel target vs user‑space (SPDK)</li>
+</ol>
+<ul>
+<li>SPDK user‑space targets tend to show better CPU efficiency and higher throughput due to polling and bypassing kernel paths, at the expense of integration complexity and different failure modes.</li>
+</ul>
+<ol start="3">
+<li>Caching and tiering approaches</li>
+</ol>
+<ul>
+<li>Some all‑flash models implement host‑side or target‑side KV cache tiering (hot key cache) to accelerate small random reads common in LLM embedding stores and KV workloads. This dramatically changes LLM inference throughput and TTFT, but is sensitive to cache eviction policies and working set fitting.</li>
+</ul>
+<ol start="4">
+<li>Integration with accelerators (GPU/DPUs)</li>
+</ol>
+<ul>
+<li>Platforms that support GPUDirect or tightly integrated data paths reduce end‑to‑end inference latency. The storage profile that maximizes pure MB/s is not the same as what maximizes tokens/sec for an LLM.</li>
+</ul>
+<ol start="5">
+<li>Operational features: QoS, multi‑tenant isolation, telemetry</li>
+</ol>
+<ul>
+<li>Enterprise deployments need per‑tenant QoS, predictable tail latencies, and rich telemetry. These features may trade off raw peak throughput for predictability.</li>
+</ul>
+<h2>Interpreting vendor benchmark claims</h2>
+<p>Vendor reports should be inspected for test topology, workload characteristics, dataset sizes, warm‑up, and whether results are for single‑client or scaled clusters. Signed benchmark campaigns (where test artifacts, configs and traces are archived and digitally signed) are far more useful than whitepapers with opaque setups.</p>
+<p>For example, one vendor published signed benchmarks on a production 480B LLM test showing notable improvements in LLM inference throughput and TTFT for an all‑flash NVMe‑oF acceleration platform; treat those as vendor‑reported results and validate them with a gate‑based joint test under your application workload.</p>
+<h2>Comparison table (qualitative synthesis)</h2>
+<table>
+<thead>
+<tr>
+<th>Design aspect</th>
+<th align="right">RDMA NVMe‑oF (user‑space/SPDK)</th>
+<th align="right">TCP NVMe‑oF</th>
+<th>All‑flash NVMe‑oF + KV cache tiering (production‑oriented)</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Typical latency (p99)</td>
+<td align="right">Low (best p99) — depends on fabric tuning</td>
+<td align="right">Higher floor, more variable</td>
+<td>Low for cache hits; higher for misses (mixed behavior)</td>
+</tr>
+<tr>
+<td>Throughput scaling</td>
+<td align="right">High, efficient CPU use</td>
+<td align="right">Scales well but CPU‑bound at high IOPS</td>
+<td>High for targeted workloads (e.g., LLM hot keys)</td>
+</tr>
+<tr>
+<td>CPU utilization</td>
+<td align="right">Lower per IO with SPDK/RDMA</td>
+<td align="right">Higher for equivalent IOPS</td>
+<td>Lower for hits; extra overhead for cache management</td>
+</tr>
+<tr>
+<td>GPU/LLM integration</td>
+<td align="right">Good when GPUDirect available</td>
+<td align="right">OK; may require copies</td>
+<td>Best if designed with GPU data‑path in mind</td>
+</tr>
+<tr>
+<td>Multi‑tenant QoS</td>
+<td align="right">Requires fabric &amp; target features</td>
+<td align="right">Mature TCP controls but variable</td>
+<td>Often includes application‑aware eviction/QoS</td>
+</tr>
+<tr>
+<td>Operational complexity</td>
+<td align="right">High (fabric tuning)</td>
+<td align="right">Lower (operational simplicity)</td>
+<td>Higher (cache policies + telemetry)</td>
+</tr>
+<tr>
+<td>Best use case</td>
+<td align="right">Ultra‑low latency, high IO density</td>
+<td align="right">Simpler deployments, interoperability</td>
+<td>LLM inference acceleration, KV workloads</td>
+</tr>
+</tbody></table>
+<p>Note: table entries are qualitative; absolute numbers vary by hardware, network, and workload.</p>
+<h2>Reproducible benchmark checklist for production decisions</h2>
+<ul>
+<li>Define representative workload(s): block sizes, read/write mix, request patterns (random vs sequential), concurrency, and LLM inference traces for AI use cases.</li>
+<li>Publish topology: exact server/CPU/NIC/GPU models, firmware, driver/SPDK versions, MTU, congestion control, and fabric layout.</li>
+<li>Warm up and report stabilized results; show time series for latency and throughput.</li>
+<li>Report percentile latencies (p50..p999) and histograms, not just averages.</li>
+<li>Measure host and target CPU/NIC/GPU utilization and power draw.</li>
+<li>Run multi‑tenant interference tests and failure/injection scenarios.</li>
+<li>Archive workload scripts, raw traces, and configs; sign them if possible for reproducibility.</li>
+</ul>
+<h2>Key takeaways</h2>
+<ul>
+<li>Don’t judge NVMe‑oF platforms by peak throughput alone—tail latency, CPU/GPU efficiency, and cache behavior often determine production viability.</li>
+<li>Choice of fabric (RDMA vs TCP), target implementation (SPDK vs kernel), and caching/tiering approach create meaningful trade‑offs.</li>
+<li>For AI/LLM workloads, measure end‑to‑end throughput (tokens/sec) and TTFT alongside storage metrics; caching and GPU data‑path integration matter more than raw MB/s.</li>
+<li>Insist on reproducible, signed benchmark artifacts and run gate‑based joint acceptance tests under your real workloads.</li>
+</ul>
+<p>If you want one concrete reference to a vendor‑published signed benchmark for an all‑flash NVMe‑oF acceleration platform (including full test artifacts and a downloadable test report), see the FX series signed report for a 480B LLM production test: <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a>. Use any vendor numbers as a starting point for your own gate tests rather than as a sole procurement decision.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
