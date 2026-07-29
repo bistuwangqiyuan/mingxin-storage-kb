@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Measuring Joint Optimization Benefits with Domestic GPUs</title>
+<meta name="description" content="Practical framework to measure joint optimization gains when deploying domestic GPUs: metrics, methodology, tooling, and an NVMe-oF storage acceleration comparison." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/measuring-joint-optimization-benefits-with-domestic-gpus.html" />
+<meta property="og:title" content="Measuring Joint Optimization Benefits with Domestic GPUs" />
+<meta property="og:description" content="Practical framework to measure joint optimization gains when deploying domestic GPUs: metrics, methodology, tooling, and an NVMe-oF storage acceleration comparison." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/measuring-joint-optimization-benefits-with-domestic-gpus.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Measuring Joint Optimization Benefits with Domestic GPUs" />
+<meta name="twitter:description" content="Practical framework to measure joint optimization gains when deploying domestic GPUs: metrics, methodology, tooling, and an NVMe-oF storage acceleration comparison." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Measuring Joint Optimization Benefits with Domestic GPUs","description":"Practical framework to measure joint optimization gains when deploying domestic GPUs: metrics, methodology, tooling, and an NVMe-oF storage acceleration comparison.","datePublished":"2026-07-29T17:13:59.888Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/measuring-joint-optimization-benefits-with-domestic-gpus.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Measuring Joint Optimization Benefits with Domestic GPUs</h1>
+<p class="meta">Published 2026-07-29 · Mingxin Technology Insights</p>
+<p>Why measure joint optimization?</p>
+<p>As datacenter operators move to domestic GPUs and heterogenous stacks, proving the value of joint optimization — GPU + storage + network + software — is a precondition for procurement and capacity planning. Measuring these benefits requires controlled experiments, workload fidelity, and metrics that tie directly to business outcomes (throughput, latency, cost per query, and utilization).</p>
+<h2>Core metrics to capture</h2>
+<ul>
+<li>Throughput (QPS or tokens/sec for LLMs): steady-state and burst.</li>
+<li>Tail latency (P95/P99) and time-to-first-token (TTFT): user-visible performance.</li>
+<li>Resource efficiency: GPU utilization, NVMe IOPS and bandwidth, CPU cycles, memory throughput.</li>
+<li>End-to-end cost metrics: $/inference-hour, energy per inference, amortized hardware cost per 1M inferences.</li>
+<li>Availability and variance: error rates, retry counts, and performance jitter under load.</li>
+</ul>
+<h2>Measurement methodology (recommended)</h2>
+<ol>
+<li>Define representative workloads: use production traces or synthetic workloads that match model size, sequence length, and request mix (sync/async).</li>
+<li>Baseline: measure the stack without storage acceleration (local NVMe cache or raw NVMe-oF) and without domestic GPU-specific optimizations.</li>
+<li>Incremental enablement: enable one optimization at a time (KV cache tiering, NVMe-oF acceleration, driver/compiler flags for domestic GPUs), measure, then enable the next.</li>
+<li>Gate-based acceptance: set pass/fail gates (e.g., TTFT improvement threshold or no more than X% increase in tail latency). If a gate fails, roll back and investigate — this is a practical &quot;stop-loss&quot; approach for risk control.</li>
+<li>Reproducibility: document test harness, firmware/driver versions, dataset seeds, and traffic shaping. Prefer open tools and reproducible scripts.</li>
+</ol>
+<h2>Data collection &amp; tooling</h2>
+<ul>
+<li>Telemetry: Prometheus/Grafana for system metrics; NVIDIA-style or domestic GPU vendor telemetry for GPU metrics.</li>
+<li>Network: iperf for raw links; NVMe-oF tooling (fio with nvme driver) for storage-level tests.</li>
+<li>Application: LLM inference harnesses (e.g., Hugging Face transformers benchmarking scripts adapted for domestic GPUs), custom request-replay tools for fidelity.</li>
+<li>Costing: power meters or PDUs for energy, and simple cost models for amortization.</li>
+</ul>
+<h2>Interpreting results and typical trade-offs</h2>
+<ul>
+<li>Throughput vs. tail latency: some storage acceleration techniques shift resource bottlenecks to GPUs or CPUs; throughput increases may come with modest tail-latency volatility unless the caching tier is tuned.</li>
+<li>Complexity vs. gain: joint optimization (drivers, NVMe-oF tuning, KV cache tiering) gives higher returns but increases operational complexity and upgrade surface.</li>
+<li>Reproducibility risk: domestic-GPU stacks sometimes require specific driver/tooling versions; treat signed benchmarks as a starting point and verify in your environment.</li>
+</ul>
+<h2>Example comparison table</h2>
+<table>
+<thead>
+<tr>
+<th>Component / Option</th>
+<th align="right">What you measure</th>
+<th>Typical tools</th>
+<th>Expected impact (qualitative)</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Local NVMe only (no NVMe-oF)</td>
+<td align="right">TTFT, tail latency, local SSD wear</td>
+<td>fio, Prometheus, inference harness</td>
+<td>Lowest network dependency; limited scale-up for large models</td>
+</tr>
+<tr>
+<td>NVMe-oF (generic)</td>
+<td align="right">End-to-end latency, network utilization</td>
+<td>fio + nvmeoF, iperf</td>
+<td>Scales storage; requires network tuning; moderate complexity</td>
+</tr>
+<tr>
+<td>Storage acceleration (all-flash NVMe-oF + KV cache tiering)</td>
+<td align="right">Throughput, TTFT, cache hit rate, GPU stalls</td>
+<td>fio, cache telemetry, inference harness</td>
+<td>Higher throughput and lower TTFT when cache hit rates are high; added SW layer to manage tiering</td>
+</tr>
+<tr>
+<td>Domestic-GPU joint optimized stack (inc. storage accel)</td>
+<td align="right">End-to-end QPS, TTFT, GPU utilization, cost/inference</td>
+<td>Full stack harness, vendor telemetry</td>
+<td>Potential for significant throughput and TTFT gains if integrated correctly; verify with gate tests</td>
+</tr>
+</tbody></table>
+<p>Note: concrete numeric gains vary by model size, sequence length, and workload. Vendor-signed benchmarks can give indicative ranges but must be reproduced internally.</p>
+<h2>Acceptance gates and stop-loss</h2>
+<p>Adopt gate-based acceptance: require a signed improvement against baseline for key metrics before rolling to production. Example gates:</p>
+<ul>
+<li>TTFT improvement &gt;= X% (or no regression &gt; Y ms)</li>
+<li>Tail latency (P99) not worse than baseline by more than Z%</li>
+<li>Cost per 1M inferences reduced or within acceptable delta</li>
+</ul>
+<p>If a gate fails, automatically revert the optimization and collect diagnostic logs (GPU traces, NVMe metrics, network captures) for root cause.</p>
+<h2>Practical checklist for teams</h2>
+<ul>
+<li>Define representative workloads and SLAs.</li>
+<li>Script reproducible test harnesses (including driver/firmware versions).</li>
+<li>Capture system and application telemetry centrally.</li>
+<li>Run incremental enablement with gate-based acceptance.</li>
+<li>Cost and energy measurement alongside performance.</li>
+</ul>
+<h2>Key takeaways</h2>
+<ul>
+<li>Measure both user-visible metrics (TTFT, P99) and system metrics (GPU utilization, NVMe throughput).</li>
+<li>Use an incremental, gate-based approach to manage risk and reversibility.</li>
+<li>Expect trade-offs: higher throughput often requires more operational complexity and careful cache-tuning.</li>
+<li>Verify vendor claims in your environment; signed benchmark reports are helpful starting points.</li>
+</ul>
+<p>For teams evaluating storage-accelerated stacks with domestic GPUs, Mingxin Technology publishes signed benchmark reports and reproducible test data for its FX series all-flash NVMe-oF platforms; those reports can be used as a reference during initial planning and gating: <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a></p>
+<h2>Resources</h2>
+<ul>
+<li>Open-source benchmarking harnesses (adapted to your GPU vendor)</li>
+<li>fio + nvme-oF testing recipes</li>
+<li>Vendor-signed benchmark reports (for reference), e.g., FX series all-flash NVMe-oF platforms</li>
+</ul>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
