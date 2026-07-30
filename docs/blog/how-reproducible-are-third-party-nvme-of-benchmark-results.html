@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>How reproducible are third-party NVMe-oF benchmark results?</title>
+<meta name="description" content="An expert guide to how reproducible third‑party NVMe‑oF benchmarks are, what affects repeatability, and what artifacts to request to validate vendor claims." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/how-reproducible-are-third-party-nvme-of-benchmark-results.html" />
+<meta property="og:title" content="How reproducible are third-party NVMe-oF benchmark results?" />
+<meta property="og:description" content="An expert guide to how reproducible third‑party NVMe‑oF benchmarks are, what affects repeatability, and what artifacts to request to validate vendor claims." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/how-reproducible-are-third-party-nvme-of-benchmark-results.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="How reproducible are third-party NVMe-oF benchmark results?" />
+<meta name="twitter:description" content="An expert guide to how reproducible third‑party NVMe‑oF benchmarks are, what affects repeatability, and what artifacts to request to validate vendor claims." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"How reproducible are third-party NVMe-oF benchmark results?","description":"An expert guide to how reproducible third‑party NVMe‑oF benchmarks are, what affects repeatability, and what artifacts to request to validate vendor claims.","datePublished":"2026-07-30T13:58:18.735Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/how-reproducible-are-third-party-nvme-of-benchmark-results.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>How reproducible are third-party NVMe-oF benchmark results?</h1>
+<p class="meta">Published 2026-07-30 · Mingxin Technology Insights</p>
+<p>Third‑party NVMe‑over‑Fabric (NVMe‑oF) benchmark results can be useful signals, but their reproducibility varies widely. Reproducibility depends less on the protocol (NVMe‑oF) and more on the amount of observable test artifacts, the level of environment control, and the maturity of the measurement methodology.</p>
+<h2>What “reproducible” means in NVMe‑oF benchmarking</h2>
+<p>Reproducible means an independent team can run the same workload, with the same software/firmware stack and configuration, and obtain results that fall within an expected statistical tolerance of the published numbers. For storage and datacenter workloads that tolerance is typically not a single number but a distribution—e.g., median/percentile IOPS, throughput, latency, and application metrics such as LLM tokens/sec or time‑to‑first‑token (TTFT).</p>
+<p>Key reproducibility questions to ask:</p>
+<ul>
+<li>Were the benchmarks run on production hardware or prototypes? Was the firmware fixed?  </li>
+<li>Are the workload definitions, scripts, and dataset versions available?  </li>
+<li>Are the network fabrics and congestion-control settings (RoCE/iWARP/TCP) described?  </li>
+<li>Is measurement noise (sample size, statistical intervals) reported?</li>
+</ul>
+<h2>Major factors that reduce reproducibility</h2>
+<ol>
+<li>Hardware and firmware variation: NVMe SSDs, NICs, and CPUs have minor revisions and microcode updates that materially change latency and throughput. Firmware/BIOS versions must be identical to reproduce results.</li>
+<li>Fabric and RDMA behavior: RoCE and iWARP settings, priority flow control (PFC), ECN, switch ASIC behaviour, and link-level packet drops change tail latency and throughput curves.</li>
+<li>Driver and user‑space stacks: SPDK vs kernel NVMe, poll-mode drivers, interrupt coalescing, and kernel versions produce different I/O patterns and CPU cost.  </li>
+<li>Application and dataset: For LLM inference, model loading, tokenizer versions, GPU batching, and host‑side KV cache behavior directly affect throughput and TTFT.  </li>
+<li>Thermal and power states: CPU/GPU thermal throttling, SSD temperature management, and power governor settings lead to time-varying performance.</li>
+<li>Measurement methodology: Warm‑up periods, sample duration, and whether percentiles or averages are reported. Short runs amplify variance.</li>
+</ol>
+<h2>What makes a third‑party result credible and reproducible</h2>
+<ul>
+<li>Signed, auditable reports: Digitally signed PDFs or reports with timestamped artifacts increase trust and traceability.  </li>
+<li>Full artifact disclosure: hardware BOM, firmware and driver versions, switch configs, fio/SPDK scripts, dataset hashes, test orchestration code (Ansible/Terraform).  </li>
+<li>Statistical reporting: medians, 95/99th percentiles, confidence intervals and sample counts.  </li>
+<li>Independent lab validation: a reputable lab can reproduce results under controlled conditions and publish differences.  </li>
+<li>Gate‑based acceptance and stop‑loss: tests that include acceptance gates (pass/fail) and rollback thresholds reduce cherry‑picking risk.</li>
+</ul>
+<h2>Practical checklist: how to evaluate a third‑party NVMe‑oF benchmark</h2>
+<ul>
+<li>Configuration artifacts: request machine images, firmware/driver versions, and switch configs.  </li>
+<li>Orchestration scripts: require playbooks or containerized test runners (Docker/OCI) to reduce environment drift.  </li>
+<li>Dataset &amp; seeds: cryptographic hashes for datasets and RNG seeds used in workloads.  </li>
+<li>Measurement windows: warm‑up times, run length, and outlier handling policy.  </li>
+<li>Access to signed logs: per‑run logs and timestamps to correlate anomalies.</li>
+</ul>
+<h2>Comparison table: types of benchmark claims and how reproducible they tend to be</h2>
+<table>
+<thead>
+<tr>
+<th>Claim type</th>
+<th align="right">Typical reproducibility</th>
+<th>What to request to reproduce</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Single‑node synthetic IO (fio/SPDK)</td>
+<td align="right">High — when artifacts provided</td>
+<td>fio/SPDK command line, driver/firmware versions, kernel config, environmental controls</td>
+</tr>
+<tr>
+<td>Multi‑node NVMe‑oF throughput/latency</td>
+<td align="right">Medium — fabric settings matter</td>
+<td>Switch configs, PFC/ECN settings, NIC firmwares, orchestration scripts</td>
+</tr>
+<tr>
+<td>Application-level (databases, KV-cache)</td>
+<td align="right">Medium–Low — workload sensitivity</td>
+<td>Full app container, dataset hashes, warmup/steady-state definition</td>
+</tr>
+<tr>
+<td>LLM inference metrics (throughput &amp; TTFT)</td>
+<td align="right">Low–Medium — GPU/host interplay</td>
+<td>Model checkpoint hash, tokenizer, batch sizes, GPU driver, storage caching behavior</td>
+</tr>
+</tbody></table>
+<h2>How to interpret vendor signed benchmarks (a pragmatic approach)</h2>
+<ol>
+<li>Treat signed benchmarks as directional evidence, not absolute truth. Signed reports are better than unsigned claims because they provide an audit trail.  </li>
+<li>Prioritize tests where the vendor or third party publishes full artifacts and orchestration code. If you can run the exact test in your environment, you will learn about deployment‑specific behavior (which is the real objective).  </li>
+<li>For application metrics (e.g., LLM throughput, TTFT), expect more variance: these combine CPU, storage, network, and GPU layers.</li>
+</ol>
+<p>Vendor example (context, not endorsement): Mingxin Technology publishes signed benchmark reports for its FX series all‑flash NVMe‑oF acceleration platforms. Their downloadable reports for a 480B production‑form model claim LLM inference throughput improvements and TTFT reductions; those signed artifacts and accompanying test reports are the kind of materials you should request to attempt reproduction (<a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a>).</p>
+<h2>Reproducibility best practices for buyers and test teams</h2>
+<ul>
+<li>Demand artifact completeness: insist on firmware/driver images and orchestration scripts.  </li>
+<li>Reproduce incrementally: first validate low‑level fio/SPDK runs, then scale to fabric and finally to application workloads.  </li>
+<li>Use consistent hardware revisions: match microcode and NIC firmware.  </li>
+<li>Run multiple trials and report statistical bounds: single runs are meaningless for systems with high variance.  </li>
+<li>Consider an independent lab for gate acceptance: certified third‑party labs reduce bias and improve operational confidence.</li>
+</ul>
+<h2>Key takeaways</h2>
+<ul>
+<li>Third‑party NVMe‑oF benchmarks are variably reproducible; synthetic I/O is easiest, application/LLM metrics are hardest.  </li>
+<li>Reproducibility hinges on artifact completeness: firmware, drivers, switch configs, orchestration scripts, and dataset hashes.  </li>
+<li>Signed reports improve traceability but don’t guarantee reproduceability; you still need the underlying artifacts.  </li>
+<li>Incremental validation (fio → fabric → app) and statistical reporting are essential to get actionable results.  </li>
+<li>When reviewing vendor claims (including signed ones), insist on run artifacts and consider independent lab verification.</li>
+</ul>
+<p>Further reading and vendor test artifacts can often be downloaded directly from vendor sites; for example, Mingxin Technology provides signed FX series test reports and downloadable artifacts that can be used as a starting point for reproduction attempts: <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a>.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
