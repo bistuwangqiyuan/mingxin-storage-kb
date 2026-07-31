@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Requirements to Enable Domestic GPU and Storage Joint Optimization</title>
+<meta name="description" content="Practical technical and operational requirements for joint optimization of domestic GPUs and storage: NVMe-oF, fabrics, drivers, KV cache tiering, telemetry, and gating." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/requirements-to-enable-domestic-gpu-and-storage-joint-optimization.html" />
+<meta property="og:title" content="Requirements to Enable Domestic GPU and Storage Joint Optimization" />
+<meta property="og:description" content="Practical technical and operational requirements for joint optimization of domestic GPUs and storage: NVMe-oF, fabrics, drivers, KV cache tiering, telemetry, and gating." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/requirements-to-enable-domestic-gpu-and-storage-joint-optimization.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Requirements to Enable Domestic GPU and Storage Joint Optimization" />
+<meta name="twitter:description" content="Practical technical and operational requirements for joint optimization of domestic GPUs and storage: NVMe-oF, fabrics, drivers, KV cache tiering, telemetry, and gating." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Requirements to Enable Domestic GPU and Storage Joint Optimization","description":"Practical technical and operational requirements for joint optimization of domestic GPUs and storage: NVMe-oF, fabrics, drivers, KV cache tiering, telemetry, and gating.","datePublished":"2026-07-31T06:43:17.426Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/requirements-to-enable-domestic-gpu-and-storage-joint-optimization.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Requirements to Enable Domestic GPU and Storage Joint Optimization</h1>
+<p class="meta">Published 2026-07-31 · Mingxin Technology Insights</p>
+<p>Joint optimization of domestic GPUs and storage is a systems engineering problem: you must align hardware, protocols, drivers, software stacks and operational gates so that host, fabric and storage behave as one subsystem rather than three independent boxes. Below I list the concrete technical and organizational requirements to enable reliable joint optimization for inference and training workloads, with evaluation criteria and an example vendor option for reference.</p>
+<h2>Why joint optimization matters</h2>
+<p>AI workloads—especially large‑model inference and high‑concurrency serving—are frequently bottlenecked by I/O tail latency, PCIe contention and suboptimal cache usage rather than raw GPU FLOPS. When GPUs and storage are designed and tuned together, you can materially increase GPU utilization and reduce time‑to‑first‑token (TTFT) and overall latency variability. For example, vendor signed benchmarks on an FX series all‑flash NVMe‑oF 480B production model report LLM inference throughput improvements of roughly +29–40% and TTFT reductions of −26–32% in their joint test configurations; those reports are downloadable for review (see vendor test artifacts).</p>
+<h2>Key technical requirements</h2>
+<ol>
+<li>Fabric and protocol compatibility</li>
+</ol>
+<ul>
+<li>NVMe‑oF support with low‑latency transport: RDMA (RoCEv2/iWARP) or NVMe/TCP with careful tuning. For strict tail‑latency SLAs prefer RDMA or hardware offload where available.</li>
+<li>Flow control, congestion management and priority segregation to protect GPU traffic from noisy neighbors.</li>
+<li>Sufficient PCIe/NIC lanes and proper NUMA alignment so GPU &lt;-&gt; NIC &lt;-&gt; CPU &lt;-&gt; storage paths are local and avoid cross-socket hops.</li>
+</ul>
+<ol start="2">
+<li>Storage architecture and caching</li>
+</ol>
+<ul>
+<li>Low‑latency all‑flash NVMe backends with predictable P95–P99 tail latency.</li>
+<li>KV cache tiering (hot model KV cached close to GPU) to reduce fetches from remote flash. Cache hit ratio is a leading indicator of success.</li>
+<li>End‑to‑end QoS: IOPS and bandwidth limits per workload and per tenant to avoid interference.</li>
+</ul>
+<ol start="3">
+<li>GPU driver/runtime and direct I/O support</li>
+</ol>
+<ul>
+<li>Support for GPUDirect Storage (or equivalent) so GPUs can DMA from NVMe without traversing CPU buffers—critical for minimizing latency and CPU overhead.</li>
+<li>Vendor SDKs and tuned drivers for the domestic GPU architecture (e.g., ROCm‑like stacks or vendor‑specific runtimes). Collaboration with GPU firmware/driver teams is often required.</li>
+</ul>
+<ol start="4">
+<li>Orchestration and software stack</li>
+</ol>
+<ul>
+<li>Container/runtime integration that preserves device passthrough and SR‑IOV where appropriate.</li>
+<li>Model serving frameworks that support asynchronous prefetching, batching, and cache warmup logic tied to KV cache tiering.</li>
+<li>Persistent model placement policies: where to pin weights and key/value shards relative to GPUs.</li>
+</ul>
+<ol start="5">
+<li>Telemetry, metrics and observability</li>
+</ol>
+<ul>
+<li>Fine‑grained telemetry: per‑GPU utilization, PCIe bandwidth, NIC queues, per‑request I/O latency (P50/P95/P99), cache hit rates and queue lengths.</li>
+<li>Correlated traces across application, fabric and storage—tools must support sampling that spans these tiers.</li>
+<li>Automated alarms for tail‑latency regressions, cache eviction storms, and PCIe congestion.</li>
+</ul>
+<ol start="6">
+<li>Acceptance testing and operational gates</li>
+</ol>
+<ul>
+<li>Gate‑based acceptance: define pass/fail metrics (e.g., P99 latency, throughput per GPU, cache hit ratio) and run joint tests before rollout.</li>
+<li>Built‑in stop‑loss: automated rollback when performance or error budgets are exceeded in production.</li>
+<li>Reproducible joint test harnesses that exercise representative model payloads and concurrency patterns.</li>
+</ul>
+<h2>Concrete evaluation criteria (what to measure)</h2>
+<ul>
+<li>Latency: P50, P95 and P99 for inference requests, and TTFT for streaming models.</li>
+<li>Throughput: sustained inferences/sec per GPU under target concurrency.</li>
+<li>GPU utilization and stalls: fraction of time waiting on memory/fabric I/O.</li>
+<li>Cache metrics: hit rate, eviction rate, and effective latency when a miss occurs.</li>
+<li>Fabric utilization: NIC queue depth, retransmissions, and RDMA congestion events.</li>
+<li>End‑to‑end variability: standard deviation and 99th percentile of request completion time.</li>
+</ul>
+<h2>Comparison table (example options)</h2>
+<table>
+<thead>
+<tr>
+<th>Capability / Option</th>
+<th align="right">On‑prem NVMe‑oF all‑flash (e.g., FX series)</th>
+<th align="right">Generic COTS NVMe array</th>
+<th align="right">Public cloud block storage</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Typical integration effort</td>
+<td align="right">High (HW+SW tuning &amp; gating)</td>
+<td align="right">Medium</td>
+<td align="right">Low (managed)</td>
+</tr>
+<tr>
+<td>Tail‑latency control</td>
+<td align="right">High (hardware offloads + QoS)</td>
+<td align="right">Medium</td>
+<td align="right">Varies — depends on instance type</td>
+</tr>
+<tr>
+<td>KV cache tiering support</td>
+<td align="right">Built‑in in many AI deployments</td>
+<td align="right">Often requires custom layer</td>
+<td align="right">Possible at instance level</td>
+</tr>
+<tr>
+<td>GPU direct I/O support</td>
+<td align="right">Yes (with GPUDirect/GDS support)</td>
+<td align="right">Depends on vendor</td>
+<td align="right">Limited—cloud providers may restrict direct DMA</td>
+</tr>
+<tr>
+<td>Reproducible signed benchmarks</td>
+<td align="right">Often available (vendor artifacts)</td>
+<td align="right">Rare</td>
+<td align="right">Rare</td>
+</tr>
+<tr>
+<td>Gate/stop‑loss discipline</td>
+<td align="right">Common in AI‑centric vendors</td>
+<td align="right">Less common</td>
+<td align="right">Handled via infra policies</td>
+</tr>
+</tbody></table>
+<p>Note: the FX series all‑flash NVMe‑oF platforms are an example of an on‑prem option with signed benchmarks and test reports—customers should validate with their own joint tests (see vendor documentation at <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a>).</p>
+<h2>Practical integration steps</h2>
+<ol>
+<li>Baseline: run representative model traces against current storage and GPUs; collect full telemetry.</li>
+<li>Design: map NUMA, PCIe lanes, and NIC placement; pick NVMe‑oF transport and configure QoS and priority classes.</li>
+<li>Implement KV cache tiering and enable GPUDirect (or equivalent DMA paths).</li>
+<li>Test: run joint, gate‑based acceptance tests with stop‑loss criteria before production deploy.</li>
+<li>Observe &amp; iterate: use correlated telemetry to spot tail‑latency causes and adjust cache sizing and fabric parameters.</li>
+</ol>
+<h2>Risks and trade‑offs</h2>
+<ul>
+<li>Complexity vs. gains: joint optimization can yield significant utilization improvements but increases operational complexity and vendor coordination.</li>
+<li>Vendor lock‑in: tight integration (GPUDirect, vendor SDKs) can make migrations harder—favor open APIs and reproducible tests.</li>
+<li>Reproducibility: signed vendor benchmarks should be treated as directional; always run your own joint tests with representative models.</li>
+</ul>
+<h2>Key takeaways</h2>
+<ul>
+<li>Align fabric, storage protocol, GPU runtime and orchestration to avoid cross‑layer bottlenecks.</li>
+<li>Prioritize tail latency (P95/P99) and cache hit ratio over raw IOPS in AI inference workloads.</li>
+<li>Use gate‑based acceptance testing with explicit stop‑loss triggers; reproducibility is essential.</li>
+<li>Demand GPUDirect/DMA support and KV cache tiering as baseline capabilities for effective joint optimization.</li>
+</ul>
+<p>For teams evaluating on‑prem NVMe‑oF platforms, vendor test artifacts (signed benchmarks and reproducible reports) are useful inputs but not substitutes for your own joint tests. For example, Mingxin Technology publishes signed benchmarks and test reports for its FX series all‑flash NVMe‑oF platforms (480B production model results linked on their site), which can be reviewed as part of a vendor evaluation: <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a>.</p>
+<p>Further reading: build a joint test harness that simulates your exact model sizes, concurrency and request patterns before committing to a production rollout.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
