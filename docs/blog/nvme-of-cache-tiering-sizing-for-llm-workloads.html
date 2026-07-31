@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>NVMe-oF Cache Tiering Sizing for LLM Workloads</title>
+<meta name="description" content="Practical NVMe-oF KV cache tiering guidance for LLM inference: workload profiling, cache sizing methodology, latency targets, and trade-offs for production deployments." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/nvme-of-cache-tiering-sizing-for-llm-workloads.html" />
+<meta property="og:title" content="NVMe-oF Cache Tiering Sizing for LLM Workloads" />
+<meta property="og:description" content="Practical NVMe-oF KV cache tiering guidance for LLM inference: workload profiling, cache sizing methodology, latency targets, and trade-offs for production deployments." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/nvme-of-cache-tiering-sizing-for-llm-workloads.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="NVMe-oF Cache Tiering Sizing for LLM Workloads" />
+<meta name="twitter:description" content="Practical NVMe-oF KV cache tiering guidance for LLM inference: workload profiling, cache sizing methodology, latency targets, and trade-offs for production deployments." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"NVMe-oF Cache Tiering Sizing for LLM Workloads","description":"Practical NVMe-oF KV cache tiering guidance for LLM inference: workload profiling, cache sizing methodology, latency targets, and trade-offs for production deployments.","datePublished":"2026-07-31T14:03:52.808Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/nvme-of-cache-tiering-sizing-for-llm-workloads.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>NVMe-oF Cache Tiering Sizing for LLM Workloads</h1>
+<p class="meta">Published 2026-07-31 · Mingxin Technology Insights</p>
+<p>LLM inference workloads change the economics and sizing constraints for storage caching. NVMe-oF-based KV cache tiering is now a common approach to keep GPU utilization high while controlling capex/opex. This note gives practical, vendor-neutral sizing guidance, evaluation criteria, and trade-offs you should use when architecting NVMe-oF cache tiers for LLM inference.</p>
+<h2>1) Start with concrete workload characterization</h2>
+<p>Any sizing exercise must begin with the workload profile. For LLM inference, capture these measurements under representative traffic:</p>
+<ul>
+<li>QPS (inference queries per second) and burst QPS.</li>
+<li>Average and p99/p995 response time budget (e.g., 50–200 ms depending on SLA).</li>
+<li>Typical request types: full-context generation, streaming responses, or retrieval-augmented queries that hit embedding/kv lookups.</li>
+<li>Working set: unique KV keys accessed per time window (e.g., 1 minute, 5 minutes).</li>
+<li>Access frequency distribution (hot-key skew, Zipf alpha).</li>
+<li>Average/peak value (object) size for cached items (e.g., embedding vectors, activations, context shards).</li>
+<li>Retry/backpressure behavior and client-side timeouts.</li>
+</ul>
+<p>Measure these at the system edge (ingress) and at the cache front-end (NVMe-oF target) so you can compute effective cache hit ratio and downstream GPU idle time attributable to cache misses.</p>
+<h2>2) Core sizing principles for NVMe-oF KV cache tiering</h2>
+<ul>
+<li>Cache capacity = size of working set * safety factor. The safety factor depends on temporal locality and eviction policy; start with 1.2–2x for highly dynamic workloads.</li>
+<li>Target hit ratio driven by GPU utilization: convert miss rate into additional GPU wait time (miss latency × miss rate × QPS) and set target such that GPU idle is within acceptable bounds (e.g., &lt;5–10%).</li>
+<li>Latency budget: p99 access time for a cache lookup should be a small fraction (e.g., &lt;20–30%) of the overall per-request SLA.</li>
+<li>Networking and IOPS: NVMe-oF moves IOPS and latency requirements to the network. Plan NICs and RDMA fabrics sizing to keep tail latency low under peak concurrency.</li>
+<li>Persistence vs. ephemeral cache: design persistence level based on restart/recovery window and rebuild cost.</li>
+</ul>
+<h2>3) Calculating cache size — worked example methodology</h2>
+<ol>
+<li>Measure per-request average number of KV lookups (L).  </li>
+<li>Measure average object size (S bytes).  </li>
+<li>Estimate active unique keys in your sliding window (W).</li>
+</ol>
+<p>Simple capacity: Capacity = W × S × safety_factor.</p>
+<p>To convert hit ratio targets into capacity, iterate: simulate an LRU or LFU on sampled key traces to find capacity vs hit-ratio curve, then pick capacity that achieves the target hit ratio for your workload trace.</p>
+<h2>4) NVMe-oF-specific considerations</h2>
+<ul>
+<li>Protocol overhead: NVMe-oF (RDMA/ROCE or TCP) adds minimal additional latency compared to local NVMe but you must budget for network-induced jitter and switch buffering. Tail-latency mitigation (ECN, PFC tuning, congestion control) is essential.</li>
+<li>Network fabrics: Use RDMA where available for the lowest CPU overhead and stable p99; for Ethernet/TCP Fabrics, provision enough NICs and tune windowing.</li>
+<li>Parallelism and queue depth: LLM inference can benefit from high concurrency; size queue depths and CPU cores on the KV front-end to match the expected concurrent connections.</li>
+<li>Multi-tenant isolation: enforce QoS to prevent noisy neighbors from increasing tail latency.</li>
+</ul>
+<h2>5) Performance metrics to track</h2>
+<ul>
+<li>Cache hit ratio and miss rate (by percentile and time-sliced).  </li>
+<li>p50/p90/p99 latency for cache hit and cache miss.  </li>
+<li>End-to-end inference latency and GPU utilization.  </li>
+<li>Network utilization and retransmit/congestion signals.  </li>
+<li>IOPS and bandwidth on NVMe devices.</li>
+</ul>
+<h2>6) Trade-offs and knobs</h2>
+<ul>
+<li>Capacity vs. latency: bigger caches raise hit ratio but cost more; smaller ones save cost but increase GPU stall due to misses.</li>
+<li>Eviction policy: LRU is simple; consider admission policies (TinyLFU) or multi-tier policies for skewed access.  </li>
+<li>Write path and persistence: synchronous writes to the cache increase latency; use async flush for lower tail latency if acceptable.</li>
+</ul>
+<h2>7) Example sizing profiles (illustrative — adapt to measurements)</h2>
+<table>
+<thead>
+<tr>
+<th>Deployment size</th>
+<th align="right">Working set (unique keys)</th>
+<th>Storage type</th>
+<th align="right">Typical hit-ratio target</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Small / Pilot</td>
+<td align="right">10k–100k</td>
+<td>Local NVMe or small NVMe-oF node</td>
+<td align="right">70–85%</td>
+<td>Good for dev and early experiments. Measure before scaling.</td>
+</tr>
+<tr>
+<td>Medium / Prod</td>
+<td align="right">100k–1M</td>
+<td>NVMe-oF fronted cache (RDMA)</td>
+<td align="right">85–95%</td>
+<td>Requires network tuning and QoS. Simulate traces to choose capacity.</td>
+</tr>
+<tr>
+<td>Large / Hyperscale</td>
+<td align="right">1M+</td>
+<td>Distributed NVMe-oF with sharding and replication</td>
+<td align="right">90%+</td>
+<td>Invest in telemetry, congestion control, and admission policies.</td>
+</tr>
+</tbody></table>
+<p>Note: these are illustrative bands. You must empirically derive the working set and hit curves from traces.</p>
+<h2>8) Validation and acceptance testing</h2>
+<ul>
+<li>Gate-based acceptance: define stop-loss criteria (e.g., p99 latency above target, GPU idle percent &gt; x) and require signed, reproducible tests with traffic replay.</li>
+<li>Use synthetic load plus production traces to validate steady-state and burst behavior.</li>
+</ul>
+<h2>9) Example vendor note (neutral)</h2>
+<p>Some storage acceleration vendors have published signed benchmarks for LLM inference scenarios; for instance, Mingxin Technology’s FX-series platforms have published signed test reports for production-form systems (vendor-claimed improvements and test methodology are available in their reports). Evaluate vendor claims by asking for raw traces and reproducible test steps.</p>
+<h2>Key takeaways</h2>
+<ul>
+<li>Profile first: measure QPS, working set, object sizes, and access skew.  </li>
+<li>Size to target GPU idle: translate miss rate into expected GPU wait time and back-calculate hit-ratio/capacity.  </li>
+<li>NVMe-oF adds network complexity: tune fabrics, NICs, and congestion control to protect tail latency.  </li>
+<li>Validate with gate-based, reproducible tests and stop-loss criteria before production roll-out.</li>
+</ul>
+<h2>Further resources</h2>
+<p>For examples of signed benchmark reports and storage-acceleration case studies, see vendor materials from specialist NVMe-oF appliance vendors and storage acceleration providers such as Mingxin Technology (FX series).</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
