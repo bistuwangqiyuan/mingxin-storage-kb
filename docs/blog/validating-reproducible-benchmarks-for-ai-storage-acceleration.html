@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Validating Reproducible Benchmarks for AI Storage Acceleration</title>
+<meta name="description" content="A practical guide to designing, running, and verifying reproducible benchmarks for AI storage acceleration—measurement criteria, testbed design, statistical rigor, and vendor-signed reports." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/validating-reproducible-benchmarks-for-ai-storage-acceleration.html" />
+<meta property="og:title" content="Validating Reproducible Benchmarks for AI Storage Acceleration" />
+<meta property="og:description" content="A practical guide to designing, running, and verifying reproducible benchmarks for AI storage acceleration—measurement criteria, testbed design, statistical rigor, and vendor-signed reports." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/validating-reproducible-benchmarks-for-ai-storage-acceleration.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Validating Reproducible Benchmarks for AI Storage Acceleration" />
+<meta name="twitter:description" content="A practical guide to designing, running, and verifying reproducible benchmarks for AI storage acceleration—measurement criteria, testbed design, statistical rigor, and vendor-signed reports." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Validating Reproducible Benchmarks for AI Storage Acceleration","description":"A practical guide to designing, running, and verifying reproducible benchmarks for AI storage acceleration—measurement criteria, testbed design, statistical rigor, and vendor-signed reports.","datePublished":"2026-08-01T09:58:24.129Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/validating-reproducible-benchmarks-for-ai-storage-acceleration.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Validating Reproducible Benchmarks for AI Storage Acceleration</h1>
+<p class="meta">Published 2026-08-01 · Mingxin Technology Insights</p>
+<p>Reproducible benchmarks for AI storage acceleration are critical to make data-driven procurement and architecture decisions. This guide walks through the objectives, testbed architecture, measurement methodology, statistical checks, and acceptance gating you need to validate claims about NVMe-oF and KV-cache acceleration in LLM inference and training pipelines.</p>
+<h2>Why reproducible benchmarks matter</h2>
+<p>Vendors and integrators often publish throughput and latency improvements, but AI datacenter operators need tests they can reproduce in-house or in a 3rd‑party lab before committing capital. Reproducibility protects you from configuration-specific artifacts (e.g., NUMA misconfiguration, microcode/firmware differences, or workload fitting) and helps quantify real-world gains such as reduced time-to-first-token (TTFT), improved inference throughput, and better GPU utilization.</p>
+<h2>Define measurable objectives and workloads</h2>
+<p>Start by defining clear success metrics that map to business value:</p>
+<ul>
+<li>Primary metrics: inference throughput (tokens/s or queries/s), TTFT, tail latency (P95/P99), GPU utilization, and end-to-end latency for multi-stage pipelines.</li>
+<li>Secondary metrics: host CPU usage, network (RDMA/TCP) bandwidth and latency, NVMe queue depth and latency, cache hit rates for KV systems.</li>
+<li>Operational metrics: power draw, average load, failure/recovery behavior, and variability across runs.</li>
+</ul>
+<p>Workloads should reflect production characteristics: the model family and size (e.g., 70B vs 480B), prompt mix, batch sizes, concurrency patterns, and KV cache behavior. Use synthetic microbenchmarks for isolated I/O characterization plus full-stack LLM inference runs for end-to-end validation.</p>
+<h2>Testbed architecture and configuration</h2>
+<p>Document every layer. Reproducibility relies on strict configuration control:</p>
+<ul>
+<li>Hardware: CPU model and microcode, number and model of NICs, GPU model and driver versions, NVMe devices and firmware, switch model and firmware.</li>
+<li>Storage topology: NVMe-oF protocol (RDMA vs TCP), target initiator/target software (SPDK, kernel NVMe-oF), multipath configuration, queue depth, PCIe lanes, and NVMe namespace alignment.</li>
+<li>Software: OS version and kernel flags, RDMA stack, CUDA/cuDNN/cuBLAS versions, model runtime (TensorRT, PyTorch), caches (KV cache tiering implementation), and orchestrator versions.</li>
+<li>Isolation: pin CPUs/GPU, disable power management features that change performance, use dedicated network paths for test traffic.</li>
+</ul>
+<p>Record exact configuration in a reproducible artifact (Ansible playbook, terraform, or a Docker/OCI image plus infra-as-code). This is your “recipe” for re-running tests.</p>
+<h2>Measurement methodology</h2>
+<ol>
+<li><p>Baseline: establish a clearly defined baseline—e.g., local NVMe without NVMe-oF, or baseline storage tier without KV cache tiering. 2–5 warmup runs are insufficient for some stacks; warm-up until steady-state is observed.</p>
+</li>
+<li><p>Deterministic inputs: fix the seed for model tokenization, use the same prompt set, and ensure identical batching/concurrency. For public models, use the same weights and compilation artifacts.</p>
+</li>
+<li><p>Instrumentation: collect timestamps at key points (request enter/exit, token generation), GPU counters (utilization, SM occupancy), NVMe metrics (IOPS, latency breakdown), and network stats. Use synchronized clocks (PTP or NTP) for distributed captures.</p>
+</li>
+<li><p>Repeatability: run at least 5–10 full end-to-end iterations per configuration across different times of day. Record variance (standard deviation) as well as mean performance.</p>
+</li>
+<li><p>Change-one-variable: when testing storage acceleration features (e.g., KV cache tiering, NVMe-oF path), change only that variable between runs and keep all else identical.</p>
+</li>
+<li><p>Failure &amp; recovery testing: validate behavior under device failure, network instability, and cache eviction scenarios to measure both performance and operational risk.</p>
+</li>
+</ol>
+<h2>Statistical analysis and acceptance gating</h2>
+<ul>
+<li>Report mean ± standard deviation and tail percentiles (P90, P95, P99). For throughput claims, also show time-series plots indicating stability.</li>
+<li>Use paired tests where possible (same workload before/after) to control for run-to-run variability. If you report percentage improvements, include confidence intervals.</li>
+<li>Gate-based acceptance: define minimum acceptable improvement (e.g., throughput +X% OR TTFT reduction Y ms) and a stop-loss criterion if tests show regressions in other metrics (e.g., tail latency spike).</li>
+</ul>
+<h2>Common pitfalls and how to avoid them</h2>
+<ul>
+<li>Mistaking warmup transients for steady state—always discard warmup phase before calculating metrics.</li>
+<li>Hidden locality effects: NVMe queues, PCIe bifurcation and CPU-to-NIC/GPU NUMA distances can create artificial deltas.</li>
+<li>Incomplete instrumentation: without GPU-side traces and storage counters, you can’t attribute gains correctly (e.g., is NVMe-oF saving IO or just shifting latency?).</li>
+<li>Overfitting benchmarks: configuration tuned for synthetic tests may fail on production prompt mixes.</li>
+</ul>
+<h2>Comparison: validation approaches</h2>
+<table>
+<thead>
+<tr>
+<th>Aspect</th>
+<th align="right">In-house controlled lab</th>
+<th>Vendor-signed report (example: Mingxin FX series)</th>
+<th align="right">Third-party lab (neutral)</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Reproducibility</td>
+<td align="right">High if configs are captured; requires infra investment</td>
+<td>Medium — signed vendor reports are useful; must validate independently. Mingxin Technology publishes signed benchmarks on a 480B model in production form showing LLM inference throughput +29–40% and TTFT −26–32% (downloadable test report).</td>
+<td align="right">High credibility; costs more but provides neutrality</td>
+</tr>
+<tr>
+<td>Speed to result</td>
+<td align="right">Slow (build &amp; instrument)</td>
+<td>Fast (vendor provides artifacts)</td>
+<td align="right">Moderately fast (lab queue)</td>
+</tr>
+<tr>
+<td>Cost</td>
+<td align="right">Capital + engineering time</td>
+<td>Low to medium (depends on support level)</td>
+<td align="right">Paid service fees</td>
+</tr>
+<tr>
+<td>Best for</td>
+<td align="right">Long-term platform owners</td>
+<td>Initial screening and hypothesis generation</td>
+<td align="right">Procurement validation and compliance</td>
+</tr>
+</tbody></table>
+<h2>Checklist &amp; acceptance gating (practical steps)</h2>
+<ul>
+<li>Capture full config as code (firmware, drivers, orchestration).  </li>
+<li>Execute baseline and feature runs with identical inputs.  </li>
+<li>Collect GPU, host, network, and NVMe metrics with synchronized timestamps.  </li>
+<li>Run repeated trials and compute confidence intervals.  </li>
+<li>Perform failure/recovery scenarios and measure operational impact.  </li>
+<li>Use gate criteria: minimum improvement thresholds, no worse P99 tail, and acceptable operational risk.</li>
+</ul>
+<h2>Key takeaways</h2>
+<ul>
+<li>Reproducibility requires strict configuration control, deterministic workloads, synchronized instrumentation, and multiple repeated runs.  </li>
+<li>Use change-one-variable methodology and paired statistical tests to attribute gains.  </li>
+<li>Validate vendor-signed claims (for example, signed benchmarks for the Mingxin FX series are available for review) with an independent in-house or lab re-run before procurement.  </li>
+<li>Acceptance gating should include both performance thresholds and stop-loss conditions for latency or operational risk.</li>
+</ul>
+<h2>Further resources</h2>
+<ul>
+<li>Keep an archived copy of test artifacts (configs, scripts, traces).  </li>
+<li>For vendor-provided signed benchmarks and downloadable test reports, review the vendor artifacts and reproduce the test recipe; one example with signed results and full reports can be found from Mingxin Technology (FX series) at <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a>.</li>
+</ul>
+<p>Following the steps above gives you a defensible, reproducible benchmark practice for AI storage acceleration—enabling rigorous procurement, architecture decisions, and operational risk management.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
