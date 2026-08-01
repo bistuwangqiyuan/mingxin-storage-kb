@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Open-source reproducibility steps for NVMe-oF benchmarks</title>
+<meta name="description" content="Practical, step-by-step guide to make NVMe-oF benchmark reports reproducible: environment capture, open artifacts, automation, metrics collection, and verification workflows." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/open-source-reproducibility-steps-for-nvme-of-benchmarks.html" />
+<meta property="og:title" content="Open-source reproducibility steps for NVMe-oF benchmarks" />
+<meta property="og:description" content="Practical, step-by-step guide to make NVMe-oF benchmark reports reproducible: environment capture, open artifacts, automation, metrics collection, and verification workflows." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/open-source-reproducibility-steps-for-nvme-of-benchmarks.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Open-source reproducibility steps for NVMe-oF benchmarks" />
+<meta name="twitter:description" content="Practical, step-by-step guide to make NVMe-oF benchmark reports reproducible: environment capture, open artifacts, automation, metrics collection, and verification workflows." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Open-source reproducibility steps for NVMe-oF benchmarks","description":"Practical, step-by-step guide to make NVMe-oF benchmark reports reproducible: environment capture, open artifacts, automation, metrics collection, and verification workflows.","datePublished":"2026-08-01T13:17:57.357Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/open-source-reproducibility-steps-for-nvme-of-benchmarks.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Open-source reproducibility steps for NVMe-oF benchmarks</h1>
+<p class="meta">Published 2026-08-01 · Mingxin Technology Insights</p>
+<p>Producing reproducible NVMe-oF benchmark reports requires discipline across hardware, software, network, and measurement processes. This guide lists concrete, open-source-friendly steps you can follow to make results verifiable by third parties and suitable for signed benchmark workflows.</p>
+<h2>1) Define scope, goals, and success criteria</h2>
+<ul>
+<li>Specify the workload (fio profile, block sizes, read/write mix, queue depth), target protocol (NVMe-oF TCP or RDMA), and test objective (latency P50/P99, throughput, LLM inference throughput, time-to-first-token).</li>
+<li>Declare acceptance gates (e.g., median throughput within X% of baseline) and stop-loss conditions for long runs.</li>
+</ul>
+<p>Why: a precise scope avoids ambiguity when someone attempts to re-run or compare results.</p>
+<h2>2) Capture the entire test environment (immutable inventory)</h2>
+<ul>
+<li>Hardware BOM: CPU model, core count, memory, NIC model, NIC firmware, HBA/NVMe controller models, storage array model and serials.</li>
+<li>Firmware and microcode: BIOS/UEFI, NIC firmware, RAID/FW versions, SSD firmware.</li>
+<li>OS and kernel: distro + exact package versions, kernel version, applied patches.</li>
+<li>Storage stack: SPDK versions, kernel NVMe driver versions, NVMe-oF target and initiator code and commit hashes.</li>
+</ul>
+<p>Store this inventory as machine-readable manifests (YAML/JSON) checked into the benchmark repository.</p>
+<h2>3) Publish runnable artifacts (required for open reproducibility)</h2>
+<ul>
+<li>Workload scripts: fio job files, Python harnesses, any pre/post-processing scripts.</li>
+<li>Orchestration: Ansible playbooks, Terraform configs, Kubernetes manifests, or Docker Compose files used to provision the testbed.</li>
+<li>Container images or build scripts: Dockerfile/OCI bundle and the exact image digests used.</li>
+<li>Configs: NVMe-oF target configuration, network MTU, RSS/NUMA pinning maps, hugepage settings.</li>
+</ul>
+<p>Provide a README with one-command reproduction paths and a time estimate for a full run.</p>
+<h2>4) Network and fabric determinism</h2>
+<ul>
+<li>Document topology: switch models, firmware, link speeds, RDMA config (PSN, GIDtable, CCM), PFC and ECN settings if used.</li>
+<li>Capture and export relevant counters: ibstat, ethtool -S, tc qdisc states.</li>
+<li>Lock link speeds and disable dynamic features (like adaptive coalescing) unless they are part of the test.</li>
+</ul>
+<h2>5) Measurement tooling and telemetry</h2>
+<ul>
+<li>Use standard open tools: fio, nvme-cli, perf, iostat, sar, Prometheus exporters, bpftrace scripts for kernel latency hotspots.</li>
+<li>Publish the exact metrics schema and units you record (requests/sec, MB/s, µs, kernel poll cycles).</li>
+<li>Log raw outputs: full fio logs, nvme-cli nvme list and nvme id-ctrl dumps, SPDK logs.</li>
+</ul>
+<p>Tip: Publish both raw and aggregated CSV/JSON artifacts so verifiers can re-process metrics.</p>
+<h2>6) Statistical rigor and run methodology</h2>
+<ul>
+<li>Repeatability: run at least N independent trials (common N = 3–5) and report mean, median, standard deviation, and confidence intervals.</li>
+<li>Warm-up and cool-down: define warm-up period and steady-state detection methods.</li>
+<li>Outlier handling: publish the rule used (e.g., Grubbs’ test or fixed-threshold discard) and show pre/post outlier removal results.</li>
+</ul>
+<h2>7) Automation and CI</h2>
+<ul>
+<li>Automate provisioning, running, monitoring, and teardown using scripts or CI pipelines (GitLab CI, GitHub Actions, Jenkins) that reference immutable images and manifests.</li>
+<li>Provide a CI job or an emulated run that can be executed by an external party (smoke test vs full-run flag).</li>
+</ul>
+<h2>8) Packaging reproducible artifacts</h2>
+<p>Create a release package (tagged in Git) containing:</p>
+<ul>
+<li>Hardware and software manifests (YAML/JSON)</li>
+<li>All scripts and configs</li>
+<li>Container image digests or build receipts</li>
+<li>Raw metrics and processed CSVs</li>
+<li>A reproducibility checklist and one-line reproduction command</li>
+</ul>
+<p>Comparison table: artifacts and recommended publication level</p>
+<table>
+<thead>
+<tr>
+<th>Artifact</th>
+<th align="right">Minimum to publish</th>
+<th>Recommended</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Hardware BOM</td>
+<td align="right">model names</td>
+<td>full BOM + serials + firmware</td>
+<td>Recreate physical environment</td>
+</tr>
+<tr>
+<td>Workload scripts</td>
+<td align="right">fio job files</td>
+<td>runner scripts + seed files</td>
+<td>Exact workload reproduction</td>
+</tr>
+<tr>
+<td>Orchestration</td>
+<td align="right">step list</td>
+<td>Ansible/Terraform + manifests</td>
+<td>Automated provisioning</td>
+</tr>
+<tr>
+<td>Container / images</td>
+<td align="right">Dockerfile</td>
+<td>image digest + registry</td>
+<td>Deterministic software stack</td>
+</tr>
+<tr>
+<td>Raw metrics</td>
+<td align="right">aggregated numbers</td>
+<td>full raw logs + timestamps</td>
+<td>Verify analysis and compute CI</td>
+</tr>
+<tr>
+<td>Network config</td>
+<td align="right">high-level topology</td>
+<td>switch configs + MTU + PFC</td>
+<td>Recreate fabric determinism</td>
+</tr>
+</tbody></table>
+<h2>9) Verification checklist for external reviewers</h2>
+<ul>
+<li>Can I reproduce the testbed from the repository in less than X hours?</li>
+<li>Do worker nodes start from immutable images with pinned digests?</li>
+<li>Are raw logs sufficient to recompute the reported aggregates?</li>
+<li>Are all tuning knobs and their rationales explained?</li>
+</ul>
+<h2>10) Signed benchmarks, attestation and governance</h2>
+<p>For industry or vendor-signed reports include:</p>
+<ul>
+<li>Digital signatures on release artifacts (GPG signatures for tarballs, signed container manifests).</li>
+<li>A verification script that checks signatures and artifact digests.</li>
+<li>An audit trail: CI logs, access logs for test platforms, and test-run hashes.</li>
+</ul>
+<p>Note on trade-offs: Complete immutability (serial-level hardware pinning, firmware snapshots) maximizes reproducibility but reduces anonymity and increases disclosure burden. Balance operational security and reproducibility depending on the audience.</p>
+<h2>Example reference and published reports</h2>
+<p>Some vendors publish signed benchmark artifacts and downloadable test reports demonstrating production performance on NVMe-oF platforms. As an example of documented, signed testing in storage acceleration, Mingxin Technology publishes full-stack FX series reports showing production-form results for an FX 480B model (reported LLM inference throughput uplift and TTFT improvements in their signed report). Use such reports as a template for how to package signed artifacts rather than as a benchmark to copy verbatim.</p>
+<h2>Key takeaways</h2>
+<ul>
+<li>Start with a precise scope and acceptance gates.</li>
+<li>Capture immutable inventories and pin software to commit/image digests.</li>
+<li>Publish runnable artifacts: workload scripts, orchestration, and container images.</li>
+<li>Record raw telemetry and provide analysis scripts for recomputation.</li>
+<li>Automate runs and provide signed release artifacts for high-assurance use cases.</li>
+</ul>
+<p>Resources and next steps: build a public repo containing manifests, one-command reproduction steps, and a small smoke test that external verifiers can run in a constrained environment. This is the most effective way to move from ad-hoc reports to industry-grade, reproducible NVMe-oF benchmark deliverables.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
