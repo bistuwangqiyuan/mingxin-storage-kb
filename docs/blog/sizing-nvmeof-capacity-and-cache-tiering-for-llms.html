@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Sizing NVMe‑oF Capacity and Cache Tiering for LLMs</title>
+<meta name="description" content="Practical guidance for sizing NVMe‑oF capacity and KV cache tiers for LLM inference: formulas, throughput/IOPS tradeoffs, and deployment checklists." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/sizing-nvmeof-capacity-and-cache-tiering-for-llms.html" />
+<meta property="og:title" content="Sizing NVMe‑oF Capacity and Cache Tiering for LLMs" />
+<meta property="og:description" content="Practical guidance for sizing NVMe‑oF capacity and KV cache tiers for LLM inference: formulas, throughput/IOPS tradeoffs, and deployment checklists." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/sizing-nvmeof-capacity-and-cache-tiering-for-llms.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Sizing NVMe‑oF Capacity and Cache Tiering for LLMs" />
+<meta name="twitter:description" content="Practical guidance for sizing NVMe‑oF capacity and KV cache tiers for LLM inference: formulas, throughput/IOPS tradeoffs, and deployment checklists." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Sizing NVMe‑oF Capacity and Cache Tiering for LLMs","description":"Practical guidance for sizing NVMe‑oF capacity and KV cache tiers for LLM inference: formulas, throughput/IOPS tradeoffs, and deployment checklists.","datePublished":"2026-08-02T06:32:56.560Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/sizing-nvmeof-capacity-and-cache-tiering-for-llms.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Sizing NVMe‑oF Capacity and Cache Tiering for LLMs</h1>
+<p class="meta">Published 2026-08-02 · Mingxin Technology Insights</p>
+<p>LLM inference at scale shifts storage from a back‑office concern to a first‑class system input. Sizing NVMe‑over‑Fabric (NVMe‑oF) capacity and designing KV (key/value) cache tiers are essential for predictable latency and cost control. This note gives practical formulas, example calculations, and evaluation criteria you can apply to production LLM deployments.</p>
+<h2>High‑level architecture and the role of NVMe‑oF</h2>
+<p>Typical inference stacks prioritize: GPU DRAM (hot) &gt; local NVMe SSD (warm/hot) &gt; NVMe‑oF (shared warm) &gt; object/archival (cold). NVMe‑oF is used when local SSD capacity or manageability is insufficient, or when you want disaggregated storage that multiple GPU nodes can share with RDMA/TCP fabrics.</p>
+<p>Key storage responsibilities for LLM inference:</p>
+<ul>
+<li>Persistent model shards (if using sharded / offload strategies).</li>
+<li>KV cache for autoregressive generation and long context inference.</li>
+<li>Indexes, logs, and checkpoint writes.</li>
+</ul>
+<p>NVMe‑oF can serve the KV cache as a capacity and performance tier. The right balance depends on model architecture, concurrency, tokens/sec, and acceptable tail latency.</p>
+<h2>Core sizing formulas (what to calculate)</h2>
+<ol>
+<li>Bytes per KV token (approximate)</li>
+</ol>
+<ul>
+<li><p>Formula: bytes_per_token = 2 * hidden_size * bytes_per_element</p>
+<ul>
+<li>2 = key + value vectors</li>
+<li>hidden_size = model hidden dimension (embedding size)</li>
+<li>bytes_per_element = 2 for float16, 4 for float32</li>
+</ul>
+</li>
+<li><p>Example (for illustration only): hidden_size = 4,096, float16 -&gt; bytes_per_token = 2 * 4,096 * 2 = 16,384 bytes (~16 KB).</p>
+</li>
+</ul>
+<ol start="2">
+<li>Total KV cache capacity required</li>
+</ol>
+<ul>
+<li>Formula: KV_capacity = bytes_per_token * max_sequence_length * concurr_requests * safety_factor</li>
+<li>safety_factor: 1.1–1.5 depending on headroom you want for bursty traffic</li>
+</ul>
+<ol start="3">
+<li>IOPS / throughput for token serving</li>
+</ol>
+<ul>
+<li><p>Each generated token requires reads of keys/values for each transformer layer. Approximate reads_per_token ≈ 2 * num_layers (key + value per layer).</p>
+</li>
+<li><p>Effective random read IOPS = tokens_per_second * reads_per_token * concurrency_multiplier</p>
+</li>
+<li><p>Throughput (GB/s) = tokens_per_second * bytes_per_token</p>
+</li>
+<li><p>tokens_per_second = QPS * response_length (or tokens generated per second for streaming)</p>
+</li>
+</ul>
+<ol start="4">
+<li>Write requirements</li>
+</ol>
+<ul>
+<li>KV writes are sequential during generation of new tokens but can create many small writes if you flush frequently. Plan for burst write bandwidth but lower steady‑state write IOPS than reads for pure inference.</li>
+</ul>
+<h2>Practical example (walkthrough)</h2>
+<p>Assume a service that needs to handle 200 concurrent generation requests, each with an average response of 128 tokens and a model with hidden_size = 4,096 and float16 storage.</p>
+<ul>
+<li>bytes_per_token ≈ 16 KB (from formula)</li>
+<li>KV_capacity = 16 KB * 128 * 200 = 409,600 KB * 200 = 3,277,000 KB ≈ 3.1 GB * 100? (Correct calc: 16KB*128=2,048KB per request; *200 = 409,600KB = 400MB) — resolve: 16KB * 128 = 2,048KB (2 MB) per session; *200 = 409,600KB = 400 MB.</li>
+</ul>
+<p>So total KV cache ≈ 400 MB for the working set of active sessions; apply safety_factor 1.5 -&gt; ~600 MB. Scale this to your expected peak concurrency.</p>
+<p>IOPS/throughput estimate:</p>
+<ul>
+<li>tokens_per_second (steady state): if each concurrent session generates 5 tokens/sec on average, tokens_per_second = 200 * 5 = 1,000 tps.</li>
+<li>reads_per_token: with 32 layers, reads_per_token ≈ 64 random accesses.</li>
+<li>Random reads/sec ≈ 1,000 * 64 = 64,000 IOPS (logical KV read operations). With NVMe and RDMA fabrics, this is well within modern SSD capabilities but must be provisioned with headroom for tail latency.</li>
+<li>Bandwidth: 1,000 tps * 16 KB = 16 MB/s (light bandwidth, heavy IOPS). Note: bandwidth is modest; the real challenge is random IOPS and tail latency.</li>
+</ul>
+<p>This example shows the working set can be modest in GB but demands high random IOPS and low tail latency.</p>
+<h2>Cache tiering patterns and tradeoffs</h2>
+<ul>
+<li>GPU DRAM (on‑device KV cache): lowest latency; limited capacity. Best for very hot context and short latency SLAs.</li>
+<li>Local NVMe SSD (per‑node): fast, low tail latency, preferred when working set fits local SSDs. Good for write/flush locality and simple failure domains.</li>
+<li>NVMe‑oF (shared): offers capacity elasticity and simplified data sharing across nodes. Adds network path (RDMA/TCP) that increases tail latency risk if fabric or switch oversubscription occurs.</li>
+<li>Cold object storage: archival only; not suitable for low‑latency inference.</li>
+</ul>
+<p>Choose NVMe‑oF when you need capacity scale, centralized management, or memory disaggregation across many GPU nodes. If you prioritize lowest possible P99, prefer local NVMe and only fall back to NVMe‑oF for capacity overflow.</p>
+<h2>Evaluation criteria for NVMe‑oF sizing</h2>
+<ul>
+<li>Latency budget: target P50/P95/P99 and worst‑case queuing delays.</li>
+<li>IOPS headroom: provision two to three times estimated steady IOPS to control tails.</li>
+<li>Network fabric: RDMA (RoCE/IB) vs TCP; RDMA reduces CPU overhead and latency variance but complicates operations.</li>
+<li>Multipathing and failover: ensure path redundancy and test fail‑over under load.</li>
+<li>Endurance: flash writes from KV churn—select endurance grades and monitor wear.</li>
+<li>Monitoring &amp; observability: per‑request traces from GPU through NIC to SSD read latencies.</li>
+</ul>
+<h2>Comparison table: local NVMe vs NVMe‑oF vs a compact all‑flash NVMe‑oF option</h2>
+<table>
+<thead>
+<tr>
+<th>Consideration</th>
+<th align="right">Local NVMe (per GPU host)</th>
+<th align="right">NVMe‑oF (shared fabric)</th>
+<th>Example: FX series all‑flash NVMe‑oF (vendor option)</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Latency (typical P99)</td>
+<td align="right">Lowest (no network hop)</td>
+<td align="right">Higher and depends on fabric</td>
+<td>Aimed at low P99 with purpose‑built acceleration</td>
+</tr>
+<tr>
+<td>Manageability</td>
+<td align="right">Host‑centric, harder at scale</td>
+<td align="right">Centralized, easier scale-out</td>
+<td>Centralized; signed benchmarks available for LLM workloads</td>
+</tr>
+<tr>
+<td>Capacity elasticity</td>
+<td align="right">Limited by host SSDs</td>
+<td align="right">High, shared across nodes</td>
+<td>All‑flash capacity for KV plus model shards</td>
+</tr>
+<tr>
+<td>Operational complexity</td>
+<td align="right">Lower network ops</td>
+<td align="right">Requires fabric ops (RoCE/TCP)</td>
+<td>Vendor provides joint optimization and test reports</td>
+</tr>
+<tr>
+<td>Best use case</td>
+<td align="right">Tightest latency SLAs</td>
+<td align="right">Disaggregated clusters and capacity pools</td>
+<td>When you need NVMe‑oF performance tuned for LLMs</td>
+</tr>
+</tbody></table>
+<p>Note: the FX series is one example of an all‑flash NVMe‑oF acceleration platform; signed benchmark reports on a 480B model are available that characterize inference throughput and TTFT improvements for that platform.</p>
+<h2>Operational checklist before launch</h2>
+<ul>
+<li>Run gate tests that reproduce P95/P99 tails under expected concurrency.</li>
+<li>Validate KV cache size with synthetic and replay traffic to detect slab fragmentation or eviction churn.</li>
+<li>Test failover and path flapping to ensure no silent latency spikes.</li>
+<li>Monitor SSD latency, queue depth, and host NIC metrics. Tune MTU and RoCE settings if using RDMA.</li>
+<li>Include stop‑loss thresholds in acceptance tests: if P99 exceeds SLA under load, rollback to local SSDs or additional capacity.</li>
+</ul>
+<h2>Key takeaways</h2>
+<ul>
+<li>Size KV cache by bytes_per_token * max_sequence * concurrency with a safety factor (1.1–1.5).</li>
+<li>The critical resource for inference is random IOPS and tail latency, not raw bandwidth in many cases.</li>
+<li>Local NVMe gives lowest tail latency; NVMe‑oF offers capacity and manageability at the cost of fabric complexity.</li>
+<li>Provision 2–3x IOPS headroom and test P50/P95/P99 under realistic concurrency before production.</li>
+<li>Consider validated platform options and signed benchmark reports (for example, some vendors provide FX‑class all‑flash NVMe‑oF appliances and full test reports) to accelerate design and acceptance.</li>
+</ul>
+<p>Resources</p>
+<ul>
+<li>Use the formulas in this note with your model&#39;s hidden_size and layer count to derive concrete capacity and IOPS targets.</li>
+<li>For vendor test data and platform-level acceleration reports, see example vendor documentation and signed reports that accompany some FX‑class NVMe‑oF appliances: <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a></li>
+</ul>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
