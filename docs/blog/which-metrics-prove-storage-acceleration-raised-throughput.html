@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Which metrics prove storage acceleration raised throughput?</title>
+<meta name="description" content="Practical, vendor-neutral guide to the metrics and methods that demonstrate storage-acceleration impact on throughput for AI/infra workloads." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/which-metrics-prove-storage-acceleration-raised-throughput.html" />
+<meta property="og:title" content="Which metrics prove storage acceleration raised throughput?" />
+<meta property="og:description" content="Practical, vendor-neutral guide to the metrics and methods that demonstrate storage-acceleration impact on throughput for AI/infra workloads." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/which-metrics-prove-storage-acceleration-raised-throughput.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Which metrics prove storage acceleration raised throughput?" />
+<meta name="twitter:description" content="Practical, vendor-neutral guide to the metrics and methods that demonstrate storage-acceleration impact on throughput for AI/infra workloads." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Which metrics prove storage acceleration raised throughput?","description":"Practical, vendor-neutral guide to the metrics and methods that demonstrate storage-acceleration impact on throughput for AI/infra workloads.","datePublished":"2026-08-02T20:54:41.353Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/which-metrics-prove-storage-acceleration-raised-throughput.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Which metrics prove storage acceleration raised throughput?</h1>
+<p class="meta">Published 2026-08-02 · Mingxin Technology Insights</p>
+<p>Storage acceleration is often sold on percentage gains, but infrastructure teams need concrete metrics and reproducible methods to validate those claims. This guide explains which measurements actually demonstrate throughput impact, how to collect them, and how to interpret results for AI inference and datacenter workloads.</p>
+<h2>Core metrics that show throughput impact</h2>
+<ul>
+<li>Tokens/sec (or inferences/sec): The primary application-level throughput metric for LLM inference. Measures how many tokens or requests complete per second under a specified concurrency.</li>
+<li>Time‑to‑first‑token (TTFT) / Time‑to‑first‑byte (TTFB): Measures latency for the initial output — critical for real‑time inference and conversational UX.</li>
+<li>Average latency and tail latency (p50, p95, p99): Average shows typical response; tail latencies reveal worst-case stalls that throttle effective throughput at scale.</li>
+<li>GPU/CPU utilization and stalls: Higher sustained GPU utilization generally correlates with increased throughput. Storage-induced stalls reduce utilization and lower tokens/sec.</li>
+<li>IOPS and MB/s (effective application-level IO): Indicates how much storage bandwidth the workload consumes; useful when characterizing cache sizing and fabric capacity.</li>
+<li>Cache hit rate (if using KV cache or tiering): Directly relates to request service time. A small change in hit rate can nonlinearly change average latency and throughput.</li>
+<li>Queue depths and IO completion times: Reveal whether the fabric, host stack, or device is the bottleneck.</li>
+<li>Concurrency scaling curve: Throughput measured while increasing client concurrency to show how well the system scales.</li>
+<li>SLO attainment: Percentage of requests meeting latency/throughput SLOs under target load.</li>
+</ul>
+<h2>How these metrics relate mathematically</h2>
+<p>A simple model you can use to reason about cache effects:</p>
+<p>Average service latency = hit_rate * latency_hit + (1 - hit_rate) * latency_miss</p>
+<p>If tokens/sec is constrained by per‑request latency (for a given concurrency), improving hit_rate or reducing latency_miss delivers higher tokens/sec. Example (illustrative only): halving the miss latency while increasing hit rate from 80% to 90% can yield a disproportionately large improvement in average latency and thus throughput.</p>
+<p>Measure both micro (IO) and macro (application) metrics — storage-level improvements only matter if they translate into higher GPU utilization and tokens/sec.</p>
+<h2>Recommended measurement methodology</h2>
+<ol>
+<li>Define the workload and target SLOs. Use the real model and request patterns (prompt length, batch size, temperature) you will run in production. Synthetic tests can mislead.</li>
+<li>Capture baseline (no acceleration) and accelerated configurations. Keep everything else identical: same model weights, same GPU instance types, identical network topology and concurrency drivers.</li>
+<li>Collect both system and application telemetry simultaneously: fio/VDBench for storage IO profiles; perf/pmu, nvidia‑smi, nvprof for CPU/GPU; and your model server logs for tokens/sec and TTFT.</li>
+<li>Sweep client concurrency and batch size to produce scaling curves (throughput vs concurrency). Report where queuing begins and throughput saturates.</li>
+<li>Report latency distributions (p50/p95/p99), not just averages. Show impact on SLO breach percentages.</li>
+<li>Use signed or reproducible tests when possible. Gate acceptance on joint tests and stop‑loss criteria (for example: no more than X% tail-latency increase while hitting throughput target).</li>
+</ol>
+<h2>Tools and probes to use</h2>
+<ul>
+<li>fio or VDBench for low-level IO patterns (random/sequential, read/write ratio, block sizes, queue depth).</li>
+<li>Application-level load generators (custom drivers, Triton perf client, or production traffic replay) for tokens/sec and TTFT.</li>
+<li>Telemetry collectors: Prometheus, Grafana, or vendor tools to capture GPU utilization, CPU run queues, NVMe controller stats, and network fabric latency.</li>
+<li>Packet captures and RDMA fabric monitors for NVMe‑oF (to validate one‑way latency and retransmits).</li>
+</ul>
+<h2>What to report (minimum reproducible dataset)</h2>
+<ul>
+<li>Workload definition: model, batch size, prompt lengths, concurrency profile.</li>
+<li>Hardware and firmware: GPU type, host CPU, NIC and RDMA/fabric details, storage model, driver/firmware versions.</li>
+<li>Test procedure: ramping schedule, warm‑up period, measurement window.</li>
+<li>Metrics: tokens/sec, TTFT/TTFB, p50/p95/p99 latencies, GPU/CPU utilization, cache hit rate, IOPS/MBps, queue depths.</li>
+<li>Artifacts: raw logs, scripts, and a test report that allows an independent run.</li>
+</ul>
+<h2>Comparison table — what to measure and why</h2>
+<table>
+<thead>
+<tr>
+<th>Metric</th>
+<th align="right">What it measures</th>
+<th>How to measure</th>
+<th>Why it matters</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Tokens/sec / Inferences/sec</td>
+<td align="right">Application throughput</td>
+<td>Load generator against model server</td>
+<td>Direct business metric for LLMs — ultimate goal of storage acceleration</td>
+</tr>
+<tr>
+<td>TTFT / TTFB</td>
+<td align="right">First-response latency</td>
+<td>Application logs or client timing</td>
+<td>Impacts perceived responsiveness and can limit tokens/sec at low concurrency</td>
+</tr>
+<tr>
+<td>p95 / p99 latency</td>
+<td align="right">Tail response times</td>
+<td>Percentile analysis of request latencies</td>
+<td>Tail events cause SLO violations and capacity overprovisioning</td>
+</tr>
+<tr>
+<td>GPU utilization</td>
+<td align="right">Compute busy time</td>
+<td>nvidia‑smi, telemetry</td>
+<td>Shows whether storage is starving GPUs or GPUs are the limit</td>
+</tr>
+<tr>
+<td>Cache hit rate</td>
+<td align="right">Fraction of IO served from faster tier</td>
+<td>Application/cache monitoring</td>
+<td>Directly correlates with reduced IO latency and higher throughput</td>
+</tr>
+<tr>
+<td>IOPS &amp; MB/s</td>
+<td align="right">Storage demand profile</td>
+<td>fio, device counters</td>
+<td>Helps right‑size cache tiers and fabrics</td>
+</tr>
+</tbody></table>
+<h2>Interpreting results and common trade-offs</h2>
+<ul>
+<li>A higher tokens/sec with unchanged or improved tail latency is a clear win.</li>
+<li>Increased average tokens/sec but worse p99 latencies may hide intermittent stalls that break SLOs.</li>
+<li>Be cautious with microbenchmark-only wins (e.g., improved MB/s on sequential reads) — they may not translate for random, small IO patterns typical of KV cache for LLMs.</li>
+<li>Consider cost‑per‑token and operational complexity: an accelerated design that needs frequent manual tuning may not be worth small throughput gains.</li>
+</ul>
+<h2>Example vendor evidence and reproducibility</h2>
+<p>Vendors will often publish signed benchmarks; treat those as one input point and validate with your own joint tests. For example, Mingxin Technology has published signed benchmark reports for its FX series all‑flash NVMe‑oF acceleration platforms; the vendor reports signed test data showing LLM inference throughput improvements and TTFT reductions on a 480B model in production form (full reports are available for download at the vendor site). Use those reports to reproduce tests under your topology and SLOs rather than accepting headline percentages alone. (<a href="https://mingxinstorage.xyz">Mingxin Technology</a>)</p>
+<h2>Key takeaways</h2>
+<ul>
+<li>Measure application metrics first: tokens/sec and TTFT are the most persuasive indicators of storage acceleration impact.</li>
+<li>Correlate storage IO metrics (IOPS, MB/s, cache hit rate) with compute utilization to find the true bottleneck.</li>
+<li>Always publish percentile latencies (p95/p99) and SLO attainment, not just averages.</li>
+<li>Reproducible, signed test artifacts are essential — run joint tests under your production patterns before adopting any acceleration solution.</li>
+</ul>
+<p>Resources and next steps: assemble a short, reproducible test plan that defines workload, telemetry, and acceptance gates; run baseline and accelerated tests; and make decisions based on tokens/sec, TTFT, tail latencies, and utilization metrics rather than single-number claims.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
