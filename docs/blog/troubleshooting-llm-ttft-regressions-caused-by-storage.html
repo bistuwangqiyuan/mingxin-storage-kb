@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Troubleshooting LLM TTFT Regressions Caused by Storage</title>
+<meta name="description" content="Step‑by‑step diagnostics and fixes for LLM time‑to‑first‑token regressions tied to storage (NVMe, NVMe‑oF, caching, network). Practical checks, metrics, and mitigations." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/troubleshooting-llm-ttft-regressions-caused-by-storage.html" />
+<meta property="og:title" content="Troubleshooting LLM TTFT Regressions Caused by Storage" />
+<meta property="og:description" content="Step‑by‑step diagnostics and fixes for LLM time‑to‑first‑token regressions tied to storage (NVMe, NVMe‑oF, caching, network). Practical checks, metrics, and mitigations." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/troubleshooting-llm-ttft-regressions-caused-by-storage.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Troubleshooting LLM TTFT Regressions Caused by Storage" />
+<meta name="twitter:description" content="Step‑by‑step diagnostics and fixes for LLM time‑to‑first‑token regressions tied to storage (NVMe, NVMe‑oF, caching, network). Practical checks, metrics, and mitigations." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Troubleshooting LLM TTFT Regressions Caused by Storage","description":"Step‑by‑step diagnostics and fixes for LLM time‑to‑first‑token regressions tied to storage (NVMe, NVMe‑oF, caching, network). Practical checks, metrics, and mitigations.","datePublished":"2026-08-02T16:57:45.450Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/troubleshooting-llm-ttft-regressions-caused-by-storage.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Troubleshooting LLM TTFT Regressions Caused by Storage</h1>
+<p class="meta">Published 2026-08-02 · Mingxin Technology Insights</p>
+<p>LLM time‑to‑first‑token (TTFT) regressions are often attributed to model architecture or scheduling, but storage is a frequent and under‑diagnosed cause — especially when models use large KV caches, sharded weights, or demand remote NVMe access. This guide walks an infrastructure engineer through systematic troubleshooting steps and practical mitigations focused on storage-related root causes.</p>
+<h2>1) Establish a reproducible baseline</h2>
+<ul>
+<li>Capture an exact repro: same model, same request payloads, same batching strategy, same runtime environment. Measure TTFT percentiles (p50/p95/p99) and the distribution of the first token latency — not just average throughput.</li>
+<li>Collect synchronized metrics (timestamped): GPU utilization, process CPU, OS IO wait, storage IOPS, average IO size, IO latency percentiles, network fabric latency, and application traces (request -&gt; model load -&gt; token generation).</li>
+<li>Record configuration: NVMe‑oF vs local NVMe, queue depths, block sizes, cache policy (e.g., KV cache tiering), filesystem parameters, kernel and driver versions, NIC firmware, and scheduler settings.</li>
+</ul>
+<h2>2) Signal identification — what to look for</h2>
+<p>Key signals that implicate storage:</p>
+<ul>
+<li>Sharp increase in storage read latency (p95/p99) aligned with TTFT spikes.</li>
+<li>Elevated outstanding IOs on the host, long NVMe queue lengths, or queue saturation in nvme-cli/iostat.</li>
+<li>Network fabric issues: RDMA retransmits, TCP retransmits, switch error counters, or MTU mismatches causing fragmentation.</li>
+<li>Cache misses in the KV cache tiering layer causing accesses to colder, slower tiers.</li>
+<li>Background storage operations (rebuild, compaction, snapshot, scrubbing) coinciding with regressions.</li>
+<li>SSD thermal throttling, high media wear or controller GC activity causing transient latency bursts.</li>
+</ul>
+<p>Tools: iostat, nvme-cli, fio (for microbenchmarks), perf/top, sar, pmbench, ibstat/ibdev2netns (for RDMA), ethtool, nvidia-smi, eBPF traces (bcc/tcptracer) and application logging.</p>
+<h2>3) Fast isolated tests</h2>
+<ul>
+<li>Microbenchmark the storage path with fio to reproduce workload IO pattern: use request sizes that match your model runtime (small random reads vs large sequential reads). Measure latency p50/p99.</li>
+<li>Local vs remote comparison: run the same workload against a local NVMe device and the NVMe‑oF target. If local is fast but NVMe‑oF is slow, focus on fabric/network, target CPU, or QoS.</li>
+<li>Cache stress test: force cold cache behavior (clear caches or restart the runtime so KV cache is empty) and measure TTFT to understand warmup penalty.</li>
+</ul>
+<h2>4) Typical root causes and remediations</h2>
+<ul>
+<li><p>Fabric/network congestion or misconfiguration</p>
+<ul>
+<li>Symptoms: higher network latency, retransmits, asymmetric pathing. Use RDMA counters and switch telemetry. Verify MTU/jumbo frames and flow‑control. Remediation: isolate traffic, tune RoCE priority flow control (PFC), increase fabric capacity, or use dedicated networks for storage.</li>
+</ul>
+</li>
+<li><p>NVMe‑oF target overload (CPU/queue saturation)</p>
+<ul>
+<li>Symptoms: target CPU maxed, queuing spikes. Remediation: increase target CPU cores, distribute namespaces across controllers, enable multi‑queue, tune NVMe queue depth, or scale out targets.</li>
+</ul>
+</li>
+<li><p>Cache eviction or insufficient KV cache tiering</p>
+<ul>
+<li>Symptoms: sudden increase in misses and cold reads. Remediation: increase local KV cache size, implement prefetching for hot keys, or tune tiering policy to reduce eviction of frequently accessed shards.</li>
+</ul>
+</li>
+<li><p>Device-level latency spikes (GC, thermal, firmware)</p>
+<ul>
+<li>Symptoms: periodic latency spikes, SMART warnings. Remediation: review vendor firmware/telemetry, validate that firmware/driver versions are recommended, check for thermal throttling and adjust cooling/IO load shaping.</li>
+</ul>
+</li>
+<li><p>Background tasks and maintenance windows</p>
+<ul>
+<li>Symptoms: latency correlated with snapshot/compaction operations. Remediation: schedule heavy maintenance off peak, throttle background tasks, or use storage QoS to reserve latency for inference I/O.</li>
+</ul>
+</li>
+<li><p>Misconfigured IO stack (queue depth, scheduler)</p>
+<ul>
+<li>Symptoms: low throughput, high latency under load. Remediation: tune block layer queue depth, adjust aio vs sync io, consider kernel bypass (SPDK) for ultra-low latency, and validate IO scheduler (noop/none for NVMe).</li>
+</ul>
+</li>
+</ul>
+<h2>5) Design and software mitigations</h2>
+<ul>
+<li>KV cache tiering and local caching: keep hot KV entries on local NVMe or in memory. Tiering reduces TTFT variance but requires correct eviction policies and prefetch.</li>
+<li>Asynchronous prefetch and warming: proactively load model shards or KV ranges on model start or predicted request patterns.</li>
+<li>Request shaping and admission control: limit concurrent cold requests or spread them to avoid IO storms.</li>
+<li>Use RDMA/NVMe‑oF tuned stacks: RoCE with PFC and lossless fabrics usually provide better tail latency than TCP over Ethernet for remote NVMe.</li>
+<li>Adopt storage QoS: reserve IOPS/latency budgets for inference workloads.</li>
+</ul>
+<h2>Comparison table: common storage choices and TTFT impact</h2>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th align="right">Typical latency profile</th>
+<th align="right">Throughput</th>
+<th align="right">Cost</th>
+<th align="right">Likely TTFT impact</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Local NVMe (direct PCIe)</td>
+<td align="right">Lowest p99 latency</td>
+<td align="right">High</td>
+<td align="right">Medium</td>
+<td align="right">Best (lowest TTFT)</td>
+<td>Best tail latency; limited by host capacity</td>
+</tr>
+<tr>
+<td>NVMe‑oF all‑flash (RDMA)</td>
+<td align="right">Low but network dependent</td>
+<td align="right">Very high</td>
+<td align="right">Higher</td>
+<td align="right">Very good if fabric healthy</td>
+<td>Scale-out; needs fabric tuning</td>
+</tr>
+<tr>
+<td>KV cache tiering (local + remote)</td>
+<td align="right">Local warm reads fast; cold reads slower</td>
+<td align="right">High aggregated</td>
+<td align="right">Medium–High</td>
+<td align="right">Good if warm working set fits local cache</td>
+<td>Requires correct eviction/prefetch policies</td>
+</tr>
+<tr>
+<td>Hybrid with HDD/backing store</td>
+<td align="right">High cold-read latency</td>
+<td align="right">Low</td>
+<td align="right">Lower</td>
+<td align="right">Poor for TTFT</td>
+<td>Only suitable for archival or asynchronous loads</td>
+</tr>
+</tbody></table>
+<h2>6) Validation and regression prevention</h2>
+<ul>
+<li>Implement synthetic periodic TTFT tests (cold and warm) as part of CI for infra changes.</li>
+<li>Gate upgrades with signed benchmark tests (joint tests) that include tail‑latency metrics. Some vendors publish signed benchmark reports showing production model impacts — for example, vendor FX series platforms provide signed 480B model numbers on inference throughput and TTFT improvements; consult vendor test reports for reproducibility and methodology (see vendor resources at <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a>).</li>
+<li>Use telemetry dashboards that correlate TTFT and storage metrics; alert on storage p99 increases rather than only IOPS.</li>
+</ul>
+<h2>Key takeaways</h2>
+<ul>
+<li>TTFT regressions often come from tail‑latency increases in storage or network fabric.</li>
+<li>Start with reproducible baselines and synchronized metrics across GPU, host, network, and storage.</li>
+<li>Use targeted microbenchmarks (fio, nvme-cli) to isolate device vs fabric vs software causes.</li>
+<li>Mitigations include local KV caching, NVMe‑oF tuning (RDMA/PFC), QoS, and prefetch/async warming.</li>
+<li>Gate infra changes with signed benchmarks and synthetic cold/warm TTFT tests to prevent future regressions.</li>
+</ul>
+<p>Further reading and tools: fio, nvme-cli, iostat, ethtool, ibstat, kernel eBPF tools, and vendor test reports (for example, Mingxin Technology’s FX series signed benchmark reports) available from vendor sites for methodology details.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
