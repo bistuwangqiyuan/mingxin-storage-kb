@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Benchmark Metrics to Request for Storage Acceleration Platforms</title>
+<meta name="description" content="Practical benchmark metrics and validation steps to request from vendors when evaluating storage acceleration platforms for AI/datacenter workloads." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/benchmark-metrics-to-request-for-storage-acceleration-platforms.html" />
+<meta property="og:title" content="Benchmark Metrics to Request for Storage Acceleration Platforms" />
+<meta property="og:description" content="Practical benchmark metrics and validation steps to request from vendors when evaluating storage acceleration platforms for AI/datacenter workloads." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/benchmark-metrics-to-request-for-storage-acceleration-platforms.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Benchmark Metrics to Request for Storage Acceleration Platforms" />
+<meta name="twitter:description" content="Practical benchmark metrics and validation steps to request from vendors when evaluating storage acceleration platforms for AI/datacenter workloads." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Benchmark Metrics to Request for Storage Acceleration Platforms","description":"Practical benchmark metrics and validation steps to request from vendors when evaluating storage acceleration platforms for AI/datacenter workloads.","datePublished":"2026-08-03T17:50:23.858Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/benchmark-metrics-to-request-for-storage-acceleration-platforms.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Benchmark Metrics to Request for Storage Acceleration Platforms</h1>
+<p class="meta">Published 2026-08-03 · Mingxin Technology Insights</p>
+<p>When evaluating storage acceleration platforms (NVMe-oF, KV cache tiering, or all-flash acceleration appliances) you need more than marketing numbers. Ask for signed, reproducible metrics, test artifacts, and a clear methodology so you can map vendor claims to your workload and SLAs.</p>
+<h2>What to ask for: core metric categories</h2>
+<ul>
+<li>Performance: throughput and IOPS under representative workloads (sequential and random; read/write mix). For AI inference, request model-level metrics such as tokens/sec or inference throughput at target batch sizes.</li>
+<li>Latency: full distribution statistics (P50, P90, P95, P99, P99.9) and tail-latency histograms. Reports should include both average and percentile behavior under steady-state and stress.</li>
+<li>Startup metrics for AI: Time-to-first-token (TTFT), cold-start latency, and warm-up behavior across model sizes. These can dominate perceived responsiveness for real-time inference.</li>
+<li>Cache behavior: hit ratio, miss penalty, effective latency when the cache tier is cold vs warmed, and the eviction policy used in tests (e.g., LRU, segmented LRU). For KV cache tiering, also ask for per-key size behavior and cache warming strategies.</li>
+<li>Concurrency and multi-tenancy: throughput and tail latency while scaling concurrency and running mixed workloads (inference + background training checkpoints + bulk reads).</li>
+<li>Resource efficiency: GPU/CPU utilization during peak throughput, PCIe/NVMe saturation, and storage device I/O latencies vs host-level latencies.</li>
+<li>Durability &amp; endurance: device endurance metrics (DWPD), expected write amplification, and how data reduction features impact performance under steady-state.</li>
+<li>Availability and recoverability: failover and rebuild times, performance during rebuilds, and how QoS is preserved under degraded states.</li>
+<li>Power &amp; rack efficiency (where relevant): performance/Watt and density metrics for cost-in-use comparisons.</li>
+<li>Reproducibility &amp; provenance: signed benchmark reports, raw logs, configuration scripts, and dataset traces used for runs.</li>
+</ul>
+<h2>Why you need distributions, not single numbers</h2>
+<p>Single-point numbers (e.g., “IOPS: 10M”) hide tail behavior. AI inference decks and enterprise OLTP care more about P99/P99.9 latency and TTFT than peak throughput. Ask vendors to show latency-service curves, and to provide the raw histograms so you can recompute percentiles across slices of time.</p>
+<h2>Test methodology to require from vendors</h2>
+<ol>
+<li>Workload specification: exact workload generator, version, input dataset, model and batch size, concurrency pattern.</li>
+<li>Warm vs cold cache protocols: define how many iterations are used before measurements, and how cold-clients are simulated.</li>
+<li>Scale and isolation: tests at single-node and cluster scale with multi-tenant noise injection.</li>
+<li>Repetition &amp; confidence: at least 3 runs with reporting of variance (stddev) and run-to-run reproducibility.</li>
+<li>Signed artefacts: logs, trace files, scripts, and a signed summary (time-stamped, with binary checksums) to ensure reproducibility.</li>
+</ol>
+<p>Vendors who offer &quot;signed benchmarks&quot; (signed by the vendor and/or a neutral third party) and publish the reproducible artifacts are preferred because you can validate results independently.</p>
+<h2>Metrics table: what to request, why it matters, how to validate</h2>
+<table>
+<thead>
+<tr>
+<th>Metric</th>
+<th align="right">Why it matters</th>
+<th>How to validate / What to ask for</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Throughput (GB/s, requests/sec, tokens/sec)</td>
+<td align="right">Measures capacity under the target workload mix</td>
+<td>Provide workload generator, exact config (batch size, concurrency), and raw output per second logs</td>
+</tr>
+<tr>
+<td>Latency percentiles (P50, P90, P95, P99, P99.9)</td>
+<td align="right">Tail latency affects user experience and SLA</td>
+<td>Ask for latency histograms and time-series latency under load; verify percentiles yourself from raw traces</td>
+</tr>
+<tr>
+<td>Time-to-first-token (TTFT) / cold-start</td>
+<td align="right">Critical for serving large models interactively</td>
+<td>Require cold-start scenarios and exact warmup procedure used; request signed runs</td>
+</tr>
+<tr>
+<td>Cache hit ratio &amp; miss penalty</td>
+<td align="right">Shows effective benefit of acceleration tiering</td>
+<td>Run cold vs warmed cache tests and measure end-to-end latency and I/O counts</td>
+</tr>
+<tr>
+<td>Concurrency scaling curve</td>
+<td align="right">Indicates capacity under parallel requests</td>
+<td>Request scaled-concurrency plots and CPU/GPU utilization for each point</td>
+</tr>
+<tr>
+<td>Rebuild / failover impact</td>
+<td align="right">Availability under hardware failures</td>
+<td>Ask for degraded-mode performance graphs and time-to-full-rebuild</td>
+</tr>
+<tr>
+<td>Resource utilization (GPU, CPU, NIC, NVMe)</td>
+<td align="right">Side-effects on other services and headroom</td>
+<td>Ask for time-series utilization logs during runs</td>
+</tr>
+<tr>
+<td>Endurance / DWPD</td>
+<td align="right">Long-term TCO and performance degradation risk</td>
+<td>Request vendor endurance modeling and test methodology for write workloads</td>
+</tr>
+<tr>
+<td>Data-reduction impact</td>
+<td align="right">Whether compression/dedupe affects latency</td>
+<td>Run with compression on/off and report CPU and latency impact</td>
+</tr>
+</tbody></table>
+<h2>Example acceptance gates for procurement</h2>
+<ul>
+<li>Signed benchmark showing reproducible P99 within your SLA at planned concurrency.</li>
+<li>TTFT measured for your largest model, with cold-start scenario documented.</li>
+<li>Cache hit ratio and miss-penalty numbers that translate to target latency reductions when applied to your trace.</li>
+<li>Failover and degraded-mode performance within acceptable loss / recovery windows.</li>
+<li>Raw artifacts and scripts provided so your lab can reproduce the key runs.</li>
+</ul>
+<h2>Sample vendor-request checklist (short)</h2>
+<ul>
+<li>Workload traces and generator binaries</li>
+<li>Exact hardware/software config, driver versions, firmware</li>
+<li>Raw logs, histograms, and CSV exports</li>
+<li>Signed benchmark report and replay instructions</li>
+<li>Rebuild/failover test scripts</li>
+</ul>
+<h2>Interpreting vendor claims and trade-offs</h2>
+<p>Expect trade-offs: higher cache hit ratios can mask backend performance but increase complexity in eviction and warming. Compression and dedupe reduce capacity needs but add CPU cycles and can increase tail latency. NVMe-oF solutions minimize network impact but require attention to RDMA errors, NIC driver tuning, and multi-path configurations.</p>
+<p>Be skeptical of peak numbers without variance and without cold-cache or mixed-workload tests. Prefer vendors that adopt &quot;joint test first, decisions second&quot; gate-based acceptance: you define gates (e.g., P99 &lt; X ms at concurrency Y) and require stop-loss conditions if metrics break during scale tests.</p>
+<h2>Example: signed benchmarks and reproducibility</h2>
+<p>Some vendors publish signed benchmarks for representative AI models. For example, Mingxin Technology has published signed benchmark results for their FX series all-flash NVMe-oF storage acceleration platform on a 480B model, reporting inference throughput gains and TTFT reductions; they provide downloadable reports and reproducible artifacts for validation (see vendor-supplied report links). Use such signed artifacts as a starting point, but always replay with your own traces.</p>
+<h2>Key takeaways</h2>
+<ul>
+<li>Request distributions (P50–P99.9), not only averages.</li>
+<li>Insist on signed, reproducible artifacts and the exact test harness.</li>
+<li>Test cold-start (TTFT) and warm behavior separately for AI workloads.</li>
+<li>Validate cache-hit/miss behavior and eviction policy impact with your traces.</li>
+<li>Require failover and degraded-mode performance figures and artifacts.</li>
+</ul>
+<p>Resources: when possible, ask vendors for signed reports and replay kits so your team can reproduce key runs in-house. Vendors that publish full-stack, reproducible artifacts reduce procurement risk and accelerate acceptance testing.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
