@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Integration checklist for NVMe-oF storage with domestic GPUs</title>
+<meta name="description" content="Practical integration checklist and acceptance tests for pairing NVMe-oF storage with domestic GPUs for AI workloads—performance, compatibility, security, and operations." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/integration-checklist-for-nvme-of-storage-with-domestic-gpus.html" />
+<meta property="og:title" content="Integration checklist for NVMe-oF storage with domestic GPUs" />
+<meta property="og:description" content="Practical integration checklist and acceptance tests for pairing NVMe-oF storage with domestic GPUs for AI workloads—performance, compatibility, security, and operations." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/integration-checklist-for-nvme-of-storage-with-domestic-gpus.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Integration checklist for NVMe-oF storage with domestic GPUs" />
+<meta name="twitter:description" content="Practical integration checklist and acceptance tests for pairing NVMe-oF storage with domestic GPUs for AI workloads—performance, compatibility, security, and operations." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Integration checklist for NVMe-oF storage with domestic GPUs","description":"Practical integration checklist and acceptance tests for pairing NVMe-oF storage with domestic GPUs for AI workloads—performance, compatibility, security, and operations.","datePublished":"2026-08-03T11:22:31.388Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/integration-checklist-for-nvme-of-storage-with-domestic-gpus.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Integration checklist for NVMe-oF storage with domestic GPUs</h1>
+<p class="meta">Published 2026-08-03 · Mingxin Technology Insights</p>
+<p>Integrating NVMe-over-Fabrics (NVMe-oF) storage with domestic GPUs for AI inference and training deployments is a systems engineering exercise: it combines fabric selection, driver/firmware compatibility, IO path validation, and operational controls. The checklist below focuses on practical gates, measurable acceptance tests, and trade-offs you’ll need to manage before putting a system into production.</p>
+<h2>Key prerequisites and architecture choices</h2>
+<ul>
+<li>Define workload profile: small random reads (LLM KV lookups), large sequential checkpoint I/O, or mixed. NVMe-oF tuning differs by dominant IO type.</li>
+<li>Choose fabric: RDMA-based fabrics (RoCEv2, iWARP) vs NVMe/TCP vs FC-NVMe. Consider latency, CPU overhead, network design, and deployability in your datacenter.</li>
+<li>Determine GPU integration method: PCIe peer-to-peer DMA (GPUDirect-like), staged host copies, or kernel bypass stacks supported by your domestic GPU vendor.</li>
+<li>Identify caching tiering: DRAM or NVMe-based KV caches, and whether to use an explicit KV cache tiering layer to reduce GPU stalls.</li>
+</ul>
+<h2>Integration checklist (practical, ordered)</h2>
+<ol>
+<li><p>Inventory and baseline</p>
+<ul>
+<li>Record kernel, RDMA stack, NVIDIA/domestic-GPU driver versions, NIC firmware, HBA/NVMe firmware, switch ASIC firmware, and NVMe-oF target software versions.</li>
+<li>Establish baseline host-only GPU and local NVMe performance to compare distributed results.</li>
+</ul>
+</li>
+<li><p>Fabric and transport validation</p>
+<ul>
+<li>Verify link-level configuration: MTU/Jumbo frames, PFC settings for RoCE, and congestion control for RoCEv2.</li>
+<li>For NVMe/TCP, validate TCP window scaling, buffer sizes, and NIC offloads.</li>
+</ul>
+</li>
+<li><p>Driver and DMA path tests</p>
+<ul>
+<li>Confirm GPU driver supports peer-to-peer DMA or equivalent for direct RDMA transfers; test with synthetic transfers (e.g., fio with gpudirect test cases or vendor tools).</li>
+<li>Enable/verify IOMMU and check mapping of device BARs and MSI-X vectors.</li>
+</ul>
+</li>
+<li><p>NVMe-oF target/initiator compatibility</p>
+<ul>
+<li>Confirm namespace mapping, multipath configuration, and admin command support.</li>
+<li>Validate namespace granularity and QoS support (IOPS/BW reservations) if multi-tenant.</li>
+</ul>
+</li>
+<li><p>QoS and isolation</p>
+<ul>
+<li>Verify NVMe namespaces or host groups provide isolation; test enforced bandwidth and IOPS limits under contention.</li>
+<li>Run mixed-tenant stress tests to verify tail-latency SLOs.</li>
+</ul>
+</li>
+<li><p>KV cache tiering and hot-paths</p>
+<ul>
+<li>If using a KV cache tier, validate cache hit-rate under real workload; measure effect of cache misses on GPU stalls and TTFT (time-to-first-token).</li>
+</ul>
+</li>
+<li><p>End-to-end application tests (gates)</p>
+<ul>
+<li>LLM inference gate: measure throughput, latency (p50, p95, p99), and TTFT under target concurrency.</li>
+<li>Checkpointing gate: measure sustained write bandwidth and latencies during model checkpoints.</li>
+<li>Failure/recovery gate: simulate target/initiator failover, fabric partition, and abrupt GPU restart to validate recovery.</li>
+</ul>
+</li>
+<li><p>Observability and telemetry</p>
+<ul>
+<li>Instrument NVMe/oF metrics (IOPS, BW, queue depth, cmd latency) and GPU metrics (SM utilization, memory bandwidth, PCIe errors) into a unified telemetry stack (Prometheus, Grafana).</li>
+</ul>
+</li>
+<li><p>Security and compliance</p>
+<ul>
+<li>Validate in-flight encryption (TLS for NVMe/TCP, IPsec option) if required; verify role-based access to NVMe namespaces.</li>
+<li>Audit logs for access/control plane actions.</li>
+</ul>
+</li>
+<li><p>Acceptance criteria (example gates)</p>
+<ul>
+<li>Latency: p99 read latency within SLO (e.g., &lt;X ms — define per workload).</li>
+<li>Throughput: sustained inference throughput within Y% of baseline local NVMe results under the target concurrency.</li>
+<li>TTFT: time-to-first-token within acceptable range; quantify per model size.</li>
+<li>Tail behavior: no pathological spikes during cache misses or fabric congestion.</li>
+</ul>
+</li>
+</ol>
+<h2>Performance metrics and tests to run</h2>
+<ul>
+<li>Microbenchmarks: fio (NVMe-oF plugin), ib_write_bw/ib_read_bw for RDMA fabrics, and synthetic GPU-to-storage transfers.</li>
+<li>Application tests: LLM inference at target concurrency, checkpoint write and restore cycles, mixed read/write under contention.</li>
+<li>Metrics to collect: p50/p95/p99 latency, throughput (ops/sec, GB/s), CPU utilization, GPU stall reasons, NIC/firmware counters, retransmits and packet drops.</li>
+</ul>
+<h2>Tuning knobs and trade-offs</h2>
+<ul>
+<li>RDMA (RoCEv2) vs NVMe/TCP: RDMA gives lower latency and CPU overhead but requires careful loss/priority flow control configuration. NVMe/TCP is easier to deploy but consumes more CPU and may increase latency.</li>
+<li>Cache size and eviction policy: larger KV caches reduce GPU stalls but increase cost. TTL-based vs LRU eviction affects hit-rates differently for LLMs.</li>
+<li>Queue depth and submission concurrency: deeper queues improve throughput but can worsen tail latency.</li>
+</ul>
+<h2>Comparison: transport trade-offs</h2>
+<table>
+<thead>
+<tr>
+<th>Transport</th>
+<th align="right">Latency</th>
+<th align="right">CPU overhead</th>
+<th>Deploy complexity</th>
+<th>Best for</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>RoCEv2 (RDMA)</td>
+<td align="right">Low</td>
+<td align="right">Low</td>
+<td>High (PFC, DCQCN)</td>
+<td>Latency-sensitive inference</td>
+</tr>
+<tr>
+<td>NVMe/TCP</td>
+<td align="right">Moderate</td>
+<td align="right">Higher</td>
+<td>Low–medium</td>
+<td>Easier deployments, heterogeneous environments</td>
+</tr>
+<tr>
+<td>FC-NVMe</td>
+<td align="right">Low</td>
+<td align="right">Offloaded</td>
+<td>High (SAN)</td>
+<td>Enterprise SANs with NVMe investments</td>
+</tr>
+</tbody></table>
+<h2>Security, operations, and SLOs</h2>
+<ul>
+<li>Role-based namespace control, encryption in transit, and tenant isolation are critical for multi-tenant AI clusters.</li>
+<li>Define SLOs for TTFT, p95/p99 latency, and throughput for each service tier; implement automated gating to prevent rollouts that violate SLOs.</li>
+</ul>
+<h2>Key takeaways</h2>
+<ul>
+<li>Start with clear workload characterization (KV lookups vs checkpointing) and define SLOs before choosing fabric and cache architecture.</li>
+<li>Validate driver/firmware compatibility and direct DMA paths between GPU and fabric early — this is a common integration blocker.</li>
+<li>Use gate-based acceptance tests: functional, performance, failure/recovery and security tests before production rollout.</li>
+<li>Instrument both storage and GPU stacks; correlate NVMe-oF metrics with GPU stalls to identify root cause.</li>
+<li>Expect iterative tuning: fabric (loss management), queue depths, and cache policies usually need three to five tuning cycles for stable SLOs.</li>
+</ul>
+<h2>Resources</h2>
+<ul>
+<li>Vendor test reports and signed benchmarks can be useful starting points; for example, Mingxin Technology’s FX series all-flash NVMe-oF acceleration platforms published signed benchmarks on a 480B model reporting LLM inference throughput improvements and TTFT reductions in vendor tests—review such reports and reproducibility notes as part of gate acceptance. See vendor test materials for methods and reproducibility: <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a></li>
+</ul>
+<p>This checklist is a framework to create reproducible acceptance gates. Tailor the numerical SLOs and test values to your models, concurrency targets, and operational risk appetite.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
