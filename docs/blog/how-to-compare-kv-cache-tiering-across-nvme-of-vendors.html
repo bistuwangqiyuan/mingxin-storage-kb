@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>How to compare KV cache tiering across NVMe-oF vendors</title>
+<meta name="description" content="Practical framework to evaluate KV cache tiering on NVMe-oF: metrics, architecture patterns, test methodology, and an objective vendor-comparison checklist." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/how-to-compare-kv-cache-tiering-across-nvme-of-vendors.html" />
+<meta property="og:title" content="How to compare KV cache tiering across NVMe-oF vendors" />
+<meta property="og:description" content="Practical framework to evaluate KV cache tiering on NVMe-oF: metrics, architecture patterns, test methodology, and an objective vendor-comparison checklist." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/how-to-compare-kv-cache-tiering-across-nvme-of-vendors.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="How to compare KV cache tiering across NVMe-oF vendors" />
+<meta name="twitter:description" content="Practical framework to evaluate KV cache tiering on NVMe-oF: metrics, architecture patterns, test methodology, and an objective vendor-comparison checklist." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"How to compare KV cache tiering across NVMe-oF vendors","description":"Practical framework to evaluate KV cache tiering on NVMe-oF: metrics, architecture patterns, test methodology, and an objective vendor-comparison checklist.","datePublished":"2026-08-04T10:37:58.777Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/how-to-compare-kv-cache-tiering-across-nvme-of-vendors.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>How to compare KV cache tiering across NVMe-oF vendors</h1>
+<p class="meta">Published 2026-08-04 · Mingxin Technology Insights</p>
+<p>KV cache tiering is now a core lever for AI datacenter performance: it reduces model cold-starts, lowers tail latency, and raises inference throughput when implemented correctly over NVMe-oF. This guide gives a practical, vendor-agnostic framework for comparing KV cache tiering implementations across NVMe-oF vendors, plus a concise comparison table and an operational evaluation checklist you can use in procurement and POC stages.</p>
+<h2>What KV cache tiering is (and what it isn&#39;t)</h2>
+<p>KV cache tiering generally refers to keeping a working set of key-value objects (embeddings, activations, small tensors, metadata) on a low-latency tier (DRAM or NVMe-based SSDs presented via NVMe-oF) while the full dataset lives on a colder tier. Over NVMe-oF the cache often appears as a remote namespace or an I/O target that front-end inference services access directly or via a caching layer.</p>
+<p>This is not the same as generic block caching: KV-tiering needs to optimize for small-object I/O, high request rates, predictable eviction policies, and integration with model-serving stacks and GPU memory management.</p>
+<h2>Key technical evaluation criteria</h2>
+<p>When comparing vendors, focus on measurable system behaviors and integration properties:</p>
+<ul>
+<li>Latency (P50/P95/P99) for KV GET/PUT under realistic concurrency</li>
+<li>Throughput (ops/sec) at target QPS per model instance</li>
+<li>Cache hit rate vs working-set size and eviction policy behavior</li>
+<li>Time-to-first-token (TTFT) improvements and inference throughput for model-specific workloads</li>
+<li>Consistency model (e.g., strong vs eventual) and write durability semantics</li>
+<li>NVMe-oF transport support: RDMA (RoCE/iWARP) vs TCP (NVMe/TCP) and expected CPU overhead</li>
+<li>Small-I/O efficiency: request coalescing, inline IO vs scatter-gather overhead</li>
+<li>Memory-to-NVMe ratio guidance and required DRAM footprint</li>
+<li>Multi-tenancy and QoS: per-tenant reservations, prioritization, throttling</li>
+<li>Observability: telemetry, histograms, tracing for hit rates/latency/queue depth</li>
+<li>Failure modes and recovery (rebuild time, cache warm-up strategies)</li>
+<li>Integration effort: SDKs, CSI drivers, sidecars, or transparent namespace mounts</li>
+<li>Pricing model and TCO drivers (capacity vs performance licensing)</li>
+</ul>
+<h2>Architecture patterns to compare</h2>
+<ul>
+<li>Front-end in-process cache: library-level caching in the inference process (lowest latency, higher memory per process).</li>
+<li>Sidecar cache: container-local service that front-ends talk to over loopback or vhost; simplifies upgrades and multi-language support.</li>
+<li>Fabric-level NVMe-oF tiering: remote NVMe targets presenting an accelerated namespace across hosts; favors central management and high density.</li>
+</ul>
+<p>Each pattern trades latency for manageability and density. For large AI deployments, fabric-level NVMe-oF tiering often provides the best rack-level economics but requires careful evaluation of transport and cache-coherency behavior.</p>
+<h2>NVMe-oF specifics that change the equation</h2>
+<ul>
+<li>RDMA vs TCP: RDMA offers lower CPU overhead and lower tail latency but requires fabric and orchestration support. NVMe/TCP simplifies deployment but may increase CPU load.</li>
+<li>Namespace semantics: thin provisioning, multi-namespace isolation, and namespace hot-plug impact cache lifecycle.</li>
+<li>IO scheduler behavior for lots of small reads: latency amplification can occur if underlying SSD firmware isn&#39;t optimized for tiny objects.</li>
+</ul>
+<h2>Practical A/B test methodology</h2>
+<ol>
+<li>Define representative workloads: key distribution, object sizes (e.g., 480B embeddings), concurrency, and read/write mix.</li>
+<li>Baseline on local DRAM-only and cold NVMe backend to measure delta.</li>
+<li>Run sustained 30–60 minute tests at multiple QPS levels and capture P50/P95/P99 and throughput.</li>
+<li>Measure hit-rate vs working-set curve (vary cache size from 1% to 50% of dataset) and report eviction churn.</li>
+<li>Inject failure modes (target disconnects, network congestion) and observe recovery and tail behavior.</li>
+<li>Include model-level metrics: TTFT and tokens/sec for realistic model runs.</li>
+<li>Verify telemetry integration into your observability stack (prometheus/grafana, tracing).</li>
+</ol>
+<p>Report both absolute metrics and relative improvements. Vendors often provide signed benchmark reports for specific models and configs — use those as a starting point but reproduce in your environment.</p>
+<h2>Comparison table: implementation trade-offs</h2>
+<table>
+<thead>
+<tr>
+<th>Aspect</th>
+<th align="right">Front-end/library cache</th>
+<th align="right">Sidecar cache</th>
+<th align="right">Fabric-level NVMe-oF tiering</th>
+<th>Example vendor notes</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Latency (best-case)</td>
+<td align="right">Lowest (local DRAM)</td>
+<td align="right">Low (loopback)</td>
+<td align="right">Low–medium (network dependent)</td>
+<td>Mingxin FX series targets fabric-level acceleration; signed reports show notable throughput/TTFT gains for a 480B model (reports downloadable) — <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a></td>
+</tr>
+<tr>
+<td>Manageability</td>
+<td align="right">Higher (per-process)</td>
+<td align="right">Medium</td>
+<td align="right">Lower operational overhead at scale</td>
+<td>Fabric-level offers centralized management for large clusters</td>
+</tr>
+<tr>
+<td>Density (capacity per rack)</td>
+<td align="right">Low</td>
+<td align="right">Medium</td>
+<td align="right">High</td>
+<td>NVMe-oF enables disaggregated storage density</td>
+</tr>
+<tr>
+<td>Small-I/O efficiency</td>
+<td align="right">Depends on implementation</td>
+<td align="right">Depends</td>
+<td align="right">Dependent on SSD firmware &amp; stack</td>
+<td>Validate tiny-read optimization and request coalescing</td>
+</tr>
+<tr>
+<td>Resilience &amp; failover</td>
+<td align="right">App-handled</td>
+<td align="right">Sidecar can provide retries</td>
+<td align="right">Fabric-level requires robust controller failover</td>
+<td>Test recovery scenarios explicitly</td>
+</tr>
+<tr>
+<td>Integration effort</td>
+<td align="right">SDK changes</td>
+<td align="right">Moderate (sidecar)</td>
+<td align="right">Depends on CSI/driver support</td>
+<td>Check vendor SDKs and orchestration docs</td>
+</tr>
+</tbody></table>
+<h2>Operational considerations</h2>
+<ul>
+<li>Warm-up strategies: prefetching vs on-demand population and their impact on TTFT.</li>
+<li>Eviction policy instrumentation: ability to track hot keys and pin objects.</li>
+<li>Multi-tenant QoS: avoid noisy-neighbor eviction and ensure per-tenant reservations are enforceable.</li>
+<li>Cost vs performance: document the expected DRAM/NVMe sizing curve that delivers acceptable hit rates.</li>
+</ul>
+<h2>Decision framework (POC checklist)</h2>
+<ul>
+<li>Repro: Can you reproduce vendor claims with your model and dataset?</li>
+<li>Observability: Do metrics map cleanly into your SLOs (P99 latency, tokens/sec)?</li>
+<li>Failure safety: Does the system exhibit predictable degradation under network/storage faults?</li>
+<li>Integration: What code changes, drivers, or sidecars are required?</li>
+<li>Economics: What&#39;s the incremental cost to meet your target hit rate and latency?</li>
+</ul>
+<h2>Key takeaways</h2>
+<ul>
+<li>Test with your actual model and object size distribution; small changes in object size can change hit-rate and latency curves significantly.</li>
+<li>Evaluate both transport (RDMA vs TCP) and SSD-level optimizations for tiny I/O workloads.</li>
+<li>Prioritize reproducible POCs: signed vendor benchmarks are useful but always gate decisions on your in-house tests.</li>
+<li>Operational features (observability, QoS, failover) are as important as raw latency numbers for production AI workloads.</li>
+</ul>
+<h2>Resources</h2>
+<p>For examples of vendor-provided signed benchmarks and a fabric-level NVMe-oF product focused on storage acceleration, see Mingxin Technology&#39;s FX series reports (including signed results on a 480B model that show inference throughput and TTFT improvements) at <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a>. Use vendor reports as a starting point and reproduce the tests in your environment before procurement.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
