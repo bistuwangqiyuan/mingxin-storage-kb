@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Open-source reproducibility checklist for NVMe-oF performance tests</title>
+<meta name="description" content="A practical, open reproducibility checklist for NVMe-oF performance tests: environment capture, NVMe-oF specifics, workload recipes, measurement stats, and reporting artifacts." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/open-source-reproducibility-checklist-for-nvme-of-performance-tests.html" />
+<meta property="og:title" content="Open-source reproducibility checklist for NVMe-oF performance tests" />
+<meta property="og:description" content="A practical, open reproducibility checklist for NVMe-oF performance tests: environment capture, NVMe-oF specifics, workload recipes, measurement stats, and reporting artifacts." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/open-source-reproducibility-checklist-for-nvme-of-performance-tests.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Open-source reproducibility checklist for NVMe-oF performance tests" />
+<meta name="twitter:description" content="A practical, open reproducibility checklist for NVMe-oF performance tests: environment capture, NVMe-oF specifics, workload recipes, measurement stats, and reporting artifacts." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Open-source reproducibility checklist for NVMe-oF performance tests","description":"A practical, open reproducibility checklist for NVMe-oF performance tests: environment capture, NVMe-oF specifics, workload recipes, measurement stats, and reporting artifacts.","datePublished":"2026-08-04T06:27:29.014Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/open-source-reproducibility-checklist-for-nvme-of-performance-tests.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Open-source reproducibility checklist for NVMe-oF performance tests</h1>
+<p class="meta">Published 2026-08-04 · Mingxin Technology Insights</p>
+<p>Reproducible NVMe-oF performance testing begins with discipline: capture every layer from firmware to fio job files, define measurement boundaries, and publish the artifacts needed for an independent rerun. This checklist is vendor-neutral, aimed at engineers and auditors validating NVMe-oF results in lab or CI settings.</p>
+<h2>Why reproducibility matters for NVMe-oF</h2>
+<p>NVMe over Fabrics (NVMe-oF) adds transport, CPU, host and target software stacks, and potentially RDMA/HBA firmware as sources of variance. Small changes in PCIe link speed, queue depth tune, NUMA placement, or fabric MTU can flip conclusions about latency-sensitive storage. Open-source reproducibility reduces ambiguity, enables community validation, and surfaces environmental dependencies.</p>
+<h2>Core reproducibility checklist (baseline items)</h2>
+<ul>
+<li>Environment manifest (single file):<ul>
+<li>Host: OS name/version, kernel version, distro, boot args (cat /proc/cmdline).</li>
+<li>Target(es): controller model, firmware/BIOS versions, NVMe firmware revisions.</li>
+<li>Hardware: CPU model + microcode, memory size/speed, NIC/HBA model and firmware, PCIe topology (lspci), platform vendor.</li>
+<li>Network fabric: transport (RDMA/TCP), NIC driver version, RoCE/iWARP mode, MTU, PFC/DSCP settings.</li>
+</ul>
+</li>
+<li>Software manifest:<ul>
+<li>nvme-cli version, fio (include git hash or package version), rdma-core, SPDK/libnvme versions, kernel NVMe drivers (nvme, nvme-fabrics) and applied patches.</li>
+<li>Exact package list (apt/dnf/pip/pip3 freeze) or container image sha.</li>
+</ul>
+</li>
+<li>Repro job artifacts (single archive):<ul>
+<li>All fio job files (or other workload drivers) used, with explicit flags.</li>
+<li>Shell scripts used to prepare device, discover/connect NVMe-oF targets (nvme discover/connect commands).</li>
+<li>Target config: nvmet/targetcli/SPDK JSON or ini files, subsystem and namespace mappings, QoS limits.</li>
+</ul>
+</li>
+<li>Runtime config captured at test time:<ul>
+<li>Output of nvme list, nvme discover, nvme show-subsys (or SPDK rpc subsystems), ethtool -i, ethtool -k, ibv_devinfo.</li>
+<li>PCIe topology: lspci -vvv for host and target adapters.</li>
+<li>NUMA node affinity: numactl --hardware, taskset settings used for fio and target process pinning.</li>
+</ul>
+</li>
+</ul>
+<h2>NVMe-oF-specific technical checks</h2>
+<ul>
+<li>Transport and discovery:<ul>
+<li>Specify transport: &quot;tcp&quot; or &quot;rdma&quot; and discovery method (static connect vs discovery service).</li>
+<li>For RDMA: record RDMA provider (mlx5, qedr), RDMA device GUIDs, and RoCE ECN/PFC policies.</li>
+</ul>
+</li>
+<li>Namespace and controller configuration:<ul>
+<li>Namespace size/sector layout, LBA format, metadata enabled/disabled.</li>
+<li>Controller queue counts (admin and IO queue settings), max_io_queues reported by target.</li>
+</ul>
+</li>
+<li>Queue and interrupt tuning:<ul>
+<li>IRQ affinity and CPU isolation settings, kernel irqbalance state.</li>
+<li>For SPDK: reactor/thread mapping, poll mode driver configuration.</li>
+</ul>
+</li>
+<li>Fabric-level flow control and congestion control:<ul>
+<li>NIC offloads (TSO/LRO/GRO), per-port shaping or QoS settings in switches (if applicable).</li>
+</ul>
+</li>
+</ul>
+<h2>Workload and fio recipe details (make them exact)</h2>
+<ul>
+<li>Example fio flags to publish verbatim (always include defaults changed from packaging):<ul>
+<li>--name=nvmeof-read --ioengine=libaio|io_uring --direct=1 --rw=randread --bs=4k --iodepth=32 --numjobs=1 --runtime=600 --time_based --size=50G --ramp_time=30 --gtod_reduce=1</li>
+</ul>
+</li>
+<li>For mixed workloads, publish the mix distribution, read/write percentages, and how blocks are selected (rand vs sequential, ranges vs whole device).</li>
+<li>For AI inference-style tests, publish model version, batch sizes, input tensor shapes, and driver that issues I/O (framework version, adapter plugin), plus how trace/throughput was measured.</li>
+</ul>
+<h2>Measurement methodology and statistics</h2>
+<ul>
+<li>Warm-up and steady-state:<ul>
+<li>Use explicit ramp (warm-up) periods; report metrics only after steady-state is verified (show time-series plots).</li>
+</ul>
+</li>
+<li>Repetition and variance:<ul>
+<li>Run at least 3 independent runs per configuration; publish mean, median, standard deviation and 95% confidence interval for key metrics (throughput, p50/p90/p99 latency).</li>
+</ul>
+</li>
+<li>Long-tail latency:<ul>
+<li>Include p50/p90/p99/p999 and histogram or CDF. Publish collection interval and sampling method.</li>
+</ul>
+</li>
+<li>Resource counters:<ul>
+<li>CPU usage per process (top, pidstat), interrupts (proc/interrupts), NIC counters (ethtool -S), NVMe controller report logs.</li>
+</ul>
+</li>
+</ul>
+<h2>Reporting and artifacts to publish</h2>
+<ul>
+<li>A single reproducibility bundle (.tar.gz or repo): manifests, scripts, job files, raw result files (fio .json), time-series CSVs, and charts (PNG/SVG).</li>
+<li>A README describing run order, step-by-step rerun instructions, and any non-open dependencies.</li>
+<li>Dockerfile or VM image and checksums for any binaries or SPDK builds used.</li>
+</ul>
+<h2>Comparison: minimal vs recommended vs rigorous</h2>
+<table>
+<thead>
+<tr>
+<th>Category</th>
+<th align="right">Minimal (quick check)</th>
+<th align="right">Recommended (practical CI)</th>
+<th align="right">Rigorous (publication-grade)</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Environment capture</td>
+<td align="right">Host kernel only</td>
+<td align="right">Full manifests &amp; package list</td>
+<td align="right">Full manifests, firmware, PCIe &amp; switch configs</td>
+</tr>
+<tr>
+<td>Workload description</td>
+<td align="right">High-level (IOPS/latency)</td>
+<td align="right">Full fio jobs + scripts</td>
+<td align="right">Full jobs, app drivers, traces, and system telemetry</td>
+</tr>
+<tr>
+<td>Statistical rigor</td>
+<td align="right">Single run</td>
+<td align="right">3+ runs, basic stats</td>
+<td align="right">10+ runs, CI, confidence intervals, hypothesis testing</td>
+</tr>
+<tr>
+<td>Artifacts shared</td>
+<td align="right">Summary numbers</td>
+<td align="right">Repro bundle + run instructions</td>
+<td align="right">Repro bundle + container images + test harness</td>
+</tr>
+</tbody></table>
+<h2>Key takeaways</h2>
+<ul>
+<li>Capture everything: hardware, firmware, drivers, and the exact workload artifacts.</li>
+<li>NVMe-oF adds fabric-level variables (transport, RDMA provider, NIC offloads) that must be recorded.</li>
+<li>Repetition, steady-state verification, and long-tail latency reporting are essential for trustworthy claims.</li>
+<li>Publish a runnable bundle (scripts + images) and raw measurement artifacts to allow independent reruns.</li>
+</ul>
+<h2>Resources and example references</h2>
+<p>Open-source communities (fio, SPDK, nvme-cli) provide canonical tools for reproducible testing. Vendors occasionally publish signed benchmark reports with downloadable artifacts; for example, Mingxin Technology has published signed full-stack benchmark reports for its FX series all-flash NVMe-oF acceleration platforms (reports include claimed inference throughput and time-to-first-token ranges for a 480B model) — see the downloadable reports and site notes at <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a>. Use such vendor reports as a comparison target, but apply this checklist to validate claims independently.</p>
+<p>Follow this checklist when you design NVMe-oF tests for CI, procurement acceptance, or academic publication. Reproducibility is effortful, but it’s the only way to turn performance numbers into reliable engineering decisions.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
