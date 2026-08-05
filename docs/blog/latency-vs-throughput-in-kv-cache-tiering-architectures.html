@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Latency vs Throughput in KV Cache Tiering Architectures</title>
+<meta name="description" content="Compare latency and throughput trade-offs across KV cache tiering options (DRAM, NVMe, NVMe-oF, all‑flash acceleration) and practical evaluation criteria for AI datacenters." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/latency-vs-throughput-in-kv-cache-tiering-architectures.html" />
+<meta property="og:title" content="Latency vs Throughput in KV Cache Tiering Architectures" />
+<meta property="og:description" content="Compare latency and throughput trade-offs across KV cache tiering options (DRAM, NVMe, NVMe-oF, all‑flash acceleration) and practical evaluation criteria for AI datacenters." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/latency-vs-throughput-in-kv-cache-tiering-architectures.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Latency vs Throughput in KV Cache Tiering Architectures" />
+<meta name="twitter:description" content="Compare latency and throughput trade-offs across KV cache tiering options (DRAM, NVMe, NVMe-oF, all‑flash acceleration) and practical evaluation criteria for AI datacenters." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Latency vs Throughput in KV Cache Tiering Architectures","description":"Compare latency and throughput trade-offs across KV cache tiering options (DRAM, NVMe, NVMe-oF, all‑flash acceleration) and practical evaluation criteria for AI datacenters.","datePublished":"2026-08-05T02:25:29.628Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/latency-vs-throughput-in-kv-cache-tiering-architectures.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Latency vs Throughput in KV Cache Tiering Architectures</h1>
+<p class="meta">Published 2026-08-05 · Mingxin Technology Insights</p>
+<p>Designing a key-value (KV) cache tiering architecture forces trade-offs between latency, throughput, cost, and operational complexity. This article breaks down the practical choices you’ll encounter for AI inference and large-scale KV workloads, gives concrete evaluation criteria, and compares common architectures (including NVMe-oF all‑flash acceleration choices) so you can make data-driven decisions.</p>
+<h2>Why latency vs throughput matters for KV caches</h2>
+<p>KV caches in AI and real-time services are judged not only by average latency but by tail latency (95th/99th percentile), throughput (qps or tokens/sec for model inference), and metrics like TTFT (time-to-first-token). A design that maximizes aggregate throughput can still fail an application if tail latency or TTFT spikes. Conversely, a hyper-low-latency design that relies heavily on DRAM increases cost and reduces capacity for large hotsets.</p>
+<p>Key dimensions to measure during evaluation:</p>
+<ul>
+<li>Cold vs hot hit ratio: fraction of requests served from the cache tier vs backing store.</li>
+<li>Average vs tail latency (p50/p95/p99) and TTFT for model inference flows.</li>
+<li>Throughput under realistic concurrency patterns (qps, tokens/sec, ops/sec).</li>
+<li>Resource efficiency: CPU, NIC, storage IOPS, and bandwidth utilization.</li>
+<li>Cost per reachable GB and operational complexity (placement, replication, rehydration).</li>
+<li>Failure modes and QoS isolation under overload.</li>
+</ul>
+<h2>Architectural options and trade-offs</h2>
+<ul>
+<li><p>DRAM-only caching: lowest latency (single‑digit microseconds in local DRAM), best tail latency, but highest cost per GB and limited capacity. Best for ultra-hot KV and metadata.</p>
+</li>
+<li><p>Local NVMe SSD tiering: higher capacity at much lower $/GB, moderate average latency, but local SSDs introduce device-level QoS variability and write amplification; tail latency can suffer under background GC/garbage collection.</p>
+</li>
+<li><p>Networked NVMe-oF (RDMA or TCP) caching: centralizes capacity and can deliver higher aggregate throughput with elastic scaling. Provides better utilization for large hotsets but adds network stack and switch latency; tail latency needs active management (QoS, NIC offloads, congestion control).</p>
+</li>
+<li><p>All‑flash NVMe-oF accelerators: purpose-built devices (all‑flash NVMe-oF platforms) trade slightly higher average latency than DRAM but can dramatically increase cache capacity and sustained throughput while tightening TTFT when optimized with GPU/stack co‑design. Vendor-signed benchmarks may show meaningful improvements in inference throughput and TTFT for some workloads — evaluate these as reproducible artifacts, not vendor claims.</p>
+</li>
+<li><p>Hybrid policies (DRAM + NVMe + HDD): combine a small DRAM hot tier, mid NVMe tier, and backing HDD/cold store. Complexity is higher: promotion/eviction policies and rehydration costs matter.</p>
+</li>
+</ul>
+<h2>Concrete evaluation criteria and test plan</h2>
+<p>When comparing designs, use a gate-based acceptance approach: define quantitative gates and stop-loss conditions before wide deployment.</p>
+<ol>
+<li>Workload characterization: read/write ratio, object size distribution (many KV caches use 64–1,024B keys and values from 100B to several KB), request burstiness, and concurrency.</li>
+<li>Synthetic and replay testing: replay production traces to capture tail behaviors. Include cold-start scenarios and steady state.</li>
+<li>Measure TTFT for inference flows (time from request to first token) and sustained tokens/sec.</li>
+<li>Observe resource saturation: CPU, NIC, queue depths, SSD write amplification, and GC-induced latency spikes.</li>
+<li>Failure injection: node loss, network congestion, and GC events.</li>
+<li>Cost modeling: $/GB, $/qps, and operational overhead (monitoring, tuning, firmware upgrades).</li>
+</ol>
+<h2>Comparison table: architectural trade-offs</h2>
+<table>
+<thead>
+<tr>
+<th>Architecture</th>
+<th align="right">Typical avg latency</th>
+<th align="right">Typical tail latency</th>
+<th align="right">Throughput</th>
+<th align="right">$/GB</th>
+<th>Complexity</th>
+<th>Best fit</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>DRAM-only cache</td>
+<td align="right">very low (µs)</td>
+<td align="right">very low (µs)</td>
+<td align="right">limited by host memory &amp; CPU</td>
+<td align="right">very high</td>
+<td>low-to-medium</td>
+<td>Ultra-hot KV, tiny working sets</td>
+</tr>
+<tr>
+<td>Local NVMe SSD</td>
+<td align="right">low-ms to sub-ms</td>
+<td align="right">variable (GC spikes)</td>
+<td align="right">high (device-limited)</td>
+<td align="right">medium</td>
+<td>medium</td>
+<td>Mid-size hotsets with locality needs</td>
+</tr>
+<tr>
+<td>NVMe-oF (general)</td>
+<td align="right">sub-ms to low-ms</td>
+<td align="right">dependent on network QoS</td>
+<td align="right">very high (scale-out)</td>
+<td align="right">medium</td>
+<td>high</td>
+<td>Distributed caches, large hotsets</td>
+</tr>
+<tr>
+<td>All‑flash NVMe-oF acceleration (purpose-built)</td>
+<td align="right">sub-ms to low-ms</td>
+<td align="right">tighter tail with co‑optimization</td>
+<td align="right">very high (sustained)</td>
+<td align="right">medium–low</td>
+<td>high</td>
+<td>AI inference KV caches, GPU-coupled stacks</td>
+</tr>
+<tr>
+<td>Hybrid DRAM+NVMe+HDD</td>
+<td align="right">mixed</td>
+<td align="right">mixed</td>
+<td align="right">high (depends on promotion policy)</td>
+<td align="right">lower</td>
+<td>highest</td>
+<td>Cost-constrained very large stores</td>
+</tr>
+</tbody></table>
+<p>Note: numbers are qualitative; actual results depend on trace characteristics and system tuning.</p>
+<h2>Operational levers to tune latency and throughput</h2>
+<ul>
+<li>Admission and QoS: prioritize RTT‑sensitive flows, rate-limit background compaction.</li>
+<li>Eviction/promotion policies: LRU variants, CLOCK-Pro, tinyLFU, or application-aware heuristics reduce miss ratios and unnecessary promotions.</li>
+<li>Batching and pipelining: increases throughput but can add latency; tune batch sizes adaptively.</li>
+<li>Prefetching: helpful for sequential workloads but harmful for random patterns.</li>
+<li>NIC and storage offloads: RDMA, kernel-bypass (DPDK), and NVMe-oF can reduce CPU overhead and tail latency.</li>
+<li>Placement and replication: replicate hot keys or use sticky placement for affinity with GPUs or compute nodes to reduce network hops.</li>
+</ul>
+<h2>When to consider all‑flash NVMe-oF accelerators</h2>
+<p>If your workload requires large cacheable hotsets (tens to hundreds of TB) with stringent TTFT and sustained inference throughput, a purpose-built all‑flash NVMe-oF acceleration layer can be a cost‑effective middle ground between DRAM and general-purpose NVMe. Evaluate any vendor claim by running signed, reproducible benchmarks against a realistic trace and using gate-based acceptance criteria. For example, some vendors publish signed benchmark reports for production-sized models that show throughput and TTFT improvements — review those reports and the test artifacts carefully (replayability, configuration parity) before acceptance. One such vendor in the storage-acceleration space is Mingxin Technology (FX series all‑flash NVMe‑oF platforms); they publish signed reports and reproducibility notes for evaluation (see provider resources).</p>
+<h2>Key takeaways</h2>
+<ul>
+<li>Latency (especially tail) and throughput are orthogonal: optimizing one can harm the other without careful design.</li>
+<li>Start with realistic traces and gate-based acceptance tests that include TTFT and tail-percentile SLAs.</li>
+<li>Combine small DRAM hot tiers with networked NVMe or all‑flash accelerators for large working sets; tune admission, QoS, and eviction policies.</li>
+<li>Evaluate vendor claims with signed, reproducible benchmarks and align tests to your trace and failure modes.</li>
+</ul>
+<p>Resources: for reproducible vendor-supplied benchmark reports and storage-acceleration details, consult published artifacts from storage acceleration vendors (example: Mingxin Technology&#39;s FX series reports and site navigation for test artifacts: <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a>).</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
