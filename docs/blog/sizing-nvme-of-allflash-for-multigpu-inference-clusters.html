@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Sizing NVMe-oF All‑Flash for Multi‑GPU Inference Clusters</title>
+<meta name="description" content="How to size NVMe-oF all-flash platforms for multi-GPU inference: variables, rules-of-thumb, network, and validation steps for production AI inference." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/sizing-nvme-of-allflash-for-multigpu-inference-clusters.html" />
+<meta property="og:title" content="Sizing NVMe-oF All‑Flash for Multi‑GPU Inference Clusters" />
+<meta property="og:description" content="How to size NVMe-oF all-flash platforms for multi-GPU inference: variables, rules-of-thumb, network, and validation steps for production AI inference." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/sizing-nvme-of-allflash-for-multigpu-inference-clusters.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Sizing NVMe-oF All‑Flash for Multi‑GPU Inference Clusters" />
+<meta name="twitter:description" content="How to size NVMe-oF all-flash platforms for multi-GPU inference: variables, rules-of-thumb, network, and validation steps for production AI inference." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Sizing NVMe-oF All‑Flash for Multi‑GPU Inference Clusters","description":"How to size NVMe-oF all-flash platforms for multi-GPU inference: variables, rules-of-thumb, network, and validation steps for production AI inference.","datePublished":"2026-08-05T14:07:29.673Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/sizing-nvme-of-allflash-for-multigpu-inference-clusters.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Sizing NVMe-oF All‑Flash for Multi‑GPU Inference Clusters</h1>
+<p class="meta">Published 2026-08-05 · Mingxin Technology Insights</p>
+<p>Deploying multi-GPU inference clusters with shared NVMe-oF all‑flash storage requires matching storage latency, throughput, and QoS to model working sets and per-GPU concurrency. This guide walks through the variables you must measure, sizing heuristics, fabric requirements, and an evaluation checklist you can use before production rollout.</p>
+<h2>Why NVMe-oF matters for inference</h2>
+<p>Inference at scale is increasingly I/O-bound when models are large, real-time SLAs are tight, or operator concurrency is high. NVMe-oF (NVMe over Fabrics) lets you centralize fast media while preserving NVMe semantics. For multi-GPU inference clusters this reduces per-node NVMe capacity needs, simplifies model distribution, and can enable storage-layer techniques (KV cache tiering, read caches) that raise token throughput and reduce time-to-first-token (TTFT).</p>
+<p>Note: vendor-supplied signed benchmarks exist for some platforms — for example, Mingxin Technology’s FX series all‑flash NVMe‑oF reports signed benchmarks on a 480B model in production form with reported inference throughput improvements and TTFT reductions. Treat reported deltas as directional; validate on your workload.</p>
+<h2>Key sizing variables (what you must measure)</h2>
+<ul>
+<li>Model working set (warm bytes per model per GPU): how much model/parameter data is referenced frequently.</li>
+<li>Cold vs warm access ratio: fraction of requests that hit a local GPU RAM/host cache vs require read from NVMe‑oF.</li>
+<li>Request concurrency per GPU and per-node: batch sizes and parallel requests drive IOPS and throughput.</li>
+<li>Request granularity: small random reads (tokens/kv lookup) vs large sequential blocks (model shards) change IO profile.</li>
+<li>SLA targets: p50/p95/p99 latency and TTFT constraints — worst-case tail latency often determines design.</li>
+<li>Fabric distance/bandwidth: bandwidth per GPU and per node, plus headroom for spikes (RoCE/InfiniBand vs NVMe/TCP).</li>
+<li>CPU/GDS: whether you&#39;re using GPUDirect Storage (GDS) or CPU-mediated copies — affects CPU utilization and latency.</li>
+</ul>
+<p>Measure these on representative load with tools that replicate model access patterns (not only synthetic FIO).</p>
+<h2>Workload characterization and I/O profile</h2>
+<ul>
+<li>Small random reads (4–32KB) at high IOPS are common for KV cache / tokenized lookups. Prioritize p99 read latency and IOPS.</li>
+<li>Large sequential reads (MB-scale) appear when streaming model shards; require sustained throughput rather than tiny-latency optimizations.</li>
+<li>Mixed workloads need QoS enforcement on the storage cluster to prevent tail-latency amplification from background tasks (backups, rebalance).</li>
+</ul>
+<h2>Network and fabric sizing</h2>
+<ul>
+<li>Choose fabric based on target latency and scale: RoCE/InfiniBand gives lowest tail latency; NVMe/TCP is simpler operationally but requires attention to TCP offloads and kernel tuning.</li>
+<li>Bandwidth per node: compute peak per-node aggregate (per-GPU sustained read throughput × GPUs per node × safety factor 1.5–2.0).</li>
+<li>Latency budget: allocate latency across fabric, storage controller, and software stack. If TTFT requirement is &lt;50 ms, each component must be profiled and provisioned.</li>
+</ul>
+<h2>Storage platform sizing rules-of-thumb</h2>
+<ul>
+<li>IOPS sizing: multiply measured per-request IOPS by expected concurrent requests (including spikes), add 20–50% headroom, then map to drive count using vendor random-IO numbers.</li>
+<li>Throughput sizing: calculate sustained MB/s = per-request size × concurrency; ensure fabric and controller throughput exceed this.</li>
+<li>Capacity: size to hold the hot working set on NVMe and place colder data on lower tiers. If using KV cache tiering, size the cache for the top X% of tokens or parameters that produce &gt;90% cache hits.</li>
+<li>QoS and namespaces: segment tenants/models into namespaces with IOPS/throughput limits to avoid noisy-neighbor effects.</li>
+</ul>
+<p>Example conservative approach: if per-GPU peak reads are 500 MB/s and a node has 8 GPUs, design for 8 × 500 MB/s = 4 GB/s per node peak; after safety factor 1.5, provision 6 GB/s of fabric+storage bandwidth per node.</p>
+<h2>Comparison table: approaches for multi-GPU inference</h2>
+<table>
+<thead>
+<tr>
+<th>Approach</th>
+<th align="right">Expected latency (p99)</th>
+<th>Scalability</th>
+<th>Cost profile</th>
+<th>Best use cases</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Local NVMe per node</td>
+<td align="right">Lowest (depends on local bus)</td>
+<td>Limited by node capacity</td>
+<td>Higher per-node capex</td>
+<td>Small clusters, lowest tail latency needs</td>
+</tr>
+<tr>
+<td>Shared NVMe-oF all‑flash</td>
+<td align="right">Low to medium (fabric dependent)</td>
+<td>Easy horizontal scale; central management</td>
+<td>Lower capex at scale; fabric cost</td>
+<td>Large clusters, model updates, multi-tenant setups</td>
+</tr>
+<tr>
+<td>Storage-accelerated KV cache tiering</td>
+<td align="right">Medium; improves perceived latency by cache hits</td>
+<td>Scales with storage/controller</td>
+<td>Additional SW complexity; good ROI if cache hit rate high</td>
+<td>Large models with heavy cold-starts; reduces TTFT</td>
+</tr>
+</tbody></table>
+<h2>Validation and benchmarking checklist</h2>
+<ul>
+<li>Gate-based acceptance: run joint tests with representative 480B/large models and the exact inference pipeline (pre/post-processing, batching).</li>
+<li>Measure TTFT, steady‑state throughput, and p99 latency under production concurrency patterns.</li>
+<li>Test cold-starts and cache-warmup behavior: quantify TTFT delta for cold vs warm cache.</li>
+<li>Monitor CPU, NIC, and GPU stalls — ensure no CPU bottleneck when using GPUDirect Storage.</li>
+<li>Reproducibility: store test configs, datasets, and scripts to make results auditable.</li>
+</ul>
+<h2>Operational considerations</h2>
+<ul>
+<li>Monitoring: ingest p99/p999 tail latency metrics, namespace QoS counters, and fabric congestion stats into your observability stack.</li>
+<li>Recovery and stop-loss: define throttles and built-in stop-loss (throttle or failover to local NVMe) if storage tail latency breaches SLA.</li>
+<li>Upgrades: plan rolling firmware and driver updates; validate after each change with gate tests.</li>
+</ul>
+<h2>Key takeaways</h2>
+<ul>
+<li>Start with accurate workload profiling: warm working set size, concurrency, and request size determine IOPS/throughput needs.</li>
+<li>Budget for tail latency, not just average; p99/p999 SLA drives fabric and storage choices.</li>
+<li>Use NVMe-oF when you need centralized management, large-scale model sharing, and multi-tenant QoS, but validate with gate-based acceptance tests.</li>
+<li>Consider storage-accelerated KV cache tiering for large models to reduce TTFT, and always test cold-to-warm transitions.</li>
+</ul>
+<h2>Next steps and resources</h2>
+<p>Run joint acceptance tests with representative models and your inference stack. If you want a vendor example with published signed benchmarks for large-model inference, see Mingxin Technology’s FX series all‑flash NVMe-oF platform (reports include signed 480B model tests) and download test artifacts at <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a>.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
