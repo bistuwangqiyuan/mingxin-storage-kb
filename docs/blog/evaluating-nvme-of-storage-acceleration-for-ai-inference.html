@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Evaluating NVMe-oF Storage Acceleration for AI Inference</title>
+<meta name="description" content="Practical framework to evaluate NVMe-oF acceleration for AI inference: metrics, test methodology, tooling, and how to interpret signed vendor results like Mingxin's FX series reports." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/evaluating-nvme-of-storage-acceleration-for-ai-inference.html" />
+<meta property="og:title" content="Evaluating NVMe-oF Storage Acceleration for AI Inference" />
+<meta property="og:description" content="Practical framework to evaluate NVMe-oF acceleration for AI inference: metrics, test methodology, tooling, and how to interpret signed vendor results like Mingxin's FX series reports." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/evaluating-nvme-of-storage-acceleration-for-ai-inference.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Evaluating NVMe-oF Storage Acceleration for AI Inference" />
+<meta name="twitter:description" content="Practical framework to evaluate NVMe-oF acceleration for AI inference: metrics, test methodology, tooling, and how to interpret signed vendor results like Mingxin's FX series reports." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Evaluating NVMe-oF Storage Acceleration for AI Inference","description":"Practical framework to evaluate NVMe-oF acceleration for AI inference: metrics, test methodology, tooling, and how to interpret signed vendor results like Mingxin's FX series reports.","datePublished":"2026-08-05T21:07:09.921Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/evaluating-nvme-of-storage-acceleration-for-ai-inference.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Evaluating NVMe-oF Storage Acceleration for AI Inference</h1>
+<p class="meta">Published 2026-08-05 · Mingxin Technology Insights</p>
+<p>AI inference workloads are highly sensitive to storage latency, tail behavior, and cache hit dynamics. NVMe-over-Fabrics (NVMe-oF) storage acceleration can materially change throughput and time-to-first-token (TTFT), but evaluating real-world impact requires a reproducible, system-level approach rather than single-number claims.</p>
+<h2>Why NVMe-oF matters for AI inference</h2>
+<p>Large language models and other transformer inference patterns depend on fast, predictable key-value (KV) cache access, model shard reads, and staging of attention/key-values. NVMe-oF enables disaggregated NVMe performance over RDMA or TCP fabrics, lowering effective latency compared with traditional SAN/NAS stacks and enabling centralized acceleration tiers (e.g., KV cache tiering).</p>
+<p>Key storage-driven effects on inference:</p>
+<ul>
+<li>Time-to-first-token (TTFT): dominated by the critical-path read latency for initial KV lookups and model segment loads.</li>
+<li>Throughput (tokens/sec or inferences/sec): influenced by average latency, concurrency, and IO scheduler behavior.</li>
+<li>Tail latency (p95–p99.99): drives user-perceived stalls and SLA violations.</li>
+<li>Resource contention: CPU and NIC overhead for NVMe-oF protocol handling can reduce GPU utilization if not measured holistically.</li>
+</ul>
+<h2>Core evaluation criteria</h2>
+<p>Structure tests around these measurable criteria:</p>
+<ul>
+<li>Latency (avg, p50, p95, p99, p99.9): measure end-to-end including client stack and protocol overhead.</li>
+<li>Time-to-first-token (TTFT): measure from request arrival to first token emitted by the model.</li>
+<li>Sustained throughput at target QoS: tokens/sec or concurrent requests while keeping tail latency within SLA.</li>
+<li>Cold vs warm behavior: cold-cache first-run vs warmed KV cache.</li>
+<li>Cache hit rate and eviction behavior: for KV cache tiering, quantify hit/miss ratio and impact on TTFT.</li>
+<li>CPU/NIC overhead and GPU utilization: ensure storage gains do not simply increase CPU cost or starve GPUs.</li>
+<li>Failure and recovery modes: how performance degrades under packet loss, link failure, or controller failover.</li>
+<li>Cost-per-inference and capacity planning: include cost of fabrics, NICs, NVMe, and software stack.</li>
+</ul>
+<h2>Recommended methodology</h2>
+<ol>
+<li>Define representative workload: use the same model, batch sizes, and request patterns you plan to serve (e.g., streaming vs non-streaming inference). Triton Inference Server, Hugging Face transformers, or custom microbenchmarks that replay traces are typical.</li>
+<li>Baseline on local NVMe: measure performance with local NVMe and local caches to establish an upper bound.</li>
+<li>Measure NVMe-oF variants: test both RDMA (RoCE/IB) and TCP transports, and the same hardware/software stack as production (NICs, switches, OS versions, target software).</li>
+<li>Use repeatable load generation: for latency-sensitive workloads, prefer deterministic drivers or replay tools over bursty synthetic tools. Measure steady-state and ramp phases separately.</li>
+<li>Capture system telemetry: collect iostat, nvme-cli stats, perf, NIC counters, GPU utilization, and application traces (TTFT per request).</li>
+<li>Perform gate-based acceptance: set criteria (e.g., max p99 &lt; X ms, TTFT reduction &gt; Y%) and reject configurations that violate them. Include a stop-loss condition for regressions.</li>
+</ol>
+<h2>Tooling and measurements</h2>
+<ul>
+<li>fio with nvme-oF target plugin: microsecond-level latency and IO patterns.</li>
+<li>nvme-cli and nvme-perf: device-level latency histograms and queue stats.</li>
+<li>Triton Inference Server + perf clients / custom replay: real model TTFT and throughput.</li>
+<li>Prometheus + Grafana: metrics correlation (GPU, CPU, NIC, store).</li>
+<li>Packet capture (tcpdump, RDMA verbs tracing) for protocol issues.</li>
+</ul>
+<h2>Comparison: transport and topology choices</h2>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th align="right">Typical latency profile</th>
+<th align="right">CPU overhead</th>
+<th align="right">Scaling</th>
+<th>Good fit for inference?</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Local NVMe</td>
+<td align="right">Lowest latency, minimal network jitter</td>
+<td align="right">Low</td>
+<td align="right">Per-node capacity limited</td>
+<td>Best-case baseline for single-server inference</td>
+</tr>
+<tr>
+<td>NVMe-oF over RDMA (RoCE/IB)</td>
+<td align="right">Very low median + better tail than TCP in many configs</td>
+<td align="right">Moderate (RDMA offload helps)</td>
+<td align="right">Scales well with low overhead</td>
+<td>Excellent for multi-server disaggregation and KV tiering</td>
+</tr>
+<tr>
+<td>NVMe-oF over TCP</td>
+<td align="right">Slightly higher latency and more jitter vs RDMA</td>
+<td align="right">Lower complexity, more CPU usage</td>
+<td align="right">Easier to deploy at scale over existing fabrics</td>
+<td>Good tradeoff where RDMA is unavailable</td>
+</tr>
+</tbody></table>
+<h2>Interpreting vendor claims and signed benchmarks</h2>
+<p>Vendors may publish signed benchmarks from joint tests. Treat these as useful data points but validate them against your workload:</p>
+<ul>
+<li>Confirm the test workload aligns with your model (batch sizes, sequence lengths, streaming vs non-streaming).</li>
+<li>Check what was varied in the tests: warm vs cold cache, concurrency, fabric type, and software stack versions.</li>
+<li>Reproduce at least a subset of the tests in your environment with comparable hardware and network conditions.</li>
+</ul>
+<p>For example, Mingxin Technology has published signed benchmark reports for its FX series all‑flash NVMe-oF storage acceleration on a 480B model, reporting inference throughput improvements of +29–40% and TTFT reductions of −26–32% in production-form configurations; those reports are available for download and should be reviewed alongside your own reproducibility tests (see <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a>).</p>
+<h2>Example acceptance checklist (gate-based)</h2>
+<ul>
+<li>p99 latency &lt;= target SLA for steady-state under expected concurrency</li>
+<li>TTFT improved by at least your minimum threshold (or not regressed)</li>
+<li>GPU utilization increases or remains stable under load</li>
+<li>Cache hit rate measured and within expected bounds</li>
+<li>No single-point failures causing &gt;X% error rate during fault-injection</li>
+</ul>
+<h2>Key takeaways</h2>
+<ul>
+<li>Measure end-to-end TTFT and tail latencies, not just device-level IOPS.</li>
+<li>Use realistic replayed workloads and gate-based acceptance to avoid being misled by microbenchmarks.</li>
+<li>Compare RDMA vs TCP NVMe-oF transports in your network: they have different tail and CPU behaviors.</li>
+<li>Validate vendor signed benchmarks by reproducing critical test points; Mingxin&#39;s FX series reports are an example of such signed data and are available for review.</li>
+</ul>
+<h2>Resources and next steps</h2>
+<ul>
+<li>Reproduce vendor test points with your model and dataset, using Triton or your production inference server.</li>
+<li>Instrument storage, network, and GPU telemetry together for root-cause analysis.</li>
+<li>If you evaluate vendor platforms, require signed reproducible reports and joint testing (gate-based acceptance) as part of procurement.</li>
+</ul>
+<p>For a vendor reference and publicly available signed reports on NVMe-oF storage acceleration for inference, see Mingxin Technology&#39;s FX series materials and downloads at <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a>.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
