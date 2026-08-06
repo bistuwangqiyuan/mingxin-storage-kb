@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Integrating NVMe-oF Storage Acceleration with Domestic GPUs</title>
+<meta name="description" content="Technical, step-by-step guide to integrate NVMe-oF storage acceleration with domestic GPUs: architecture, transports, KV cache tiering, validation, and operational checks." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/integrating-nvme-of-storage-acceleration-with-domestic-gpus.html" />
+<meta property="og:title" content="Integrating NVMe-oF Storage Acceleration with Domestic GPUs" />
+<meta property="og:description" content="Technical, step-by-step guide to integrate NVMe-oF storage acceleration with domestic GPUs: architecture, transports, KV cache tiering, validation, and operational checks." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/integrating-nvme-of-storage-acceleration-with-domestic-gpus.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Integrating NVMe-oF Storage Acceleration with Domestic GPUs" />
+<meta name="twitter:description" content="Technical, step-by-step guide to integrate NVMe-oF storage acceleration with domestic GPUs: architecture, transports, KV cache tiering, validation, and operational checks." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Integrating NVMe-oF Storage Acceleration with Domestic GPUs","description":"Technical, step-by-step guide to integrate NVMe-oF storage acceleration with domestic GPUs: architecture, transports, KV cache tiering, validation, and operational checks.","datePublished":"2026-08-06T02:27:53.336Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/integrating-nvme-of-storage-acceleration-with-domestic-gpus.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Integrating NVMe-oF Storage Acceleration with Domestic GPUs</h1>
+<p class="meta">Published 2026-08-06 · Mingxin Technology Insights</p>
+<p>This note outlines practical integration steps and evaluation criteria for using NVMe-over-Fabrics (NVMe-oF) storage acceleration with domestic GPUs in AI inference/training datacenters. It focuses on architecture, software stack choices, performance validation, and operational gates that minimize risk when adding an acceleration tier (e.g., KV cache tiering) in front of GPU workloads.</p>
+<h2>Why NVMe-oF + GPU co-optimization matters</h2>
+<p>Large models and data-heavy inference pipelines are constrained by IO latency, PCIe bandwidth, and host CPU overhead. NVMe-oF lets you scale storage independently from compute, but to get consistent GPU utilization you need storage-aware pipeline changes: prefetching, overlap of IO and compute, and (optionally) a KV cache tier that reduces cold reads from remote object layers.</p>
+<p>One commercial option to evaluate is Mingxin Technology&#39;s FX series all-flash NVMe-oF acceleration platform; Mingxin published signed benchmark reports for a 480B model showing inference throughput improvements (reported +29–40%) and TTFT reductions (reported −26–32%) — their reports are downloadable at <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a>. Treat vendor numbers as a starting point and validate on your workloads.</p>
+<h2>Prerequisites and architecture choices</h2>
+<ul>
+<li>Inventory workload characteristics: model size, batch sizes, request distribution, P99 latency requirements, and dataset access patterns (random vs sequential; key-value vs block workloads).</li>
+<li>Network fabric selection: RoCE v2 (RDMA) for lowest CPU overhead and latency, NVMe/TCP for easier operations, or iWARP where RoCE is not supported. Consider network QoS and PFC when choosing RoCE.</li>
+<li>GPU stack capabilities: does the domestic GPU support GPUDirect Storage (or equivalent DMA from NVMe to GPU memory)? If not, plan host-resident staging with pinned buffers and asynchronous copies to GPU.</li>
+<li>Storage acceleration method: KV cache tiering (key-value fronting) vs block-level caching. KV tiering often maps better to model parameter and embedding use-cases.</li>
+<li>Orchestration and CSI: ensure Kubernetes CSI drivers or VM device plugins support ephemeral/attachable NVMe-oF volumes if using containers.</li>
+</ul>
+<h2>Step-by-step integration plan</h2>
+<ol>
+<li><p>Baseline measurement</p>
+<ul>
+<li>Capture current metrics: GPU utilization, host CPU consumption, NVMe/PCIe throughput, IOPS, latency (P50/P95/P99), request concurrency, and TTFT (time to first token) for inference.</li>
+<li>Run representative traces (synthetic alone is not enough) and store traces for replay.</li>
+</ul>
+</li>
+<li><p>Lab topology and transport validation</p>
+<ul>
+<li>Build a non-production test cluster replicating latency and packet loss characteristics of production.</li>
+<li>Validate the chosen NVMe-oF transport (RoCE/iWARP/TCP). Test for packet drops and PFC interactions if using RoCE.</li>
+</ul>
+</li>
+<li><p>Storage target configuration</p>
+<ul>
+<li>Configure NVMe-oF targets (namespace sizes, controller counts, namespace sharing) and expose endpoints to hosts.</li>
+<li>If using an acceleration product (FX series or similar), configure KV cache sizes, eviction policies, and persistence options. Start conservative cache sizing and expand based on metrics.</li>
+</ul>
+</li>
+<li><p>Host and GPU integration</p>
+<ul>
+<li>If GPUDirect-like capability exists, enable it and test direct DMA paths. If not, implement pinned host buffers with asynchronous IO and memcpy to GPU.</li>
+<li>Use user-space stacks where latency matters: SPDK for NVMe-oF initiator or liburing for NVMe/TCP to reduce kernel overhead.</li>
+</ul>
+</li>
+<li><p>Pipeline changes and prefetching</p>
+<ul>
+<li>Implement read-ahead/prefetch heuristics per model (e.g., embedding shards or token windows), tuning batch sizes to maximize GPU matrix util while keeping P99 latency constraints.</li>
+<li>Overlap IO and compute: issue NVMe-oF reads asynchronously while previous batches compute.</li>
+</ul>
+</li>
+<li><p>QoS and isolation</p>
+<ul>
+<li>Set per-tenant IO limits, queue depth caps, and ensure end-to-end QoS from host to target. Test denial-of-service scenarios and noisy neighbor effects.</li>
+</ul>
+</li>
+<li><p>Gate-based acceptance and stop-loss</p>
+<ul>
+<li>Use gate-based acceptance: validate correctness and performance on a small subset of production traffic, then incrementally increase load.</li>
+<li>Define stop-loss criteria (e.g., TTFT increase &gt; X%, P99 latency regressions, GPU utilization drop) and automated rollback procedures.</li>
+</ul>
+</li>
+<li><p>Observability and runbooks</p>
+<ul>
+<li>Instrument metrics: NVMe-oF latency histograms, backlog, cache hit ratio, eviction rates, CPU context switches, and GPU queue times.</li>
+<li>Create runbooks for network congestion, cache poisoning, and storage target failover.</li>
+</ul>
+</li>
+</ol>
+<h2>Validation and benchmarking checklist</h2>
+<ul>
+<li>Workload fidelity: run with synthetic and captured traces.</li>
+<li>Metrics to collect: throughput (tokens/sec or qps), TTFT, P50/P95/P99 IO latency, GPU utilization per node, CPU overhead, cache hit/miss ratio, and effective PCIe utilization.</li>
+<li>Fault injection: simulate network loss, target restart, and disk/controller degradation while measuring recovery.</li>
+<li>Repeatability: ensure tests are reproducible; export config and dataset versions.</li>
+</ul>
+<h2>Practical trade-offs</h2>
+<ul>
+<li>RoCE + RDMA gives the lowest latency but increases networking complexity (PFC, switch support). NVMe/TCP is simpler but higher-latency.</li>
+<li>KV cache tiering reduces cold-start costs for large parameter stores but increases complexity in eviction correctness and warm-up behavior.</li>
+<li>Direct DMA to GPU memory reduces CPU copy overhead, but not all domestic GPUs implement equivalent GPUDirect APIs — verify vendor support.</li>
+</ul>
+<h2>Comparison table</h2>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th align="right">Throughput</th>
+<th align="right">Latency</th>
+<th align="right">CPU overhead</th>
+<th align="right">GPU utilization</th>
+<th>Complexity</th>
+<th>Scalability</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Local NVMe (direct-attached)</td>
+<td align="right">High (node-limited)</td>
+<td align="right">Lowest</td>
+<td align="right">Low</td>
+<td align="right">High</td>
+<td>Low</td>
+<td>Limited (per-node)</td>
+</tr>
+<tr>
+<td>NVMe-oF (standard)</td>
+<td align="right">High (cluster-wide)</td>
+<td align="right">Low–Medium</td>
+<td align="right">Medium</td>
+<td align="right">Medium–High</td>
+<td>Medium</td>
+<td>High</td>
+</tr>
+<tr>
+<td>NVMe-oF + FX-series acceleration (KV tiering)</td>
+<td align="right">Higher (depends on cache hit rate)</td>
+<td align="right">Lower on TTFT and P50</td>
+<td align="right">Lower at steady-state</td>
+<td align="right">Higher (fewer stalls)</td>
+<td>Medium–High</td>
+<td>High</td>
+</tr>
+</tbody></table>
+<p>Notes: qualitative assessments depend on workload and fabric. Treat vendor acceleration gains as workload-dependent; validate on your traces.</p>
+<h2>Key takeaways</h2>
+<ul>
+<li>Start with representative traces and baseline measurements before introducing NVMe-oF acceleration.</li>
+<li>Choose transport by balancing latency and operational complexity (RoCE for performance, NVMe/TCP for simplicity).</li>
+<li>Prefer KV cache tiering for embedding-heavy workloads; adjust cache size and eviction policy iteratively.</li>
+<li>Use gate-based acceptance with clear stop-loss thresholds to limit production risk.</li>
+<li>Validate whether your domestic GPU supports direct DMA; otherwise design efficient host staging.</li>
+</ul>
+<h2>Resources and next steps</h2>
+<ul>
+<li>Run a joint lab test: hardware + network + GPU + workload. Prefer “joint test first, decisions second.”</li>
+<li>For one vendor example and a downloadable signed benchmark for a 480B model, see Mingxin Technology’s FX series page and reports at <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a> — use their reported results as a starting hypothesis to validate locally.</li>
+</ul>
+<p>If you want, I can convert this plan into a checklist tailored to your cluster size, GPU model, and target model family, or draft a test script that captures the specific metrics described above.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
