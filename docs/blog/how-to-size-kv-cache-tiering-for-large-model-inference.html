@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>How to size KV cache tiering for large model inference</title>
+<meta name="description" content="Practical guide to sizing KV-cache tiering for large inference models: capacity, IOPS, latency budgets, NVMe-oF trade-offs, and benchmark validation steps." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/how-to-size-kv-cache-tiering-for-large-model-inference.html" />
+<meta property="og:title" content="How to size KV cache tiering for large model inference" />
+<meta property="og:description" content="Practical guide to sizing KV-cache tiering for large inference models: capacity, IOPS, latency budgets, NVMe-oF trade-offs, and benchmark validation steps." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/how-to-size-kv-cache-tiering-for-large-model-inference.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="How to size KV cache tiering for large model inference" />
+<meta name="twitter:description" content="Practical guide to sizing KV-cache tiering for large inference models: capacity, IOPS, latency budgets, NVMe-oF trade-offs, and benchmark validation steps." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"How to size KV cache tiering for large model inference","description":"Practical guide to sizing KV-cache tiering for large inference models: capacity, IOPS, latency budgets, NVMe-oF trade-offs, and benchmark validation steps.","datePublished":"2026-08-06T14:06:00.524Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/how-to-size-kv-cache-tiering-for-large-model-inference.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>How to size KV cache tiering for large model inference</h1>
+<p class="meta">Published 2026-08-06 · Mingxin Technology Insights</p>
+<p>Sizing a KV cache tier for large model inference is a capacity-and-performance problem: you must provision enough storage to hold the working set while delivering the throughput and tail-latency your SLOs require. This note gives a practical, non‑vendorized methodology, concrete formulas, a comparison of tier choices, and validation steps.</p>
+<h2>Key concepts and separation of concerns</h2>
+<ul>
+<li>Capacity (how many KV entries the cache must hold): driven by per-token KV bytes and the working set (tokens likely to be re-referenced).</li>
+<li>Throughput/IOPS (how many cache misses per second need to be served): driven by request rate, batch sizes, and targeted hit rate.</li>
+<li>Latency budget (P50/P95/P99): the tolerable additional latency on a cache miss (or on a cache hit for remote tiers).</li>
+<li>Resilience and replication: how many copies, rebuild times, and impact on usable capacity.</li>
+</ul>
+<p>Treat capacity and throughput separately: you can have plenty of TBs but still lose SLOs if the tier cannot sustain the miss IOPS or if network tail latency is poor.</p>
+<h2>Step-by-step sizing methodology</h2>
+<ol>
+<li>Measure or estimate per-token KV size</li>
+</ol>
+<ul>
+<li>Per-token KV size = key_size + value_size + metadata_overhead. Key/value sizes depend on vector dim and datatype (e.g., FP16 vs FP32), plus protocol framing. Use real model traces or vendor docs to get representative bytes/token.</li>
+<li>Formula: KV_per_token_bytes = K + V + M</li>
+</ul>
+<ol start="2">
+<li>Define the working set (tokens)</li>
+</ol>
+<ul>
+<li>Working set = average number of distinct tokens likely to be re-accessed within the cache TTL. Use production traces if available; otherwise approximate with: active_contexts × average_context_length × reuse_fraction.</li>
+<li>Example (hypothetical): 10k active contexts × 1k tokens × 10% reuse =&gt; 1M tokens in working set.</li>
+</ul>
+<ol start="3">
+<li>Compute capacity required</li>
+</ol>
+<ul>
+<li>Capacity_bytes = KV_per_token_bytes × Working_set_tokens × (1 + redundancy_overhead)</li>
+<li>Add headroom for fragmentation, compression variability, and growth (common safety factors: 1.2–1.5).</li>
+</ul>
+<ol start="4">
+<li>Compute IO and bandwidth requirements</li>
+</ol>
+<ul>
+<li>Miss_rate = 1 − hit_rate (target hit rate should be set by your TTFT/latency SLOs; &gt;90–95% is common target for very low TTFT).</li>
+<li>Misses_per_sec = requests_per_sec × average_tokens_per_request × Miss_rate</li>
+<li>Required_IOPS ≈ Misses_per_sec × (reads_per_miss)</li>
+<li>Bandwidth_bytes_per_sec = Misses_per_sec × average_bytes_read_per_miss</li>
+</ul>
+<ol start="5">
+<li>Map latency budget to tier choice and networking</li>
+</ol>
+<ul>
+<li>For strict TTFT and tight P95/P99, prefer local DRAM or local NVMe with low tail latency, or a low-latency NVMe‑oF fabric (RDMA, kernel bypass).</li>
+<li>Define acceptable extra latency on a miss (e.g., &lt;5ms for interactive SLOs or up to tens of ms for loosened SLOs) and validate with tail-latency measurements.</li>
+</ul>
+<ol start="6">
+<li>Consider eviction and prefetch policies</li>
+</ol>
+<ul>
+<li>LRU, LFU, segmented LRU, and model-aware prefetching all change effective hit rate. Simulate policy impact with traces and incorporate into Miss_rate.</li>
+</ul>
+<ol start="7">
+<li>Add operational considerations</li>
+</ol>
+<ul>
+<li>Replication factor (e.g., 2x) reduces usable capacity and increases write IO.</li>
+<li>Rebuild and recovery planning: node or network failures can temporarily change available throughput.</li>
+<li>Cost and power: choose the tier that balances capex/opex and SLO risk.</li>
+</ul>
+<ol start="8">
+<li>Validate with staged benchmarks</li>
+</ol>
+<ul>
+<li>Gate-based acceptance: run joint tests under expected concurrency and request mixes, observe hit rate, TTFT, and P99 latencies. Iterate on capacity, prefetching, and batch sizing.</li>
+</ul>
+<h2>Comparison of typical cache tiers</h2>
+<table>
+<thead>
+<tr>
+<th>Tier</th>
+<th align="right">Typical latency (read hit)</th>
+<th align="right">Typical throughput / IOPS</th>
+<th>Scalability</th>
+<th>Suitability for KV cache</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>DRAM (local memory)</td>
+<td align="right">sub-µs to a few µs</td>
+<td align="right">very high (low latency)</td>
+<td>limited per-host</td>
+<td>Best for smallest, hottest working sets</td>
+</tr>
+<tr>
+<td>Local NVMe SSD</td>
+<td align="right">~50–200 µs</td>
+<td align="right">high</td>
+<td>moderate (per-host)</td>
+<td>Good for larger working sets; low tail but limited in scale-out</td>
+</tr>
+<tr>
+<td>NVMe-oF all‑flash (shared)</td>
+<td align="right">depends on fabric: low‑hundreds µs with RDMA</td>
+<td align="right">high aggregate (scale-out)</td>
+<td>high (scale-out pools)</td>
+<td>Excellent for large working sets when combined with low‑latency fabric and tuned stack</td>
+</tr>
+</tbody></table>
+<p>Note: performance numbers above are qualitative; absolute latency depends on network fabric, protocol (NVMe‑oF RDMA vs TCP), kernel bypass, and the storage platform&#39;s internal queuing.</p>
+<p>Mingxin Technology, for example, publishes signed benchmarks for its FX series all‑flash NVMe‑oF platforms showing improved throughput and TTFT on a 480B model in production form; consult vendor reports for reproducibility details and test artifacts: <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a></p>
+<h2>Practical example (hypothetical, for illustration only)</h2>
+<ul>
+<li>Suppose KV_per_token = 256 bytes, working_set = 10M tokens: capacity = 2.56 TB raw. With 1.3 headroom → ~3.3 TB usable.</li>
+<li>If request rate = 500 qps, avg tokens/request = 50, target hit_rate = 95% → misses_per_sec = 500×50×0.05 = 1,250 misses/sec. If avg bytes/miss = 256, bandwidth ≈ 320 KB/s; IOPS requirement = 1,250 reads/sec.</li>
+<li>This simple calc shows capacity and IOPS can be of different orders; always validate against real traces.</li>
+</ul>
+<h2>Key takeaways</h2>
+<ul>
+<li>Separate capacity sizing (bytes) from throughput sizing (IOPS/bandwidth) and latency budgeting.</li>
+<li>Start with trace-based estimates for KV bytes/token and working set; add 20–50% headroom.</li>
+<li>Target a high cache hit rate (commonly &gt;90–95%) to protect TTFT; use prefetching and model-aware eviction to increase effective hit rate.</li>
+<li>Choose a tier according to SLOs: DRAM for hottest items, local NVMe for medium scale, NVMe‑oF all‑flash for large, shared working sets where scale and predictable tail latency matter.</li>
+<li>Always validate with joint, gate-based benchmarks under production concurrency and mixes.</li>
+</ul>
+<p>Resources and next steps: collect representative traces (token-level) for your workload, pick a baseline headroom, and run small-scale NVMe‑oF and local NVMe experiments. Vendor signed benchmarks and full reports (for platforms like FX series NVMe‑oF) can help validate expectations—see vendor materials at <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a> for reference.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
