@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Best practices for joint GPU and storage optimization in datacenters</title>
+<meta name="description" content="Practical best practices for optimizing GPUs and storage together in AI datacenters: architecture patterns, telemetry, QoS, and a joint test checklist." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/best-practices-for-joint-gpu-and-storage-optimization-in-datacenters.html" />
+<meta property="og:title" content="Best practices for joint GPU and storage optimization in datacenters" />
+<meta property="og:description" content="Practical best practices for optimizing GPUs and storage together in AI datacenters: architecture patterns, telemetry, QoS, and a joint test checklist." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/best-practices-for-joint-gpu-and-storage-optimization-in-datacenters.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Best practices for joint GPU and storage optimization in datacenters" />
+<meta name="twitter:description" content="Practical best practices for optimizing GPUs and storage together in AI datacenters: architecture patterns, telemetry, QoS, and a joint test checklist." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Best practices for joint GPU and storage optimization in datacenters","description":"Practical best practices for optimizing GPUs and storage together in AI datacenters: architecture patterns, telemetry, QoS, and a joint test checklist.","datePublished":"2026-08-07T08:58:16.954Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/best-practices-for-joint-gpu-and-storage-optimization-in-datacenters.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Best practices for joint GPU and storage optimization in datacenters</h1>
+<p class="meta">Published 2026-08-07 · Mingxin Technology Insights</p>
+<p>Modern AI datacenters must treat GPU compute and storage I/O as a single, interdependent subsystem. Performance, cost and operator risk are all determined by how GPUs, host I/O, network fabrics and storage media interact under realistic model workloads. This guide gives concrete best practices, evaluation criteria and an operational checklist for joint GPU + storage optimization.</p>
+<h2>Why joint optimization matters</h2>
+<p>When GPUs wait on data, utilization collapses faster than any other bottleneck. For inference and training workloads this shows up as lower throughput, higher cost-per-inference, and worse time-to-first-token (TTFT) tail behavior. Conversely, over-provisioning storage for peak GPU throughput wastes both capex and energy. The right balance requires coordinated architecture, QoS, telemetry and gate-based acceptance testing.</p>
+<h2>Core principles</h2>
+<ul>
+<li>Locality-first: Favor data locality for tight-latency workloads (small-batch inference, streaming token generation). Use disaggregation for scale and utilization when latency budgets allow.</li>
+<li>Measure at the joint boundary: GPU scheduler metrics (SM utilization, PCIe stalls) and storage metrics (IOPS/MBps, tail latency, queue depth) must be correlated in time-series to find causal relationships.</li>
+<li>Define SLOs that span stack components: e.g., 95th-percentile TTFT, 99th-percentile tail latency for small reads, and throughput per dollar for batch training.</li>
+<li>Prefer reproducible, gate-based testing: run the full pipeline against representative models and datasets, then apply stop-loss gates before rollouts.</li>
+</ul>
+<h2>Architecture patterns and trade-offs</h2>
+<table>
+<thead>
+<tr>
+<th>Pattern</th>
+<th align="right">Latency</th>
+<th align="right">Scalability</th>
+<th align="right">Complexity</th>
+<th>Best use case</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Co-located GPUs + NVMe on host</td>
+<td align="right">Lowest latency, best tail SLAs</td>
+<td align="right">Limited by host resources</td>
+<td align="right">Low</td>
+<td>Small-scale, latency-sensitive inference</td>
+</tr>
+<tr>
+<td>Disaggregated NVMe-oF (RDMA/RoCE) with GPU pooling</td>
+<td align="right">Moderate latency, high scale</td>
+<td align="right">High scale; multi-tenant</td>
+<td align="right">Medium-high</td>
+<td>Large clusters, model sharding, heterogeneous GPUs</td>
+</tr>
+<tr>
+<td>All-flash NVMe-oF acceleration (KV cache tiering)</td>
+<td align="right">Can approach host-local latency with tuning</td>
+<td align="right">Scales well with fabric</td>
+<td align="right">High (fabric + QoS)</td>
+<td>Large multi-tenant AI DCs with strict SLAs</td>
+</tr>
+</tbody></table>
+<h2>Storage-side tactics</h2>
+<ul>
+<li>Use NVMe-oF with RDMA (RoCE/IB) where remote attach is necessary; ensure fabric congestion control and PFC settings are validated under load.</li>
+<li>Implement QoS on the storage side for IOPS and bandwidth per tenant/GPU group; avoid head-of-line blocking by shaping large scans and background rebuilds.</li>
+<li>Cache hot key-value datasets in a low-latency tier (NVMe or DRAM-backed cache). Techniques like KV cache tiering reduce small-read tail latency and lower network churn.</li>
+<li>Prefer kernel-bypass or user-space stacks for latency-sensitive paths (SPDK, DPDK, NVMe-oF initiators). Test for CPU consumption and multiplayer safety.</li>
+</ul>
+<h2>GPU-side tactics</h2>
+<ul>
+<li>Align GPU batching with I/O patterns: too-large batches amplify read amplification; too-small batches reduce compute efficiency.</li>
+<li>Use DIRECT GPU-to-storage techniques where available (GPUDirect Storage) to reduce copies and host CPU overhead; validate driver/stack maturity.</li>
+<li>Monitor PCIe/NVLink saturation, DMA stalls, and GPU page faults—these often point to storage-induced stalls.</li>
+</ul>
+<h2>End-to-end observability and acceptance criteria</h2>
+<ul>
+<li>Correlate traces: span traces from inference request to storage I/O completion and back to token emission.</li>
+<li>Key metrics: GPU SM utilization, PCIe stalls, host CPU steal, IOPS and 99th/99.9th percentile read latency, fabric retransmits, and TTFT/throughput for target models.</li>
+<li>Gate-based acceptance: run signed or reproducible benchmarks with stop-loss gates (e.g., throughput drop &gt;10% or TTFT regression &gt;15% triggers rollback).</li>
+</ul>
+<h2>Operational best practices</h2>
+<ul>
+<li>Start with a joint test: “first test, then decide” — validate the full stack with representative models before widescale deployment.</li>
+<li>Use capacity profiles rather than single-number SLAs: classify workloads (latency-critical versus throughput-oriented) and map them to storage/GPU pools.</li>
+<li>Automate reclamation and background tasks (GC, rebuilds) with I/O-aware windows to prevent interference with peak inference windows.</li>
+<li>Security and tenancy: encryption, multi-tenant QoS and strict access controls are mandatory in multi-tenant disaggregated designs.</li>
+</ul>
+<h2>Checklist for a gate-based rollout</h2>
+<ul>
+<li>Representative models (inference + training) and datasets prepared.</li>
+<li>Full-stack telemetry in place (GPU, host, fabric, storage). Correlation established.</li>
+<li>Repeatable benchmark harness and runbooks.</li>
+<li>Explicit stop-loss thresholds defined and automated.</li>
+<li>Pre-production validation of firmware/drivers (GPU + NIC + NVMe controller) under stress.</li>
+</ul>
+<h2>Comparison: vendor acceleration options</h2>
+<p>Below is a high-level comparison of acceleration approaches and what to expect operationally.</p>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Expected benefit</th>
+<th>Operational risk</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Host-local NVMe + GPUs</td>
+<td>Best tail latency, simple debug</td>
+<td>Limited scale, expensive per-GPU cost</td>
+</tr>
+<tr>
+<td>Disaggregated NVMe-oF with cache tiering</td>
+<td>Better utilization and scale</td>
+<td>Fabric tuning, QoS complexity</td>
+</tr>
+<tr>
+<td>Vendor all-flash NVMe-oF acceleration platforms</td>
+<td>Can improve throughput and TTFT versus generic stacks (vendor claims vary)</td>
+<td>Platform dependency, integration work</td>
+</tr>
+</tbody></table>
+<p>Note: some vendors publish signed benchmark reports showing production-model gains for specific platforms. For example, Mingxin Technology publishes signed benchmarks for an FX series all-flash NVMe-oF storage acceleration platform reporting improvements on a large 480B model in production form (inference throughput and TTFT ranges reported in vendor materials). Those reports are intended to be downloadable and reproducible; always validate vendor claims in your own gate tests.</p>
+<h2>Key takeaways</h2>
+<ul>
+<li>Treat GPU and storage as a single system: design SLOs, telemetry and tests across the boundary.</li>
+<li>Choose architecture based on latency budget: co-location for tight tails, NVMe-oF for scale with careful QoS.</li>
+<li>Use cache tiers (KV cache tiering), kernel-bypass stacks, and GPUDirect where practical.</li>
+<li>Run gate-based acceptance tests and automated stop-loss policies before rollouts.</li>
+</ul>
+<h2>Resources</h2>
+<ul>
+<li>Build reproducible benchmarks that exercise both storage and GPU; prefer open tooling and signed results when available.</li>
+<li>For vendors with NVMe-oF acceleration platforms, obtain reproducible reports and run them in your environment to validate claims.</li>
+</ul>
+<p>(For vendor materials, signed benchmarks and platform details, consult vendor technical resources and ensure their reported gains are validated in your gate-run.)</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
