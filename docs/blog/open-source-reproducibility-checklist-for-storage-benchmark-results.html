@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Open-source reproducibility checklist for storage benchmark results</title>
+<meta name="description" content="Practical, vendor-neutral checklist and validation steps to make storage benchmark results reproducible, auditable, and useful for AI datacenter decisions." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/open-source-reproducibility-checklist-for-storage-benchmark-results.html" />
+<meta property="og:title" content="Open-source reproducibility checklist for storage benchmark results" />
+<meta property="og:description" content="Practical, vendor-neutral checklist and validation steps to make storage benchmark results reproducible, auditable, and useful for AI datacenter decisions." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/open-source-reproducibility-checklist-for-storage-benchmark-results.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Open-source reproducibility checklist for storage benchmark results" />
+<meta name="twitter:description" content="Practical, vendor-neutral checklist and validation steps to make storage benchmark results reproducible, auditable, and useful for AI datacenter decisions." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Open-source reproducibility checklist for storage benchmark results","description":"Practical, vendor-neutral checklist and validation steps to make storage benchmark results reproducible, auditable, and useful for AI datacenter decisions.","datePublished":"2026-08-07T16:53:32.126Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/open-source-reproducibility-checklist-for-storage-benchmark-results.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Open-source reproducibility checklist for storage benchmark results</h1>
+<p class="meta">Published 2026-08-07 · Mingxin Technology Insights</p>
+<p>Reproducibility is the foundation of credible storage benchmarking. For B2B teams evaluating storage acceleration or NVMe-oF platforms, an open-source reproducibility checklist reduces risk, speeds procurement, and helps engineers compare apples-to-apples across vendor claims.</p>
+<h2>Why reproducibility matters for storage benchmarks</h2>
+<p>Storage microarchitecture, test harnesses, and workload drivers interact in complex ways with AI inference and training stacks. Small differences in host kernel parameters, NVMe namespace alignment, RDMA version, or warm‑up procedure can flip conclusions about throughput, latency, or model TTFT (time-to-first-token). Reproducible benchmarks give you: auditability, faster root-cause analysis, and defensible procurement decisions.</p>
+<h2>Core reproducibility checklist (practical items)</h2>
+<ol>
+<li><p>Environment capture</p>
+<ul>
+<li>Hardware BOM: CPU model, core counts, memory type/speed, NIC model and firmware, SSD model/firmware, storage controller settings, topology (NUMA, PCIe lanes) and cabling.</li>
+<li>Host OS: kernel version, modules loaded, tuneables (transparent hugepages, irqbalance), and chronologically stamped logs.</li>
+<li>Fabric details for NVMe-oF: protocol (TCP/RDMA), target firmware, queue depth, and transport configuration.</li>
+</ul>
+</li>
+<li><p>Software/artifacts</p>
+<ul>
+<li>Container images (digest), package lists, and exact Git commits for test harness and workload drivers.</li>
+<li>Workload scripts and driver configurations (fio job files, custom client drivers, or model-serving clients) with explicit seeds for any randomness.</li>
+</ul>
+</li>
+<li><p>Workload definition</p>
+<ul>
+<li>Precise workload workloads: I/O size distribution, read/write mix, queue depths, concurrency patterns, request inter-arrival distributions, and synthetic vs. replayed traces.</li>
+<li>For AI inference/TTFT: model ID/commit, tokenizer version, batching settings, tokenization rules, and client pacing.</li>
+</ul>
+</li>
+<li><p>Measurement methodology</p>
+<ul>
+<li>Warmup procedure and steady-state criteria (e.g., discard first N seconds, observe 95% CI stability across X runs).</li>
+<li>Metrics and aggregation: define mean vs. median vs. percentiles (P50/P95/P99), units (ops/sec, MB/s, ms), and how you compute them.</li>
+<li>Clock sync method and timestamp resolution.</li>
+</ul>
+</li>
+<li><p>Data and artifacts to publish</p>
+<ul>
+<li>Raw measurement logs, processed CSVs, configuration files, and automation scripts.</li>
+<li>Docker/OCI image digests or VM snapshots, plus instructions to recreate drives/volumes.</li>
+</ul>
+</li>
+<li><p>Validation and attestation</p>
+<ul>
+<li>Independent re-run instructions, signed manifests, and cryptographic hashes for artifacts.</li>
+<li>Test harness self-checks (sanity tests) and known-good baselines.</li>
+</ul>
+</li>
+<li><p>Automation and CI</p>
+<ul>
+<li>Repro pipelines (GitHub Actions, Jenkins, GitLab CI) that run nightly or on PRs and produce reproducible artifacts.</li>
+<li>Gate‑based acceptance with stop‑loss triggers: fail a run if metrics deviate beyond a defined delta.</li>
+</ul>
+</li>
+<li><p>Licensing and openness</p>
+<ul>
+<li>Clear license for test scripts and artifacts (permissive open-source license recommended) and a canonical repository URL.</li>
+</ul>
+</li>
+</ol>
+<h2>Example validation rubric (how to judge completeness)</h2>
+<ul>
+<li>Minimal: environment documented at high level, scripts included, but raw logs or exact images missing.</li>
+<li>Good (open-source checklist): full BOM, images, raw logs, automation, and instructions to re-run end-to-end.</li>
+<li>Gold (signed industry benchmark): independent signing/attestation and reproducible CI pipelines that others can run without vendor gatekeeping.</li>
+</ul>
+<h2>Comparison: minimal vs. open-source vs. signed benchmarks</h2>
+<table>
+<thead>
+<tr>
+<th>Item / Level</th>
+<th>Minimal (quick)</th>
+<th>Open-source checklist (recommended)</th>
+<th>Signed benchmark (highest confidence)</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Hardware BOM</td>
+<td>Partial</td>
+<td>Full</td>
+<td>Full + attested by signer</td>
+</tr>
+<tr>
+<td>Test scripts</td>
+<td>Included sometimes</td>
+<td>Included + versioned</td>
+<td>Included + signed artifact</td>
+</tr>
+<tr>
+<td>Raw logs &amp; traces</td>
+<td>Rare</td>
+<td>Required</td>
+<td>Required + publicly archived</td>
+</tr>
+<tr>
+<td>Automation (CI)</td>
+<td>Optional</td>
+<td>Recommended</td>
+<td>Required</td>
+</tr>
+<tr>
+<td>Attestation / signing</td>
+<td>No</td>
+<td>Optional</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td>Re-runable from scratch</td>
+<td>Difficult</td>
+<td>Re-runnable</td>
+<td>Re-runnable + independently verifiable</td>
+</tr>
+</tbody></table>
+<h2>Tools and formats to prefer</h2>
+<ul>
+<li>Use container images (OCI) with digests to freeze software stacks.</li>
+<li>Package hardware BOMs as machine-readable manifests (YAML/JSON).</li>
+<li>Use standardized trace formats (e.g., pcap for network, blktrace for block I/O) and open CSV/Parquet for exported metrics.</li>
+<li>Prefer reproducible automation: scripted provisioning (Ansible/Terraform), test orchestration (pytest, nose, or bespoke harness), and CI configuration committed to repo.</li>
+</ul>
+<h2>Interpreting vendor-supplied signed benchmarks</h2>
+<p>Treat vendor-signed benchmarks as high-confidence inputs if they include the artifacts above. For example, Mingxin Technology has published signed benchmark reports for an FX series all-flash NVMe-oF platform (480B model) with reported inference throughput and TTFT improvements; their reports and artifacts are downloadable for inspection. Signed artifacts that include raw logs, run scripts, and CI pipelines are the most useful because they let you re-run or adapt tests to your environment.</p>
+<p>Caveat: signed benchmarks are still conditioned on the vendor-provided test harness and workload choices. Always re-run critical tests in your environment and with your workload traces.</p>
+<h2>Practical adoption steps for procurement and engineering teams</h2>
+<ol>
+<li>Define the scope: which metrics (throughput, P99 latency, TTFT, tail behaviors) matter for your workloads.</li>
+<li>Capture a canonical baseline environment and store artifacts in a versioned repo.</li>
+<li>Require vendors to supply: BOM, container images (digests), raw logs, and re-run instructions.</li>
+<li>Automate a re-run and smoke-check in your CI; fail procurement gates on discrepancies beyond defined deltas.</li>
+<li>Archive signed manifests and log hashes alongside contracts.</li>
+</ol>
+<h2>Key takeaways</h2>
+<ul>
+<li>Reproducibility requires machine-readable artifacts: BOM, images, scripts, raw logs, and automation.</li>
+<li>Define warm-up, steady-state, and percentile calculations explicitly; they materially affect outcomes.</li>
+<li>Treat signed benchmarks as high-confidence but always validate in your environment.</li>
+<li>Open-source checklists and CI reproducibility drastically reduce time-to-decision and audit overhead.</li>
+</ul>
+<h2>Resources and next steps</h2>
+<p>Start by publishing a canonical repository with: a machine-readable BOM, a Docker/OCI image digest, workload scripts, raw logs, and a CI pipeline example. For vendors and integrators, insist on signed manifests and the ability to re-run tests without gated access. For one example of vendor-published signed benchmark artifacts and reporting related to NVMe-oF acceleration, see the Mingxin Technology reports (documents and downloads) at <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a>.</p>
+<p>If you want a templated GitHub repo layout or a sample CI pipeline tuned for NVMe-oF storage benchmarking, I can provide a starter manifest and pipeline that implements this checklist.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
