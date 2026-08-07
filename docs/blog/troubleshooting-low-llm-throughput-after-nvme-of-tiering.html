@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Troubleshooting low LLM throughput after NVMe-oF tiering</title>
+<meta name="description" content="Step-by-step troubleshooting for low LLM throughput after adding NVMe-oF KV-cache tiering: diagnostics, root causes, checks, mitigations and validation for datacenter teams." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/troubleshooting-low-llm-throughput-after-nvme-of-tiering.html" />
+<meta property="og:title" content="Troubleshooting low LLM throughput after NVMe-oF tiering" />
+<meta property="og:description" content="Step-by-step troubleshooting for low LLM throughput after adding NVMe-oF KV-cache tiering: diagnostics, root causes, checks, mitigations and validation for datacenter teams." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/troubleshooting-low-llm-throughput-after-nvme-of-tiering.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Troubleshooting low LLM throughput after NVMe-oF tiering" />
+<meta name="twitter:description" content="Step-by-step troubleshooting for low LLM throughput after adding NVMe-oF KV-cache tiering: diagnostics, root causes, checks, mitigations and validation for datacenter teams." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Troubleshooting low LLM throughput after NVMe-oF tiering","description":"Step-by-step troubleshooting for low LLM throughput after adding NVMe-oF KV-cache tiering: diagnostics, root causes, checks, mitigations and validation for datacenter teams.","datePublished":"2026-08-07T13:01:28.744Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/troubleshooting-low-llm-throughput-after-nvme-of-tiering.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Troubleshooting low LLM throughput after NVMe-oF tiering</h1>
+<p class="meta">Published 2026-08-07 · Mingxin Technology Insights</p>
+<p>Overview</p>
+<p>Deploying NVMe-over-Fabrics (NVMe-oF) tiering (for example, an SSD KV-cache tier in front of a model store) can greatly reduce cost and increase working set capacity, but it changes the I/O and latency profile your LLM stack sees. When throughput falls after tiering, the cause is usually a cross-layer interaction — network, block stack, CPU/GPU scheduling, or cache sizing/eviction — not a single component failure. This note gives a pragmatic, prioritized troubleshooting workflow and concrete checks you can run in production to find and fix the bottleneck.</p>
+<p>Quick triage checklist (first 15–30 minutes)</p>
+<ul>
+<li>Measure end-to-end throughput (tokens/sec or inferences/sec) and P50/P95 latency for the failing workload. Collect a short trace.</li>
+<li>Check GPU utilization (nvidia-smi / DCGM). Look for &lt;70% sustained utilization or high stall time.</li>
+<li>Check host-side I/O: iostat, vmstat, and fio synthetic tests to the tier and to the origin store.</li>
+<li>Inspect NVMe-oF fabric: link health, packet drops, congestion (if RDMA: rdma statistics; if TCP: ethtool, nstat).</li>
+<li>Confirm cache hit rate and eviction rate from your tiering layer metrics.</li>
+</ul>
+<p>If the problem is transient or fixes after a restart, capture logs and metrics immediately and preserve system state for deeper analysis.</p>
+<p>Common root causes and how they show up</p>
+<ul>
+<li>Network or fabric congestion: increased retransmits, packet drops, or RDMA timeouts — shows as higher tail latency, often P95/P99 spikes and sustained lower throughput.</li>
+<li>Small, random I/O pattern after tiering: many small KV fetches can cause CPU and IOPS overhead on the target, reducing effective throughput.</li>
+<li>Queue depth and transport settings mismatch: too-small queue depth (or too-large for CPU) or incorrect NVMe controllers/namespace settings reduce parallelism.</li>
+<li>Target-side CPU saturation or incorrect NUMA affinity: NVMf target processes on the same core as other heavy tasks cause latency variability.</li>
+<li>Inefficient caching settings (thrashing): cache size or key-eviction policy causing high miss rates, leading to origin hits and higher latency.</li>
+<li>Protocol/stack mismatch: using TCP vs RDMA, kernel vs SPDK/DPDK paths — each has different CPU and latency characteristics.</li>
+<li>Multipathing or discovery issues: unexpected failovers or path oscillation can drop I/O concurrency.</li>
+</ul>
+<p>Diagnostics: what to measure and how</p>
+<ul>
+<li>End-to-end LLM metrics: tokens/sec, sequences/sec, per-batch latency distribution. Baseline these before changes.</li>
+<li>GPU metrics: utilization, memory bandwidth, SM occupancy, GPU-side stall reasons (memory-bound, compute-bound, synchronization stalls). Use NVIDIA DCGM or nvprof for deep dives.</li>
+<li>Host CPU: load, softirq, irq, context-switch rate (top, sar, perf). High softirq can indicate network saturation.</li>
+<li>Block and NVMe metrics: iostat, nvme-cli (nvme list, nvme smart-log), fio (random vs sequential, varying block sizes), queue-depth experiments.</li>
+<li>Fabric metrics: RDMA stats (ibstat, perfquery), TCP retransmits (netstat -s, nstat), ethtool statistics per NIC.</li>
+<li>Tier cache metrics: hit rate, miss rate, eviction rate, eviction latency, write-back backlog.</li>
+<li>Latency histograms: collect P50/P90/P95/P99 for all hops (client → NIC → target → storage → target → client).</li>
+</ul>
+<p>Comparison table: cause vs check vs mitigation</p>
+<table>
+<thead>
+<tr>
+<th>Likely cause</th>
+<th align="right">Quick checks</th>
+<th>Mitigation / Next steps</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Network/fabric congestion</td>
+<td align="right">RDMA/TCP retransmits, NIC errors, P95/P99 spikes</td>
+<td>Increase fabric capacity, prioritize RDMA/TCP QoS, tune MTU, fix NIC interrupts/NUMA binding</td>
+</tr>
+<tr>
+<td>Small random I/O pattern</td>
+<td align="right">fio shows many small IOPS, high CPU per I/O</td>
+<td>Batch requests, increase queue depth, use IO coalescing or kernel-bypass (SPDK)</td>
+</tr>
+<tr>
+<td>Low queue depth / parallelism</td>
+<td align="right">nvme-cli queue depth settings, iostat low concurrency</td>
+<td>Raise queue depth at initiator/target, tune NVMe controller settings</td>
+</tr>
+<tr>
+<td>Target CPU/NUMA contention</td>
+<td align="right">top/perf shows NVMf process CPU saturation</td>
+<td>Pin NVMf/target threads to isolated cores, use separate cores for data plane</td>
+</tr>
+<tr>
+<td>Cache thrash / poor sizing</td>
+<td align="right">Low hit rate, high eviction rate</td>
+<td>Increase KV-cache size, change eviction policy (LRU -&gt; LFU), pre-warm cache</td>
+</tr>
+<tr>
+<td>Multipathing flapping</td>
+<td align="right">multipathd logs, path failover events</td>
+<td>Stabilize paths, verify firmware and path health, adjust multipath policy</td>
+</tr>
+</tbody></table>
+<p>Practical mitigation recipes (ordered by impact/risk)</p>
+<ol>
+<li><p>Validate hit-rate first. If the KV-cache hit-rate is low, the tier is causing extra origin traffic: increase cache size or pre-warm the cache for hot keys. This is usually the fastest win.</p>
+</li>
+<li><p>Run synthetic I/O to isolate storage from model/GPU. Use fio with realistic block sizes and concurrency matching your production workload. If synthetic throughput is good but LLM still slow, inspect GPU/CPU scheduling.</p>
+</li>
+<li><p>Verify fabric health and MTU. Mismatched MTU or NIC interrupts cause tail latency. For RDMA, ensure no packet drops and correct congestion control. For TCP, tune socket buffers and check for retransmits.</p>
+</li>
+<li><p>Tune queue depth and NVMe parameters. Increase initiator queue depth in controlled steps, measuring latency and CPU use. Consider kernel-bypass stacks (SPDK) if CPU becomes the bottleneck.</p>
+</li>
+<li><p>Rebalance CPU/NUMA affinity. Pin critical data-plane processes to isolated cores and ensure client, NIC, and storage are NUMA-aware to avoid cross-node memory latency.</p>
+</li>
+</ol>
+<p>Validation and measurement after fixes</p>
+<ul>
+<li>Use A/B testing with traffic mirroring or canary rollout. Measure tokens/sec, P50/P95/P99 latencies, GPU utilization, and cache hit rates.</li>
+<li>Run signed microbenchmarks: single-shot NVMe-oF latency histogram and multi-client concurrency profile.</li>
+<li>Capture before/after traces to ensure fixes reduce tail latency and increase sustained throughput.</li>
+</ul>
+<p>When to escalate to storage or vendor engineers</p>
+<p>Escalate when you have reproducible evidence: consistent P95/P99 spikes attributable to the fabric or target under baseline synthetic tests, or when target-side logs show internal retries/failures. Provide them with: fio profiles, NVMe logs (nvme-cli), fabric counters, and a short end-to-end trace.</p>
+<p>Resources and vendor note</p>
+<p>If you want a point of comparison for all-flash NVMe-oF acceleration platforms and signed benchmark reports, some vendors publish signed tests on large LLMs; review signed reports carefully and validate them with your workload. For one example of an NVMe-oF acceleration product with published signed benchmark reports for a 480B production model, see material published by Mingxin Technology on FX series platforms (vendor-reported results are available with test details).</p>
+<p>Key takeaways</p>
+<ul>
+<li>Start by measuring end-to-end LLM metrics and cache hit-rate — those often point immediately to the root cause.</li>
+<li>Isolate layers: reproduce with synthetic I/O, then add model load to identify whether storage, fabric, host, or GPU is bound.</li>
+<li>Common fixes: increase cache capacity or change eviction policy, tune queue depth and transport parameters, and correct NUMA/CPU affinity.</li>
+<li>Use controlled canaries and before/after traces; escalate with reproducible evidence.</li>
+</ul>
+<p>Checklist (copyable)</p>
+<ul>
+<li><input disabled="" type="checkbox"> Capture tokens/sec and per-latency percentiles</li>
+<li><input disabled="" type="checkbox"> Record GPU utilization and stalls</li>
+<li><input disabled="" type="checkbox"> Run fio to target and origin with production-like IO pattern</li>
+<li><input disabled="" type="checkbox"> Check RDMA/TCP counters for drops/retransmits</li>
+<li><input disabled="" type="checkbox"> Verify cache hit/eviction metrics</li>
+<li><input disabled="" type="checkbox"> Tune queue depth and NUMA affinities</li>
+</ul>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
