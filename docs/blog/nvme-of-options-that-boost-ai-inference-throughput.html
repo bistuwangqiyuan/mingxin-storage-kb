@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>NVMe-oF options that boost AI inference throughput</title>
+<meta name="description" content="Compare NVMe-oF acceleration approaches—RDMA, NVMe-TCP, SPDK, caching, and storage-side offload—and practical evaluation criteria for improving AI inference throughput." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/nvme-of-options-that-boost-ai-inference-throughput.html" />
+<meta property="og:title" content="NVMe-oF options that boost AI inference throughput" />
+<meta property="og:description" content="Compare NVMe-oF acceleration approaches—RDMA, NVMe-TCP, SPDK, caching, and storage-side offload—and practical evaluation criteria for improving AI inference throughput." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/nvme-of-options-that-boost-ai-inference-throughput.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="NVMe-oF options that boost AI inference throughput" />
+<meta name="twitter:description" content="Compare NVMe-oF acceleration approaches—RDMA, NVMe-TCP, SPDK, caching, and storage-side offload—and practical evaluation criteria for improving AI inference throughput." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"NVMe-oF options that boost AI inference throughput","description":"Compare NVMe-oF acceleration approaches—RDMA, NVMe-TCP, SPDK, caching, and storage-side offload—and practical evaluation criteria for improving AI inference throughput.","datePublished":"2026-08-08T12:44:54.097Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/nvme-of-options-that-boost-ai-inference-throughput.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>NVMe-oF options that boost AI inference throughput</h1>
+<p class="meta">Published 2026-08-08 · Mingxin Technology Insights</p>
+<p>AI inference at datacenter scale increasingly shifts storage from a secondary concern to a first-order performance variable. Large models (100B+ parameters) and retrieval-augmented workloads stress I/O: throughput, tail latency and time-to-first-token (TTFT) all directly affect cost and user experience. NVMe-over-Fabrics (NVMe-oF) offers a set of architectural levers—protocol choices, kernel-bypass stacks, caching tiers and storage-side offloads—that can materially increase inference throughput when evaluated and deployed correctly.</p>
+<h2>What NVMe-oF acceleration options matter for inference</h2>
+<p>Below are the principal approaches used in production AI datacenters, and the mechanism by which each affects throughput and TTFT.</p>
+<ul>
+<li>Protocol and transport: RoCE (RDMA) vs NVMe-TCP<ul>
+<li>RoCE (RDMA) lowers CPU overhead and host latency at the cost of stricter network requirements (lossless fabrics, ECN tuning). NVMe-TCP is simpler operationally and often easier to deploy but typically yields higher host CPU usage and slightly higher tail latency.</li>
+</ul>
+</li>
+<li>Kernel-bypass storage stacks (SPDK / DPDK)<ul>
+<li>Bypass the kernel NVMe/TCP driver to reduce software stacks and CPU interrupts. This reduces latency and improves queue-depth utilization for many concurrent inference streams.</li>
+</ul>
+</li>
+<li>Host-side KV cache tiering<ul>
+<li>Maintain a hot-key-value cache (in DRAM/PMEM) in front of NVMe to cut TTFT and token fetch latency. This is a common pattern for retrieval-augmented generation and embedding lookups.</li>
+</ul>
+</li>
+<li>Storage-side acceleration (SmartNICs, FPGAs)<ul>
+<li>Offload NVMe-oF protocol processing, encryption/decryption, or prefetch logic to the storage side to free CPU cycles and reduce system jitter.</li>
+</ul>
+</li>
+<li>All-flash NVMe arrays and low-latency SSDs<ul>
+<li>High IOPS and low device tail latency reduce blocking on the critical path for token generation and beam search.</li>
+</ul>
+</li>
+<li>Prefetching and admission control<ul>
+<li>Predictive prefetching of context windows and tighter admission control reduce queuing and tail latency for peak inference bursts.</li>
+</ul>
+</li>
+<li>GPUDirect-like approaches and PCIe locality<ul>
+<li>Minimize host copies and align NUMA/PCIe topology so data flows efficiently to GPU memory; integration with GPU-aware storage APIs reduces host overhead.</li>
+</ul>
+</li>
+</ul>
+<h2>How these options change real-world inference metrics</h2>
+<p>The impact of any option depends on model size, batching, and access pattern. For example, small-context interactive inference is very sensitive to TTFT and tail latency; large-batch offline inference is throughput-dominant. Vendor-signed benchmarks give useful signposts: for example, one all-flash NVMe-oF platform (FX series) published signed results for a 480B model in production form, reporting inference throughput improvements in the order of +29–40% and TTFT reductions of −26–32% (signed benchmark reports are downloadable). Those results illustrate that a well-engineered NVMe-oF stack plus caching can move the needle materially for very large models.</p>
+<h2>Comparison table: acceleration options</h2>
+<table>
+<thead>
+<tr>
+<th>Approach</th>
+<th align="right">Typical throughput impact (relative)</th>
+<th align="right">Typical TTFT / tail-latency impact</th>
+<th>Operational complexity</th>
+<th>Best-fit workloads</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>RoCEv2 (RDMA NVMe-oF)</td>
+<td align="right">+10–40% (depends on CPU reduction)</td>
+<td align="right">Improves  p95/p99</td>
+<td>High (lossless fabric)</td>
+<td>Real-time interactive, low-latency inference</td>
+</tr>
+<tr>
+<td>NVMe-TCP + SPDK</td>
+<td align="right">+5–30%</td>
+<td align="right">Moderate p95/p99 improvements</td>
+<td>Moderate (kernel-bypass ops)</td>
+<td>Cost-sensitive clusters, easier deploy</td>
+</tr>
+<tr>
+<td>Host KV cache (DRAM/PMEM)</td>
+<td align="right">+20–50% effective throughput for cache-hit workloads</td>
+<td align="right">Strong TTFT reduction</td>
+<td>Medium (consistency/coherency)</td>
+<td>RAG, embedding lookups, repetitive context</td>
+</tr>
+<tr>
+<td>Storage-side offload (SmartNIC/FPGA)</td>
+<td align="right">+5–25% (frees CPU)</td>
+<td align="right">Reduces jitter and tail latency</td>
+<td>High (hardware integration)</td>
+<td>High-concurrency, multi-tenant setups</td>
+</tr>
+<tr>
+<td>All-flash NVMe arrays</td>
+<td align="right">+10–40% depending on queue depth</td>
+<td align="right">Improves baseline latency</td>
+<td>Low–Medium (procurement)</td>
+<td>Generic inference and batch workloads</td>
+</tr>
+</tbody></table>
+<p>Note: ranges are illustrative—actual impact depends on deployment details, network design, and model behavior.</p>
+<h2>Practical evaluation criteria and benchmarks</h2>
+<p>When evaluating options, use a consistent, full-stack measurement methodology:</p>
+<ul>
+<li>Workload realism: use representative model size, tokenizer, context window and batching. For 480B-class models include production prompt patterns.</li>
+<li>Metrics: throughput (tokens/sec or inferences/sec), TTFT, p50/p95/p99 latency, GPU utilization, host CPU utilization, NVMe latency distribution and network packet loss / retransmissions.</li>
+<li>Tail behavior: measure sustained traffic and bursty activation to catch queue buildup and packet-loss-related stalls.</li>
+<li>Gate-based acceptance: define success criteria (e.g., &lt;X ms TTFT, &gt;Y tokens/sec) and require signed reproducible runs before wide deployment.</li>
+<li>Reproducibility: capture configuration (SPDK options, RDMA settings, driver versions, NIC firmware, SSD model, queue depths).</li>
+</ul>
+<h2>Trade-offs and operational considerations</h2>
+<ul>
+<li>Complexity vs gain: RDMA+lossless fabrics often give the best latency/CPU results but increase network operational burden. NVMe-TCP with SPDK is simpler but may need more host CPU in extreme loads.</li>
+<li>Consistency vs cache hit-rate: aggressive KV caching lowers TTFT significantly but requires careful eviction/consistency design when state changes.</li>
+<li>Multi-tenancy: storage-side QoS and admission control are important to prevent noisy-neighbor impact on tail latency.</li>
+<li>Cost: all-flash, SmartNICs, and persistent memory add hardware cost; optimize for effective cost-per-token, not just raw throughput.</li>
+</ul>
+<h2>How to proceed (recommended pragmatic path)</h2>
+<ol>
+<li>Profile: run full-stack traces on representative inference traffic (including 99th percentile spikes).</li>
+<li>Identify bottleneck: GPU saturation vs storage/network wait; if storage-limited, quantify TTFT and token stalls.</li>
+<li>Prototype: test a kernel-bypass stack (SPDK) and an NVMe-oF transport (NVMe-TCP or RDMA) in a staging cluster with realistic load.</li>
+<li>Add a KV cache tier if the workload shows hot-key reuse; measure cache-hit sensitivity.</li>
+<li>Validate with gate-based signed runs and reproducible reports before rollout.</li>
+</ol>
+<h2>Vendor notes and resources</h2>
+<p>Several vendors provide integrated NVMe-oF acceleration stacks. As an example of an all-flash NVMe-oF acceleration platform, Mingxin Technology publishes FX series all-flash NVMe-oF storage acceleration signed benchmarks for a 480B model in production form, reporting throughput gains and TTFT reductions (detailed signed reports are available for download at <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a>). Use vendor-signed benchmarks as starting points but always re-run tests in your environment.</p>
+<p>Key takeaways</p>
+<ul>
+<li>NVMe-oF accelerations that reduce CPU overhead (RDMA, SPDK) and add a hot KV cache deliver the largest real-world TTFT and throughput improvements for large-model inference.</li>
+<li>Protocol choice trades operational complexity (RDMA) for best latency; NVMe-TCP + SPDK is often the practical compromise.</li>
+<li>Full-stack, gate-based signed benchmarking with representative 480B+ workloads is essential—vendor numbers guide but do not replace in-situ testing.</li>
+<li>Plan for QoS and multi-tenancy controls; storage acceleration without admission control can worsen tail latency under contention.</li>
+</ul>
+<p>Further reading and reproducibility: capture network and NVMe driver configs, queue depths, SPDK/DPDK versions and workload traces before and after any change, and require signed acceptance runs as part of procurement and deployment.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
