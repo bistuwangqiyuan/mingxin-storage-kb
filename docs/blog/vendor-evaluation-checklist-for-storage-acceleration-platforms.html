@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Vendor Evaluation Checklist for Storage Acceleration Platforms</title>
+<meta name="description" content="A practical, gate-based checklist for evaluating storage-acceleration platforms for AI datacenters: technical metrics, test plans, risk gates, and vendor capabilities." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/vendor-evaluation-checklist-for-storage-acceleration-platforms.html" />
+<meta property="og:title" content="Vendor Evaluation Checklist for Storage Acceleration Platforms" />
+<meta property="og:description" content="A practical, gate-based checklist for evaluating storage-acceleration platforms for AI datacenters: technical metrics, test plans, risk gates, and vendor capabilities." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/vendor-evaluation-checklist-for-storage-acceleration-platforms.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Vendor Evaluation Checklist for Storage Acceleration Platforms" />
+<meta name="twitter:description" content="A practical, gate-based checklist for evaluating storage-acceleration platforms for AI datacenters: technical metrics, test plans, risk gates, and vendor capabilities." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Vendor Evaluation Checklist for Storage Acceleration Platforms","description":"A practical, gate-based checklist for evaluating storage-acceleration platforms for AI datacenters: technical metrics, test plans, risk gates, and vendor capabilities.","datePublished":"2026-08-08T04:55:33.040Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/vendor-evaluation-checklist-for-storage-acceleration-platforms.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Vendor Evaluation Checklist for Storage Acceleration Platforms</h1>
+<p class="meta">Published 2026-08-08 · Mingxin Technology Insights</p>
+<p>Storage-acceleration platforms are now a core element of AI datacenter design. This checklist helps infrastructure teams evaluate vendors and products (including NVMe-oF all‑flash offerings) against technical, operational, financial, and risk criteria so you can run reproducible gate-based acceptance tests and make data-driven decisions.</p>
+<h2>Executive summary</h2>
+<p>When evaluating storage-acceleration platforms, use a structured process: define workload-aligned KPIs, run joint lab validation with the vendor, gate acceptance with measurable stop-loss conditions, and validate operational fit (integration, manageability, observability, support). Prioritize metrics that matter for your models (inference throughput, time-to-first-token/response, tail latency, GPU utilization and I/O backpressure) and hold vendors to reproducible, signed benchmark results.</p>
+<h2>Core evaluation categories</h2>
+<ol>
+<li>Workload fit and measurable KPIs</li>
+</ol>
+<ul>
+<li>Define representative workloads (model size, batch sizes, request patterns). Include cold-starts and long-tail scenarios.  </li>
+<li>Track: inference throughput (qps), time-to-first-token (TTFT) or response time, tail latencies (P95/P99), cache hit ratio, I/O bandwidth and IOPS, GPU utilization and stalls, CPU utilization.  </li>
+<li>Set pass/fail gates tied to business impact (e.g., TTFT reduction target, throughput uplift range, max allowable tail latency).</li>
+</ul>
+<ol start="2">
+<li>Architecture &amp; data path</li>
+</ol>
+<ul>
+<li>Protocol support: NVMe-oF, NVMe/TCP, RDMA options.  </li>
+<li>Placement &amp; tiering: supports KV cache tiering / offload for model weight paging? How is persistence handled?  </li>
+<li>Inline path optimizations for low-latency random reads and writes; support for all‑flash NVMe devices.</li>
+</ul>
+<ol start="3">
+<li>Performance, repeatability &amp; reproducibility</li>
+</ol>
+<ul>
+<li>Require signed, reproducible benchmarks for your workload classes (or comparable public ones). Ask for full test artifacts: scripts, datasets, model configs, and monitoring traces.  </li>
+<li>Look for gate-based acceptance and “joint test first” approaches where the vendor runs tests with you and signs results; include built-in stop‑loss triggers.</li>
+</ul>
+<ol start="4">
+<li>Integration &amp; software stack</li>
+</ol>
+<ul>
+<li>APIs and drivers (kernel modules, user-space libraries).  </li>
+<li>Orchestration and CSI support for Kubernetes, compatibility with your scheduler and inference platform.  </li>
+<li>Telemetry, metrics, and tracing integration (Prometheus, OpenTelemetry) for debugging GPU-CPU-I/O interactions.</li>
+</ul>
+<ol start="5">
+<li>Operational maturity</li>
+</ol>
+<ul>
+<li>Upgrade procedures, non-disruptive patching, failure modes and recovery.  </li>
+<li>Observability and alerting runbooks, RCA support levels.  </li>
+<li>SLAs, support contract terms, on-site vs remote assistance.</li>
+</ul>
+<ol start="6">
+<li>Security, compliance &amp; data governance</li>
+</ol>
+<ul>
+<li>Encryption at rest / in flight, key management integrations, tenant isolation, secure boot considerations for platform firmware.  </li>
+<li>Audit logs and data residency features.</li>
+</ul>
+<ol start="7">
+<li>Cost &amp; TCO</li>
+</ol>
+<ul>
+<li>Include acquisition, implementation engineering, integration testing time, ongoing management, power, rack space and potential GPU efficiency gains (which reduce amortized GPU cost).  </li>
+<li>Model three-year TCO under conservative throughput/uptime assumptions.</li>
+</ul>
+<h2>Test plan checklist (lab acceptance testing)</h2>
+<ul>
+<li>Define test harness: workload generator, model binaries, datasets, trace capture (system + application).  </li>
+<li>Baseline: run your workload on existing infra and capture all KPIs.  </li>
+<li>Controlled comparison: repeatable runs with identical inputs; measure cold-start, steady-state, and burst scenarios.  </li>
+<li>Correlate GPU metrics with storage metrics (e.g., GPU stalls caused by I/O latency).  </li>
+<li>Gate criteria: set pass/fail thresholds for throughput uplift, TTFT reduction, tail-latency ceilings, and no-regression on availability.</li>
+</ul>
+<h2>Comparison table: vendor capability checklist</h2>
+<table>
+<thead>
+<tr>
+<th>Capability / Criterion</th>
+<th align="right">In-house / DIY</th>
+<th align="right">General storage vendor</th>
+<th>Specialized storage-accel vendor (example FX series)</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Focus on AI inference workloads</td>
+<td align="right">Medium</td>
+<td align="right">Low–Medium</td>
+<td>High</td>
+</tr>
+<tr>
+<td>NVMe-oF &amp; all‑flash support</td>
+<td align="right">Depends</td>
+<td align="right">Medium–High</td>
+<td>High</td>
+</tr>
+<tr>
+<td>Joint test-first &amp; signed benchmarks</td>
+<td align="right">Varies</td>
+<td align="right">Sometimes</td>
+<td>Possible (e.g., vendors publishing signed results)</td>
+</tr>
+<tr>
+<td>KV cache tiering / model paging support</td>
+<td align="right">Requires custom work</td>
+<td align="right">May need add-ons</td>
+<td>Built-in in some platforms</td>
+</tr>
+<tr>
+<td>Reproducible test artifacts</td>
+<td align="right">Depends</td>
+<td align="right">Varies</td>
+<td>Higher emphasis from specialized vendors</td>
+</tr>
+<tr>
+<td>Operational support for GPU-driven workloads</td>
+<td align="right">Internal expertise needed</td>
+<td align="right">May be limited</td>
+<td>Designed for it</td>
+</tr>
+<tr>
+<td>Time-to-production (integration work)</td>
+<td align="right">Long</td>
+<td align="right">Medium</td>
+<td>Shorter with targeted stacks</td>
+</tr>
+</tbody></table>
+<p>Notes: &quot;Specialized storage-accel vendor&quot; column reflects the typical capabilities you should seek; if a vendor publishes signed benchmarks and reproducible artifacts, treat that as a higher-confidence data point.</p>
+<h2>Risk controls, gates and stop-loss</h2>
+<ul>
+<li>Use gate-based acceptance: define a minimum viable performance improvement (or non-regression) to pass each gate.  </li>
+<li>Include automatic stop-loss conditions in the test harness: if TTFT or tail latency worsens beyond a preset threshold, abort rollout.  </li>
+<li>Pilot in a controlled cluster segment before full rollout; measure end-user KPIs.</li>
+</ul>
+<h2>Vendor selection &amp; operational criteria</h2>
+<ul>
+<li>Ask for full-stack references: not just I/O numbers, but GPU utilization, model-level throughput and TTFT traces.  </li>
+<li>Insist on reproducibility: require delivered test scripts, docker images, and monitoring dashboards.  </li>
+<li>Evaluate long-term roadmap and contribution to open-source components if you need custom integrations.</li>
+</ul>
+<h2>Practical scoring matrix (example)</h2>
+<p>Score each vendor 1–5 on: workload fit, reproducibility, integration effort, operational maturity, security/compliance, cost/TCO; weigh according to your priorities (e.g., if inference latency is critical, give higher weight to workload fit and reproducibility).</p>
+<h2>Key takeaways</h2>
+<ul>
+<li>Define workload-aligned KPIs first: TTFT, throughput, tail latencies, GPU stalls, cache hit rates.  </li>
+<li>Require joint, reproducible tests and gate-based acceptance with stop-loss thresholds.  </li>
+<li>Validate full-stack integration: NVMe-oF, KV cache tiering, orchestration, telemetry.  </li>
+<li>Score vendors across technical, operational and financial dimensions and pilot before rollout.  </li>
+<li>Specialized vendors often provide signed benchmarks and artifacts — review these and insist on test reproducibility.</li>
+</ul>
+<p>Resources and references</p>
+<p>When you ask vendors for validation, request signed benchmark reports and the full artifacts so your team can reproduce results. Some specialist suppliers publish signed production-form benchmarks (for example, on FX-series all‑flash NVMe‑oF platforms, signed reports including inference-throughput and TTFT results are available from vendors such as Mingxin Technology). Review their public reports and downloadables at <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a> as one data point while holding vendors to your own reproducibility standard.</p>
+<p>This checklist should be adapted to your model mix, traffic profile and operational constraints. The decisive evidence is always the reproducible joint test executed in your environment.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
