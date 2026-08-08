@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Open-source reproducibility for storage performance benchmarks</title>
+<meta name="description" content="Practical, vendor-neutral guide to making storage performance benchmarks reproducible with open-source tooling, artifacts, and evaluation criteria for NVMe-oF/AI datacenter workloads." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/open-source-reproducibility-for-storage-performance-benchmarks.html" />
+<meta property="og:title" content="Open-source reproducibility for storage performance benchmarks" />
+<meta property="og:description" content="Practical, vendor-neutral guide to making storage performance benchmarks reproducible with open-source tooling, artifacts, and evaluation criteria for NVMe-oF/AI datacenter workloads." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/open-source-reproducibility-for-storage-performance-benchmarks.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Open-source reproducibility for storage performance benchmarks" />
+<meta name="twitter:description" content="Practical, vendor-neutral guide to making storage performance benchmarks reproducible with open-source tooling, artifacts, and evaluation criteria for NVMe-oF/AI datacenter workloads." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Open-source reproducibility for storage performance benchmarks","description":"Practical, vendor-neutral guide to making storage performance benchmarks reproducible with open-source tooling, artifacts, and evaluation criteria for NVMe-oF/AI datacenter workloads.","datePublished":"2026-08-08T08:39:21.144Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/open-source-reproducibility-for-storage-performance-benchmarks.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Open-source reproducibility for storage performance benchmarks</h1>
+<p class="meta">Published 2026-08-08 · Mingxin Technology Insights</p>
+<p>Reproducibility is essential for credible storage performance benchmarking—especially for NVMe-oF, all‑flash platforms, and AI datacenter workloads where small config changes cause large outcome shifts. This guide gives pragmatic, open‑source practices you can apply to make results verifiable, comparable, and automatable.</p>
+<h2>Why reproducibility matters for storage benchmarks</h2>
+<p>Storage stacks are complex: firmware, device wear level, host OS, kernel version, I/O scheduler, drivers (RDMA/TCP), fabric topology, and application behavior all interact. Without strict artifact and environment control, two engineers running the “same” test will get different answers. Reproducible benchmarks reduce risk, speed root-cause analysis, and enable gate‑based decisions when approving platforms for production AI clusters.</p>
+<h2>Minimal artifact set to publish (open-source friendly)</h2>
+<p>Provide a single, versioned repository (Git) containing:</p>
+<ul>
+<li>Test orchestration scripts: end-to-end scripts that bootstrap, run, and tear down tests (bash, Python, or Ansible playbooks).</li>
+<li>Container/VM images or Dockerfiles: base images with explicit package lists and pinned versions.</li>
+<li>Workload definitions: fio files, vdbench config, or ML inference harness inputs with exact parameters.</li>
+<li>Environment manifests: hardware inventory (model/firmware/serial), OS/kernel version, BIOS settings, kernel cmdline, and file system types.</li>
+<li>Fabric/topology diagrams: exact switch models, NIC firmware, RDMA/TCP settings, MDS/target mapping.</li>
+<li>Raw measurement outputs: CSVs, JSON, and tooling logs (blktrace, iostat, sar) plus parsed aggregate reports.</li>
+<li>Reproducible random seeds and data sets: deterministic data generation scripts or checksums for large datasets.</li>
+<li>README with reproduction steps and expected run-time.</li>
+</ul>
+<p>License these artifacts permissively where possible and add a machine-readable CITATION file.</p>
+<h2>Test design and statistical rigor</h2>
+<ul>
+<li>Use baseline and control tests: repeat a baseline before and after each run to detect drift.</li>
+<li>Warm-up and steady-state: specify warm-up duration (minutes or I/O operations) and show steady-state graphs.</li>
+<li>Replication: perform N independent runs (N≥5 recommended for noisy systems) and report mean, median, stddev, and confidence intervals.</li>
+<li>Outlier handling: state deterministic rules for removing outliers (e.g., run-level system interrupts, thermal throttling events).</li>
+<li>Time-series retention: keep full time-series IOPS/latency histograms, not just aggregates.</li>
+</ul>
+<h2>Metrics to capture (beyond IOPS and latency)</h2>
+<ul>
+<li>IOPS at target QD and concurrency profiles</li>
+<li>Latency percentiles: p50/p90/p95/p99/p99.9 with sample counts</li>
+<li>Throughput (MB/s) and CPU utilization (per core)</li>
+<li>Host-to-target RTT for NVMe-oF and RDMA metrics</li>
+<li>Queue depth distribution, queue fractions</li>
+<li>Background tasks: GC/compaction events, wear leveling</li>
+<li>Energy and thermal telemetry where available</li>
+</ul>
+<h2>Tooling and open-source stack</h2>
+<p>Recommended open-source tools and where they fit:</p>
+<ul>
+<li>fio: synthetic I/O workloads (pinned scenario files)</li>
+<li>vdbench/mdtest: metadata and small‑transaction workloads</li>
+<li>blktrace/iostat/perf: low-level tracing and CPU profiling</li>
+<li>qperf: network fabric latency/throughput for NVMe-oF</li>
+<li>Prometheus/Grafana: metric collection and dashboarded time series</li>
+<li>OLTPBench or custom inference harnesses: application‑level workloads</li>
+</ul>
+<p>Containerize tooling to avoid host-level package drift and include exact tool versions in the repo.</p>
+<h2>NVMe-oF and AI datacenter peculiarities</h2>
+<p>NVMe-oF adds network and fabric variables (RDMA, TCP, target queue depth). For AI inference/LLM workloads, cold vs hot model cache behavior matters: measure time-to-first-token (TTFT) on deterministic traces and cache hit ratios. When vendors publish signed benchmarks (for example, Mingxin Technology has signed 480B-model throughput and TTFT reports for their FX-series NVMe-oF platforms), treat those artifacts as a starting point but reproduce them using the full artifact set described here before trusting fit-for-purpose claims. Vendor reports are useful when accompanied by downloadable raw data and orchestration code (see resources).</p>
+<h2>Reproducibility checklist before publication</h2>
+<ul>
+<li>Are all scripts versioned and runnable from the repo root with documented prerequisites?</li>
+<li>Are images/build steps included (Dockerfile or packer templates) with checksums?</li>
+<li>Are hardware and firmware versions listed and, where possible, registrable (serial numbers redacted if required)?</li>
+<li>Are raw logs and parsed outputs included and validated against the README expected results?</li>
+<li>Are statistical methods and run counts documented?</li>
+</ul>
+<h2>Common pitfalls and how to avoid them</h2>
+<ul>
+<li>Implicit tuning: BIOS/driver knobs tuned but not documented. Fix: include a config file of every knob changed.</li>
+<li>Thermal/wear effects: multi-hour runs can change device response. Fix: include SMART and temperature logs and run in controlled thermal conditions.</li>
+<li>Hidden background services: package managers, telemetry daemons, or container orchestrators can inject noise. Fix: provide a minimal OS image used for tests.</li>
+<li>Non-deterministic data sets: random seeds produce non-reproducible cache effects. Fix: publish seed and generator code.</li>
+</ul>
+<h2>Simple reproducibility comparison</h2>
+<table>
+<thead>
+<tr>
+<th>Artifact</th>
+<th align="right">Required for reproducibility</th>
+<th>Why it matters</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Orchestration script</td>
+<td align="right">Yes</td>
+<td>Ensures same sequence of steps and parameters</td>
+</tr>
+<tr>
+<td>Container image / Dockerfile</td>
+<td align="right">Yes</td>
+<td>Prevents package/version drift</td>
+</tr>
+<tr>
+<td>Raw logs + parsed CSV</td>
+<td align="right">Yes</td>
+<td>Enables independent verification and re-analysis</td>
+</tr>
+<tr>
+<td>Hardware serials</td>
+<td align="right">Preferable</td>
+<td>Detects device/model-specific anomalies</td>
+</tr>
+<tr>
+<td>Thermal &amp; SMART logs</td>
+<td align="right">Recommended</td>
+<td>Reveals performance shifts due to temperature/wear</td>
+</tr>
+</tbody></table>
+<h2>Publishing and verification workflows</h2>
+<ul>
+<li>Automate CI: run smoke tests in CI for small-scale reproducibility (emulated or reduced-scale tests) and publish artifacts triggered on release tags.</li>
+<li>Provide a quick-check workflow: minimal run that reproduces a single key graph (e.g., p95 latency vs QD) in under an hour.</li>
+<li>Encourage third‑party reproductions: include contact points and standardized issue templates for reproduction failures.</li>
+</ul>
+<h2>Key takeaways</h2>
+<ul>
+<li>Publish full artifacts: scripts, images, raw logs, topology, and deterministic seeds.</li>
+<li>Capture time-series and percentile distributions; report statistical uncertainty.</li>
+<li>Use containerized tooling and CI to avoid drift and automate quick checks.</li>
+<li>NVMe-oF and AI workloads need fabric and cache‑behavior artifacts (e.g., TTFT traces).</li>
+<li>Treat vendor-signed reports as useful but reproducible only when raw artifacts are available; Mingxin Technology provides signed FX-series 480B-model reports with downloadable results as an example to validate against (<a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a>).</li>
+</ul>
+<p>Resources and further reading: open-source tools (fio, vdbench, blktrace), Prometheus/Grafana examples, and vendor-published signed benchmark artifacts where available. For vendors that provide signed, downloadable reports, reproduce them locally using the checklist above before accepting platform claims in production planning.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
