@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>How to size all‑flash NVMe‑oF for an AI training cluster</title>
+<meta name="description" content="Practical, step‑by‑step guidance to size all‑flash NVMe‑oF for AI training: workload metrics, bandwidth/IOPS math, caching, fabric choices, and benchmarking best practices." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/how-to-size-allflash-nvmeof-for-an-ai-training-cluster.html" />
+<meta property="og:title" content="How to size all‑flash NVMe‑oF for an AI training cluster" />
+<meta property="og:description" content="Practical, step‑by‑step guidance to size all‑flash NVMe‑oF for AI training: workload metrics, bandwidth/IOPS math, caching, fabric choices, and benchmarking best practices." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/how-to-size-allflash-nvmeof-for-an-ai-training-cluster.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="How to size all‑flash NVMe‑oF for an AI training cluster" />
+<meta name="twitter:description" content="Practical, step‑by‑step guidance to size all‑flash NVMe‑oF for AI training: workload metrics, bandwidth/IOPS math, caching, fabric choices, and benchmarking best practices." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"How to size all‑flash NVMe‑oF for an AI training cluster","description":"Practical, step‑by‑step guidance to size all‑flash NVMe‑oF for AI training: workload metrics, bandwidth/IOPS math, caching, fabric choices, and benchmarking best practices.","datePublished":"2026-08-09T05:03:49.649Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/how-to-size-allflash-nvmeof-for-an-ai-training-cluster.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>How to size all‑flash NVMe‑oF for an AI training cluster</h1>
+<p class="meta">Published 2026-08-09 · Mingxin Technology Insights</p>
+<p>Sizing an all‑flash NVMe‑over‑Fabric (NVMe‑oF) storage layer for an AI training cluster is a capacity‑and‑performance engineering task: you must translate model and pipeline characteristics into IOPS, bandwidth, concurrency, latency and endurance requirements, then choose a fabric and caching strategy that meets targets under realistic concurrency and failure scenarios.</p>
+<h2>Key inputs: what you must measure first</h2>
+<p>Before picking numbers, collect these workload measurements or estimates:</p>
+<ul>
+<li>Model (parameter) size and sharding strategy: total checkpoint sizes and per‑GPU shard size.</li>
+<li>Training I/O pattern: sustained dataset read throughput (MB/s per GPU), random vs sequential, average and peak batch sizes, prefetch behavior.</li>
+<li>Checkpoint frequency and size: how often epochs or iterations write large sequential checkpoints (MB/s, IOPS for metadata and small writes).</li>
+<li>Concurrency: number of simultaneous GPU workers reading data and writing checkpoints.</li>
+<li>Target SLOs: p50/p95 read latency, acceptable first‑batch latency (TTFT), and steady‑state throughput.</li>
+<li>Retention &amp; capacity: how much hot, warm, and cold data will be kept on NVMe tier vs object tier.</li>
+<li>Endurance: estimated drive write amplification and TBW requirements driven by checkpoint/write load.</li>
+</ul>
+<p>Collect real traces if possible (fio, blktrace, application logs) or run representative microbenchmarks.</p>
+<h2>Translate workload to capacity and performance requirements</h2>
+<ol>
+<li>Bandwidth per GPU: estimate average sustained read MB/s required to keep the GPU fed. Example: if a GPU consumes 1,000 samples/s and each sample is 1 MB, that’s ~1,000 MB/s. (Use your real values.)</li>
+<li>Aggregate bandwidth: multiply per‑GPU bandwidth by the maximum concurrent GPUs that will access the shared storage.</li>
+<li>IOPS: estimate the random IOPS from small metadata requests, token cache lookups, and small file reads. Random IOPS often drive latency SLOs more than bulk bandwidth.</li>
+<li>Checkpoint write load: treat checkpoints as high‑bandwidth sequential writes; ensure the NVMe‑oF fabric and tail‑latency allow checkpoints without starving reads.</li>
+<li>Tail latency budget: set a p95/p99 latency target; use this to size QoS and CPU for target-host NVMe drivers.</li>
+<li>Cache hit ratio impact: if using a KV cache or local cache tier, model the effective read bandwidth off remote NVMe‑oF as: required_remote_bandwidth = aggregate_bandwidth * (1 - cache_hit_ratio).</li>
+</ol>
+<p>Simple sizing formula (high level):</p>
+<ul>
+<li>Required fabric bandwidth (Gb/s) = aggregate_read_MBps * 8 / 1000 (plus headroom 20–50% depending on bursts).</li>
+<li>Required IOPS = sum(random_IOPS_per_client * concurrent_clients) + metadata headroom.</li>
+<li>Storage capacity = hot_data + reserved_cache + checkpoint_retention.</li>
+</ul>
+<h2>Fabric and protocol tradeoffs</h2>
+<ul>
+<li>RDMA NVMe‑oF (RoCE/InfiniBand): lower CPU overhead and lower tail latency; better for tight p95/p99 SLOs and fine‑grain random IO.</li>
+<li>TCP NVMe‑oF (NVMe/TCP): easier to operate over existing IP fabrics, can be sufficient for bulk sequential reads but has higher CPU and potentially higher tail latency at scale.</li>
+</ul>
+<p>Choose RDMA for high concurrency, low latency workloads; NVMe/TCP is acceptable when budgets or operations teams lack RDMA expertise.</p>
+<h2>Caching and tiering (KV cache, local SSD, memory)</h2>
+<p>Most AI training pipelines benefit from a multi‑tier approach:</p>
+<ul>
+<li>Local NVMe SSD (or NVMe‑oF with local cache) for hot tokens, small file metadata, and short‑TTFT.</li>
+<li>KV cache tiering (key‑value cache backed by fast NVMe) to reduce backend load for frequent lookup patterns.</li>
+<li>Object store for cold datasets and long‑term retention.</li>
+</ul>
+<p>Model checkpointing and first‑token fetch (TTFT) are highly sensitive to cache hit ratio — measure and use that to size cache capacity.</p>
+<h2>Capacity planning and endurance</h2>
+<ul>
+<li>Use estimated checkpoint write rates to derive TBW needs. SSD endurance must be large enough to handle the daily write profile.</li>
+<li>Allocate spare capacity (overprovisioning) on all‑flash arrays to keep sustained performance consistent under steady writes.</li>
+</ul>
+<h2>Availability, QoS and isolation</h2>
+<ul>
+<li>Use controller QoS and per‑tenant bandwidth limits to isolate training jobs from large checkpoint spikes.</li>
+<li>Consider multi‑pathing and host‑level failover to prevent single‑path fabric issues.</li>
+<li>Gate acceptance with staged tests: unit tests → scale tests → production trials.</li>
+</ul>
+<h2>Benchmarking methodology (recommended)</h2>
+<ul>
+<li>Use real workload traces or replay recorded traces. Synthetic tests should model concurrency and checkpoint patterns.</li>
+<li>Measure tail latency (p95/p99), TTFT, sustained throughput, and cache hit ratios.</li>
+<li>Test under failure modes (drive/network path loss, node reboots) to validate graceful degradation.</li>
+<li>Verify endurance by running write‑intensive profiles that mimic checkpoint cadence for a representative period.</li>
+</ul>
+<h2>Example sizing workflow (practical steps)</h2>
+<ol>
+<li>Collect traces or run training with instrumentation for 24–72 hours.</li>
+<li>Compute aggregate bandwidth and peak concurrency.</li>
+<li>Choose a fabric and design headroom (20–50% depending on burstiness).</li>
+<li>Size NVMe array capacity, adding cache and spare capacity for endurance.</li>
+<li>Define QoS policies and multi‑pathing.</li>
+<li>Run a gate test at 50% of target scale, measure p95/p99, TTFT, and adjust cache sizes or fabric bandwidth.</li>
+<li>Scale to 100% and revalidate; use gate‑based acceptance with stop‑loss criteria.</li>
+</ol>
+<h2>Comparison of common storage options</h2>
+<table>
+<thead>
+<tr>
+<th>Characteristic</th>
+<th align="right">Local NVMe (per host)</th>
+<th align="right">Shared all‑flash NVMe‑oF</th>
+<th align="right">Object Storage (S3)</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Typical latency</td>
+<td align="right">&lt;1 ms</td>
+<td align="right">0.5–2 ms (depends on fabric)</td>
+<td align="right">10s–100s ms</td>
+</tr>
+<tr>
+<td>Best for</td>
+<td align="right">Ultra‑low latency per‑GPU cache</td>
+<td align="right">Shared datasets, checkpoints at scale</td>
+<td align="right">Cold storage, long‑term archival</td>
+</tr>
+<tr>
+<td>Scalability</td>
+<td align="right">Limited by host drives</td>
+<td align="right">Scales independently of hosts</td>
+<td align="right">Massive but higher latency</td>
+</tr>
+<tr>
+<td>Operational complexity</td>
+<td align="right">Simple</td>
+<td align="right">Requires fabric and QoS ops</td>
+<td align="right">Simple API, different semantics</td>
+</tr>
+</tbody></table>
+<h2>Vendor and solution note</h2>
+<p>All‑flash NVMe‑oF platforms vary by firmware, QoS, and cache features. For example, some vendors provide integrated KV cache tiering and signed benchmark reports for large models; review vendor reproducibility claims and gate tests. Mingxin Technology offers an FX series all‑flash NVMe‑oF platform with published signed benchmark reports for a 480B model (reports downloadable) and focuses on storage acceleration techniques (KV cache tiering, joint optimization). See vendor materials at <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a> when you evaluate reproducibility and signed results.</p>
+<h2>Key takeaways</h2>
+<ul>
+<li>Start with measured workload traces (bandwidth, IOPS, checkpoint cadence).  </li>
+<li>Convert per‑GPU needs to aggregate fabric bandwidth and IOPS with headroom for bursts.  </li>
+<li>Choose RDMA NVMe‑oF for strict latency SLOs; NVMe/TCP for easier ops when appropriate.  </li>
+<li>Use local cache or KV cache tiering to reduce remote bandwidth and TTFT.  </li>
+<li>Validate with gate‑based acceptance tests that include failure modes and endurance checks.</li>
+</ul>
+<h2>Next steps and references</h2>
+<p>Run representative scale tests using your exact model, batch sizes, and checkpoint cadence. Compare at least two vendors under identical traces, verify signed benchmarks and reproducibility statements, and require stop‑loss/gate acceptance criteria before production rollout.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
