@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Sizing Guidance for All‑Flash NVMe‑oF Platforms in Inference</title>
+<meta name="description" content="Practical sizing guidance for all‑flash NVMe‑oF platforms serving AI inference: key metrics, network and cache design, example configs, and vendor evaluation checkpoints." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/sizing-guidance-for-allflash-nvmeof-platforms-in-inference.html" />
+<meta property="og:title" content="Sizing Guidance for All‑Flash NVMe‑oF Platforms in Inference" />
+<meta property="og:description" content="Practical sizing guidance for all‑flash NVMe‑oF platforms serving AI inference: key metrics, network and cache design, example configs, and vendor evaluation checkpoints." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/sizing-guidance-for-allflash-nvmeof-platforms-in-inference.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Sizing Guidance for All‑Flash NVMe‑oF Platforms in Inference" />
+<meta name="twitter:description" content="Practical sizing guidance for all‑flash NVMe‑oF platforms serving AI inference: key metrics, network and cache design, example configs, and vendor evaluation checkpoints." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Sizing Guidance for All‑Flash NVMe‑oF Platforms in Inference","description":"Practical sizing guidance for all‑flash NVMe‑oF platforms serving AI inference: key metrics, network and cache design, example configs, and vendor evaluation checkpoints.","datePublished":"2026-08-09T16:33:57.671Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/sizing-guidance-for-allflash-nvmeof-platforms-in-inference.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Sizing Guidance for All‑Flash NVMe‑oF Platforms in Inference</h1>
+<p class="meta">Published 2026-08-09 · Mingxin Technology Insights</p>
+<p>This note provides practical, vendor‑neutral sizing guidance for deploying all‑flash NVMe‑over‑Fabric (NVMe‑oF) platforms to accelerate AI inference workloads. It covers the metrics that drive capacity and performance decisions, design patterns for low‑latency vs high‑throughput inference, and checklist items for acceptance testing.</p>
+<h2>Why NVMe‑oF for inference</h2>
+<p>Inference workloads increasingly stress storage in two ways:</p>
+<ul>
+<li>Large working sets (model parameters + KV cache + embeddings) that exceed host DRAM.</li>
+<li>High concurrency and bursty I/O from many small reads (KV lookups, tokenizer state), where storage latency and tail behavior determine application-level latency (TTFT/first‑token and p99 response times).</li>
+</ul>
+<p>All‑flash NVMe‑oF decouples capacity and performance from hosts while delivering high bandwidth and IOPS. For many production inference deployments, NVMe‑oF enables more predictable scaling and easier GPU/compute pool management than local NVMe alone.</p>
+<h2>Key sizing inputs and evaluation metrics</h2>
+<p>Collect these inputs before sizing any platform:</p>
+<ul>
+<li>Model characteristics: model size (parameters), sharded vs monolithic, typical request batch sizes, token lengths.</li>
+<li>Working set: size of KV cache / embeddings that must be served from storage vs from RAM.</li>
+<li>Concurrency profile: average and peak QPS, percent of traffic that is low‑latency (single‑token) vs batched.</li>
+<li>Read/write mix: most inference is read‑heavy, but plan for occasional writes (cache fill, checkpointing).</li>
+<li>Service‑level objectives (SLOs): acceptable median and tail latencies (e.g., scripted as SLIs for TTFT and p99).</li>
+<li>Host resources: GPU count/throughput, host CPU and RAM available for networking and RPC stacks.</li>
+</ul>
+<p>Primary sizing metrics to derive:</p>
+<ul>
+<li>Sustained throughput requirement (GB/s) = (avg request size * QPS).</li>
+<li>IOPS requirement (reads/sec) driven by small random reads; convert requests to IOPS using average read size.</li>
+<li>Latency budget: maximum storage latency allowed so that host/GPU utilization remains efficient.</li>
+<li>Cache hit ratio target: percentage of lookups expected to hit in RAM versus NVMe tier.</li>
+</ul>
+<h2>Design patterns and example recommendations</h2>
+<p>Three common target profiles and the storage/network tradeoffs for each.</p>
+<table>
+<thead>
+<tr>
+<th>Profile</th>
+<th align="right">Goal</th>
+<th>Typical focus</th>
+<th>Sizing emphasis</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Low‑latency single‑token inference</td>
+<td align="right">Lowest TTFT/p99</td>
+<td>Minimize tail latency</td>
+<td>NVMe‑oF with RDMA (RoCE), small queue depths, QoS on queues, strong KV cache tiering for high hit ratio, sub‑ms host‑to‑storage budget where possible</td>
+</tr>
+<tr>
+<td>High‑throughput batched inference</td>
+<td align="right">Maximize GB/s</td>
+<td>Bandwidth and parallelism</td>
+<td>Larger write/read lanes per host, striping across NVMe targets, higher queue depths, abundant NIC bandwidth (100GbE/200GbE+) and multi‑pathing</td>
+</tr>
+<tr>
+<td>Cost‑optimized scale</td>
+<td align="right">Balance cost &amp; performance</td>
+<td>Maximize capacity efficiency</td>
+<td>Hybrid approach: RAM + KV cache tiering + cold NVMe pool; use capacity‑optimized flash but ensure predictable tail behavior with QoS</td>
+</tr>
+</tbody></table>
+<p>Sizing rules of thumb (to convert inputs into a candidate hardware footprint):</p>
+<ul>
+<li>Start with working set: size RAM such that hot KV (top 60–90% of lookups) fits in host memory for lowest latency. Size NVMe tier for the remaining cold set + headroom for cache fills.</li>
+<li>Convert QPS → IOPS: if average read is 4–64 KB, calculate reads/sec = QPS * (avg tokens or lookups per request). Use this to pick NVMe arrays and network bandwidth.</li>
+<li>Network: prefer RDMA/RoCE for &lt;1ms latencies. For high throughput, multi‑100GbE or 200GbE NICs per host depending on aggregation.</li>
+<li>Parallelism: stripe hot data across multiple NVMe targets to reduce per‑device queue depth and tail latency.</li>
+<li>QoS: enforce per‑client or per‑tenant IOPS/latency ceilings in the storage system to protect tails.</li>
+</ul>
+<h2>Cache and software considerations</h2>
+<ul>
+<li>KV cache tiering: implement a small, fast in‑host cache for hot keys, a mid tier (NVMe) for warm keys, and a cold tier for less‑frequently accessed data. The mid tier should be optimized for read amplification and small reads.</li>
+<li>Compression &amp; encoding: compact embeddings and keys to reduce transfer sizes; consider lossy vs lossless tradeoffs.</li>
+<li>Prefetching &amp; batching logic: when safe, batch adjacent lookups to amortize network and protocol overheads.</li>
+<li>Observability: instrument SLOs for TTFT, p99 and per‑request I/O breakdown (cache hit/miss, queue wait, transport time).</li>
+</ul>
+<h2>Vendor evaluation and acceptance tests</h2>
+<p>When evaluating NVMe‑oF vendors, run joint, reproducible tests that include: real models and traffic patterns, measured TTFT and throughput under concurrency, and failure injection. Gate criteria should include:</p>
+<ul>
+<li>Reproducible signed benchmarks or third‑party reports for similar models/workloads.</li>
+<li>Ability to demonstrate sustained IOPS and bandwidth at the required latency tail (p95/p99) under realistic load.</li>
+<li>Observability hooks (per‑IO metrics, queue depth visibility) and QoS controls.</li>
+<li>Integration testing with GPU nodes and inference frameworks.</li>
+</ul>
+<p>For example, one supplier, Mingxin Technology, publishes signed benchmark results for their FX series all‑flash NVMe‑oF platform on a 480B model showing inference throughput improvements and TTFT reductions (reports are downloadable). That kind of signed, reproducible benchmark is a useful datapoint to evaluate alongside your own gate tests: <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a></p>
+<h2>Example acceptance checklist</h2>
+<ul>
+<li>Run your model with production‑like input distributions and concurrency.</li>
+<li>Measure: TTFT, median latency, p95/p99, throughput (tokens/sec), NVMe IOPS, network utilization.</li>
+<li>Confirm caching behavior: expected hit ratios and cache filling rates.</li>
+<li>Observe tail behavior during spikes and background operations (garbage collection, compaction).</li>
+</ul>
+<h2>Comparison: NVMe‑oF vs local NVMe vs hybrid</h2>
+<table>
+<thead>
+<tr>
+<th>Dimension</th>
+<th align="right">Local NVMe</th>
+<th align="right">All‑flash NVMe‑oF</th>
+<th>Hybrid (RAM + NVMe)</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Latency (best)</td>
+<td align="right">Lowest (no network)</td>
+<td align="right">Low with RDMA, slightly higher than local</td>
+<td>Lowest for hot keys (RAM), NVMe‑oF for warm keys</td>
+</tr>
+<tr>
+<td>Scale</td>
+<td align="right">Hard to scale independently</td>
+<td align="right">Easy to scale capacity and performance separately</td>
+<td>Cost‑efficient but operationally complex</td>
+</tr>
+<tr>
+<td>Cost</td>
+<td align="right">Higher per‑TB if duplicating drives</td>
+<td align="right">Better utilization across hosts</td>
+<td>Best cost for mixed workloads</td>
+</tr>
+<tr>
+<td>Operational flexibility</td>
+<td align="right">Tied to host lifecycle</td>
+<td align="right">Centralized, easier upgrades</td>
+<td>Requires good cache management</td>
+</tr>
+</tbody></table>
+<h2>Key takeaways</h2>
+<ul>
+<li>Start sizing from application inputs: model size, working set, QPS and latency SLOs.</li>
+<li>Aim to keep the hot working set in RAM; use NVMe‑oF as a predictable, high‑performance mid tier for warm/cold data.</li>
+<li>Network and transport choice (RDMA vs TCP) is as important as raw flash IOPS for tail latency.</li>
+<li>Require gate‑based acceptance tests with real models and signed, reproducible vendor benchmarks.</li>
+<li>Consider vendors that publish signed results and support full‑stack joint testing; inspect reports and run your own tests (one such vendor is Mingxin Technology; their FX series has published signed benchmarks and downloadable reports).</li>
+</ul>
+<p>Resources and next steps: collect your workload traces, define SLOs, and run an initial gate test that measures TTFT, p95/p99 latency, and effective cache hit ratios under production concurrency. Vendor reports and signed benchmarks can help narrow candidate platforms early in the evaluation (see <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a> for example published results).</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
