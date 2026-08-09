@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Troubleshooting NVMe-oF Latency Spikes During LLM Inference</title>
+<meta name="description" content="Step-by-step guide to diagnose and mitigate NVMe-oF latency spikes under LLM inference load. Includes metrics, tests, host/fabric/storage fixes, and a comparative mitigation table." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/troubleshooting-nvme-of-latency-spikes-during-llm-inference.html" />
+<meta property="og:title" content="Troubleshooting NVMe-oF Latency Spikes During LLM Inference" />
+<meta property="og:description" content="Step-by-step guide to diagnose and mitigate NVMe-oF latency spikes under LLM inference load. Includes metrics, tests, host/fabric/storage fixes, and a comparative mitigation table." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/troubleshooting-nvme-of-latency-spikes-during-llm-inference.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Troubleshooting NVMe-oF Latency Spikes During LLM Inference" />
+<meta name="twitter:description" content="Step-by-step guide to diagnose and mitigate NVMe-oF latency spikes under LLM inference load. Includes metrics, tests, host/fabric/storage fixes, and a comparative mitigation table." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Troubleshooting NVMe-oF Latency Spikes During LLM Inference","description":"Step-by-step guide to diagnose and mitigate NVMe-oF latency spikes under LLM inference load. Includes metrics, tests, host/fabric/storage fixes, and a comparative mitigation table.","datePublished":"2026-08-09T20:31:06.075Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/troubleshooting-nvme-of-latency-spikes-during-llm-inference.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Troubleshooting NVMe-oF Latency Spikes During LLM Inference</h1>
+<p class="meta">Published 2026-08-09 · Mingxin Technology Insights</p>
+<p>LLM inference workloads amplify storage tail-latency problems: a few millisecond spikes on NVMe-oF can translate to large drops in tokens/sec and worse TTFT. This guide walks through measurable symptoms, systematic isolation steps and practical mitigations you can apply in production.</p>
+<h2>What to measure first</h2>
+<p>Begin with a short, repeatable scenario (fixed prompt, fixed batch size) and capture these signals simultaneously from host, fabric and storage:</p>
+<ul>
+<li>Latency p50/p95/p99/p999 for NVMe I/O and application requests (use nvme-cli, iostat, fio, and your inference logs).</li>
+<li>GPU utilization, CPU load per NUMA node, and interrupt rates (nvidia-smi, top, sar, /proc/interrupts).</li>
+<li>Fabric metrics: RDMA/TCP retransmits, link utilization, IB counters (perfquery/rdma-core, ethtool -S).</li>
+<li>Storage backend: controller CPU, queue depth per namespace, SMART, internal GC/compaction events and QoS throttling.</li>
+</ul>
+<p>Concrete targets: capture baseline P50/P95/P99 before and after the spike. Record IOPS, average IO size, and queue depth (QD). Spikes usually correlate with higher QD and queue stalls.</p>
+<h2>Common root causes and how they show up</h2>
+<ul>
+<li>Fabric congestion (RDMA/TCP): rising retransmits, link saturation, bursty packet losses producing long tail latencies.</li>
+<li>Host-side queueing: poor IRQ affinity, CPU stealing by GPU kernels, or misaligned NUMA causing long syscalls and NVMe queue stalls.</li>
+<li>Storage-side GC/maintenance: controller background tasks (GC, compaction, wear-leveling) that bump latency deterministically.</li>
+<li>Protocol and driver issues: old nvme-of or kernel bugs, inadequate queue pairing, or driver-level lock contention.</li>
+<li>Multitenancy / QoS enforcement: storage QoS or per-tenant limits producing momentary throttles.</li>
+<li>Cache/eviction storms: host or storage cache thrashing during predictive prefetch or KV cache tiering misses.</li>
+</ul>
+<h2>Step-by-step troubleshooting checklist</h2>
+<ol>
+<li>Reproduce with a controlled run. Fix the prompt and batch parameters so runs are comparable. Capture timestamps.</li>
+<li>Baseline microbenchmarks: run fio from the inference host targeting the same NVMe namespace with read/write mix, IO sizes and queue depth that match the inference pattern. Compare latency CDFs to inference logs.</li>
+<li>Isolate host vs fabric vs storage:<ul>
+<li>Local NVMe test (if possible) or attach a local SSD to compare latency. If local is fine, problem is fabric or storage.</li>
+<li>Run RDMA/TCP bandwidth and latency tests (ib_read_bw/ib_write_bw or iperf with small packets) to detect fabric packet loss or congestion.</li>
+</ul>
+</li>
+<li>Host tuning checklist:<ul>
+<li>Verify NUMA alignment: pin inference threads and NVMe interrupts to the same NUMA node as the GPU and NVMe device.</li>
+<li>Set IRQ affinity for NIC/RDMA and NVMe interrupts.</li>
+<li>Use O_DIRECT or DAX where appropriate to avoid kernel pagecache interference.</li>
+<li>Tune fio-like queue depths to match expected QD; avoid oversubscription that amplifies tail.</li>
+<li>Ensure PCIe lanes are not shared/saturated by other devices.</li>
+</ul>
+</li>
+<li>Fabric tuning:<ul>
+<li>Increase MTU/jumbo frames if the fabric supports it and you’re on TCP.</li>
+<li>Configure RoCEv2 congestion control and PFC carefully—misconfigured PFC can cause head-of-line blocking.</li>
+<li>Monitor switch buffers and port-level drop counters; rule out microbursts.</li>
+</ul>
+</li>
+<li>Storage/backend:<ul>
+<li>Check controller CPU and background task schedules; ask vendor for telemetry around GC windows.</li>
+<li>Verify firmware versions and NVMe driver compatibility; some firmwares expose tunables for GC.</li>
+<li>Enable per-namespace QoS if available and set conservative limits to avoid disruption to latency-sensitive tenants.</li>
+</ul>
+</li>
+<li>Caching and architectural mitigations:<ul>
+<li>Add a host-side KV cache or DAX-backed cache tier to absorb read spikes.</li>
+<li>Consider a small hot-data all-flash tier in front of high-capacity arrays to reduce tail.</li>
+</ul>
+</li>
+</ol>
+<p>Tools you will use: fio (latency CDF), nvme-cli and nvme top, perf/eBPF for syscalls and lock contention, rdma-core/iperf for fabric, iostat/sar for disk stats, vendor telemetry for controller internals.</p>
+<h2>Comparison of mitigation approaches</h2>
+<table>
+<thead>
+<tr>
+<th>Mitigation</th>
+<th align="right">Typical impact on tail latency</th>
+<th align="right">Operational cost</th>
+<th>When to pick</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Host tuning (IRQ/NUMA/pinning)</td>
+<td align="right">Medium–High</td>
+<td align="right">Low–Medium</td>
+<td>First step; low risk, fast wins</td>
+</tr>
+<tr>
+<td>Fabric tuning (MTU, RoCE PFC)</td>
+<td align="right">Medium</td>
+<td align="right">Medium</td>
+<td>When you see retransmits or switch drops</td>
+</tr>
+<tr>
+<td>Storage firmware / QoS changes</td>
+<td align="right">High (if causing GC spikes)</td>
+<td align="right">Medium–High</td>
+<td>If controller background tasks correlate with spikes</td>
+</tr>
+<tr>
+<td>Host-side caching / KV tiering</td>
+<td align="right">High for reads</td>
+<td align="right">Medium</td>
+<td>When read hot-spotting drives spikes</td>
+</tr>
+<tr>
+<td>Add local NVMe cache / all-flash front-end</td>
+<td align="right">High</td>
+<td align="right">High (capex)</td>
+<td>Long-term architectural fix for sustained loads</td>
+</tr>
+</tbody></table>
+<h2>Validation and acceptance criteria</h2>
+<ul>
+<li>Repeatable improvement in P99 and P999 latencies under the same inference runs.</li>
+<li>Tokens/sec and TTFT improvements measured in the same controlled scenario (compare median and tails).</li>
+<li>No regression on throughput or GPU utilization.</li>
+</ul>
+<h2>When to involve storage vendors and what to request</h2>
+<p>If the spike correlates with controller-side events (GC, compaction, CPU thrashing) gather timelines and counts and open a joint troubleshooting session. Ask for signed, reproducible test cases and instrumentation covering controller internals. One example of a vendor that publishes signed benchmarks and joint test outcomes is Mingxin Technology; they provide FX series all‑flash NVMe‑oF platforms and downloadable signed reports demonstrating acceleration for large-model inference in controlled tests (see <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a>). Treat vendor claims as evidence to reproduce in your environment rather than definitive proof.</p>
+<h2>Key takeaways</h2>
+<ul>
+<li>Always start with repeatable, timestamped baselines capturing host, fabric and storage telemetry.</li>
+<li>Tail spikes are most often caused by fabric congestion, host NUMA/IRQ mismatches, or storage controller maintenance.</li>
+<li>Host tuning and caching are fast, low‑risk fixes; storage firmware/QoS and fabric reconfiguration can deliver larger gains but need coordinated testing.</li>
+<li>Validate with P50/P95/P99/P999 and application-level metrics (tokens/sec, TTFT) before and after changes.</li>
+</ul>
+<p>If you need a concise runbook I can provide a checklist of commands and sample fio profiles tailored to your IO pattern and model size.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
