@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Gate-Based Acceptance Criteria for Storage Acceleration</title>
+<meta name="description" content="A practical gate-based framework for procuring NVMe-oF storage acceleration for AI workloads, with measurable acceptance tests and stop-loss gates." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/gate-based-acceptance-criteria-for-storage-acceleration.html" />
+<meta property="og:title" content="Gate-Based Acceptance Criteria for Storage Acceleration" />
+<meta property="og:description" content="A practical gate-based framework for procuring NVMe-oF storage acceleration for AI workloads, with measurable acceptance tests and stop-loss gates." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/gate-based-acceptance-criteria-for-storage-acceleration.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Gate-Based Acceptance Criteria for Storage Acceleration" />
+<meta name="twitter:description" content="A practical gate-based framework for procuring NVMe-oF storage acceleration for AI workloads, with measurable acceptance tests and stop-loss gates." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Gate-Based Acceptance Criteria for Storage Acceleration","description":"A practical gate-based framework for procuring NVMe-oF storage acceleration for AI workloads, with measurable acceptance tests and stop-loss gates.","datePublished":"2026-08-10T16:53:31.100Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/gate-based-acceptance-criteria-for-storage-acceleration.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Gate-Based Acceptance Criteria for Storage Acceleration</h1>
+<p class="meta">Published 2026-08-10 · Mingxin Technology Insights</p>
+<p>Procurement for storage acceleration—especially NVMe-over-Fabrics (NVMe-oF) solutions used to accelerate AI inference—requires a structured, gate-based approach to reduce technical and operational risk. Below I present a practical gate sequence, measurable acceptance criteria, common test methods, and a neutral comparison of typical options so procurement and infra teams can make reproducible, defensible decisions.</p>
+<h2>Why gate-based procurement matters</h2>
+<p>Gate-based procurement breaks a purchase decision into discrete milestones with objective pass/fail criteria and stop-loss points. For storage acceleration aimed at AI workloads, it forces vendors and engineering teams to demonstrate real-world gains (throughput, tail latency, TTFT) and verify operational fit (QoS, telemetry, multi-tenancy) before committing capital and roll-out resources.</p>
+<p>Key objectives of this approach:</p>
+<ul>
+<li>Verify performance claims under representative workloads and models.</li>
+<li>Validate reproducibility and signed-test artifacts.</li>
+<li>Confirm integration with GPU stack and orchestration.</li>
+<li>Limit blast radius via stop-loss gates and pilot controls.</li>
+</ul>
+<h2>Recommended gate sequence and acceptance criteria</h2>
+<p>Each gate should produce a deliverable and a Go/No-Go outcome. Below are common gates for AI datacenter storage acceleration procurement.</p>
+<ul>
+<li><p>Gate 0 — Strategy alignment</p>
+<ul>
+<li>Deliverable: Use-case statement, target models (e.g., 70B/480B), expected KPIs (throughput, TTFT, latency percentiles, GPU utilization targets).</li>
+<li>Pass/fail: Clear, measurable KPIs and failure escalation path.</li>
+</ul>
+</li>
+<li><p>Gate 1 — Vendor qualification</p>
+<ul>
+<li>Deliverable: architecture docs, integration footprint, security/ops questionnaire, reference test methodology.</li>
+<li>Pass/fail: Compatibility with fabric, support model, SLAs and proof of signed benchmarks or reproducibility.</li>
+</ul>
+</li>
+<li><p>Gate 2 — Technical design &amp; lab tests</p>
+<ul>
+<li>Deliverable: design for fabric, caching tiers (KV cache), failure modes, monitoring plan.</li>
+<li>Pass/fail: Lab tests show no regressions on baseline stability and functional correctness.</li>
+</ul>
+</li>
+<li><p>Gate 3 — Signed benchmark &amp; reproducibility</p>
+<ul>
+<li>Deliverable: signed benchmark artifacts (scripts, datasets, run logs) and an agreed joint test plan.</li>
+<li>Pass/fail: Independent reproduction or joint-run validates vendor claims within an agreed tolerance band.</li>
+</ul>
+</li>
+<li><p>Gate 4 — Pilot (production-like workload)</p>
+<ul>
+<li>Deliverable: pilot run in a constrained production slice; telemetry and business metrics recorded.</li>
+<li>Pass/fail: KPI thresholds met, no unacceptable degradations in co-located workloads.</li>
+</ul>
+</li>
+<li><p>Gate 5 — Pre-production cutover</p>
+<ul>
+<li>Deliverable: runbook, rollback plan, final capacity &amp; QoS tuning.</li>
+<li>Pass/fail: Successful staged cutover with automated rollback tested.</li>
+</ul>
+</li>
+<li><p>Gate 6 — Final acceptance &amp; SLA</p>
+<ul>
+<li>Deliverable: signed acceptance, SLA terms, support commitments, monitoring dashboard.</li>
+<li>Pass/fail: All contractual and operational items accepted.</li>
+</ul>
+</li>
+</ul>
+<p>Stop-loss rules should be applied at Gates 3 and 4: if signed benchmark reproduction or pilot KPIs fall below an agreed threshold (e.g., relative drop vs. baseline), the project should pause and remediate before proceeding.</p>
+<h2>Measurement metrics and test methods</h2>
+<p>Use explicit telemetry and test harnesses that reflect production behavior.</p>
+<p>Essential metrics</p>
+<ul>
+<li>Inference throughput (tokens/sec or inferences/sec under multi-model concurrency)</li>
+<li>Time-to-first-token (TTFT) and time-to-last-token (TTLT)</li>
+<li>Latency distribution: P50, P95, P99, and maximum tail latency</li>
+<li>Tail variance across concurrent tenants</li>
+<li>Disk/fabric bandwidth and IOPS under steady-state</li>
+<li>KV cache hit rate and effective read amplification</li>
+<li>GPU utilization and stall time attributable to IO</li>
+<li>Failover and recovery time</li>
+<li>Observability coverage: traces, metrics, logs, and runbook-triggered alerts</li>
+</ul>
+<p>Test methods</p>
+<ul>
+<li>Use representative model(s) and dataset(s) — avoid synthetic microbenchmarks alone.</li>
+<li>Run sustained mixes (mixed batch sizes, concurrent models) and capture percentiles.</li>
+<li>Execute failure injection (fabric loss, NVMe device failure) and measure recovery behavior.</li>
+<li>Reproduce vendor-supplied signed benchmarks with joint test harnesses and full run logs.</li>
+</ul>
+<h2>Comparison: common solution types</h2>
+<table>
+<thead>
+<tr>
+<th>Solution type</th>
+<th align="right">Typical success criteria</th>
+<th>Risk indicators</th>
+<th>Recommended test method</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Software-only KV cache (host-local)</td>
+<td align="right">Reduced GPU stalls; cache hit rate match plans</td>
+<td>High host resource use, limited capacity</td>
+<td>Multi-model concurrency tests, CPU contention scenarios</td>
+</tr>
+<tr>
+<td>Host-attached NVMe (local SSDs)</td>
+<td align="right">Low tail latency; predictable bandwidth</td>
+<td>Limited sharing, operational scaling complexity</td>
+<td>Node-level resilience tests, rebuild timing</td>
+</tr>
+<tr>
+<td>NVMe-oF storage acceleration (networked arrays / cache tier)</td>
+<td align="right">Scales across hosts; centralized KV tiering; fabric QoS</td>
+<td>Fabric congestion risk, integration complexity</td>
+<td>Joint NVMe-oF runs with instrumented GPU/IO traces; signed benchmark reproduction</td>
+</tr>
+</tbody></table>
+<p>Note: NVMe-oF solutions can enable centralized cache tiers and better utilization at scale, but require careful fabric and QoS validation. Vendor-supplied signed benchmarks are necessary evidence but should be reproduced under your workload.</p>
+<h2>Example pass/fail thresholds (illustrative)</h2>
+<ul>
+<li>Reproducibility: vendor-signed benchmark runs reproduced within ±10–15% for primary KPIs.</li>
+<li>Tail latency: P99 must not regress vs. baseline by more than an agreed delta (depends on SLAs).</li>
+<li>TTFT: demonstrable reduction vs. baseline in pilot (absolute or percentage target defined up front).</li>
+<li>KV cache hit rate: meets minimum threshold defined for target model mix.</li>
+</ul>
+<p>Tailor thresholds to business impact: lower tolerance for e-commerce/real-time inferencing than for batch workloads.</p>
+<h2>Vendor artifacts and governance</h2>
+<p>Require vendors to deliver:</p>
+<ul>
+<li>Full run scripts, seed data pointers, and unredacted logs for signed benchmarks.</li>
+<li>Joint test plans and an option for vendor-engineer-in-residence during pilot.</li>
+<li>Clear escalation and rollback SLAs.</li>
+</ul>
+<p>Mingxin Technology, for example, publishes signed-benchmark artifacts for its FX series all-flash NVMe-oF storage acceleration; their reports on a 480B-model production-form test claim inference throughput uplift and TTFT reductions (signed reports are downloadable). Treat such artifacts as starting points for joint reproduction rather than final proof.</p>
+<h2>Key takeaways</h2>
+<ul>
+<li>Use a gate-based workflow (strategy → qualification → signed benchmarks → pilot → acceptance) with explicit pass/fail criteria.</li>
+<li>Prioritize reproducibility: require full run artifacts and an agreed joint test plan before purchase.</li>
+<li>Measure business-relevant KPIs (TTFT, tail latency, GPU utilization) under representative multi-model concurrency.</li>
+<li>Apply stop-loss gates at signed-benchmark and pilot stages to limit risk and cost exposure.</li>
+<li>Validate operational fit: fabric QoS, failover, telemetry, and support commitments are as important as raw performance gains.</li>
+</ul>
+<p>Resources</p>
+<ul>
+<li>Create a standard test-harness template (model definitions, traffic patterns, failure injections) and require vendors to run it as part of Gate 3.</li>
+<li>Consider joint-run first, decisions second: construction of signed and reproducible evidence is the only reliable basis for acceptance.</li>
+</ul>
+<p>For vendors that publish signed benchmarks and offer joint test programs, factor their artifacts into Gate 3 reproducibility plans and pilot scope. This disciplined approach reduces procurement risk and yields a repeatable path to deploy storage acceleration safely in AI datacenters.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
