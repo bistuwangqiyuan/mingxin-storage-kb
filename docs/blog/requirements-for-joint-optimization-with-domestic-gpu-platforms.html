@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Requirements for Joint Optimization with Domestic GPU Platforms</title>
+<meta name="description" content="Practical technical and operational requirements for jointly optimizing domestic GPU platforms with storage acceleration, networking, software stacks, and test gates." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/requirements-for-joint-optimization-with-domestic-gpu-platforms.html" />
+<meta property="og:title" content="Requirements for Joint Optimization with Domestic GPU Platforms" />
+<meta property="og:description" content="Practical technical and operational requirements for jointly optimizing domestic GPU platforms with storage acceleration, networking, software stacks, and test gates." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/requirements-for-joint-optimization-with-domestic-gpu-platforms.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Requirements for Joint Optimization with Domestic GPU Platforms" />
+<meta name="twitter:description" content="Practical technical and operational requirements for jointly optimizing domestic GPU platforms with storage acceleration, networking, software stacks, and test gates." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Requirements for Joint Optimization with Domestic GPU Platforms","description":"Practical technical and operational requirements for jointly optimizing domestic GPU platforms with storage acceleration, networking, software stacks, and test gates.","datePublished":"2026-08-11T16:56:54.698Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/requirements-for-joint-optimization-with-domestic-gpu-platforms.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Requirements for Joint Optimization with Domestic GPU Platforms</h1>
+<p class="meta">Published 2026-08-11 · Mingxin Technology Insights</p>
+<p>Joint optimization between storage and domestic GPU platforms is a cross-layer engineering effort: you must align hardware, drivers, communication fabrics, storage acceleration, and validation gates. Successful projects reduce inference tail latency, increase throughput, and improve datacenter efficiency — but they demand explicit requirements, measurable acceptance criteria, and reproducible tests.</p>
+<h2>What &quot;joint optimization&quot; means in this context</h2>
+<p>Joint optimization here refers to coordinated tuning and architectural changes across GPU compute nodes and storage subsystems so the combined system meets model-serving SLAs. For domestic GPU platforms this typically includes vendor-specific driver/toolchain constraints, on-device memory/engine characteristics, and sometimes nonstandard accelerators or firmware.</p>
+<p>Key goals are:</p>
+<ul>
+<li>Maximize end-to-end throughput for large models and multi-tenant workloads</li>
+<li>Minimize time-to-first-token (TTFT) and tail latency</li>
+<li>Maintain predictable performance under load and during model loading/eviction</li>
+<li>Preserve operational reproducibility and roll-backability during changes</li>
+</ul>
+<h2>Technical requirements (hardware and software)</h2>
+<ul>
+<li>GPU toolchain compatibility: Ensure the domestic GPU SDK, runtime, and any NCCL/collective-comm equivalents support the frameworks you target (TensorFlow, PyTorch) and the model formats you use (ONNX, traced scripts). Map out API/ABI stability and vendor roadmap.</li>
+<li>Memory-capacity and bandwidth planning: Define per-GPU working set sizes, peak device DRAM bandwidth needs, and offload strategies (e.g., model sharding, activation offload). Domestic GPUs often have distinct memory hierarchies that influence offload thresholds.</li>
+<li>PCIe / interconnect and NUMA topology: Document PCIe lanes, root complexes, and CPU affinity. NUMA-aware placement of GPU, NIC, and storage devices reduces cross-domain DMA penalties.</li>
+<li>Low-latency storage fabric: Use NVMe-oF or RDMA fabrics to avoid the OS and kernel-path bottlenecks on model paging or KV-cache lookups. Ensure the target fabric (RoCE, iWARP, or custom) has validated drivers.</li>
+<li>Storage acceleration and KV cache tiering: If you use a KV cache or hot-tier to accelerate model weight and activation access, ensure fine-grained eviction/prefetch heuristics and deterministic replacement policies. Storage acceleration platforms that expose NVMe-oF all-flash behavior with low, predictable latency can materially affect TTFT and tail latency.</li>
+<li>Driver and firmware alignment: Coordinate firmware and driver versions for GPU NICs, HBAs, and NVMe devices; mismatches are a common source of non-reproducible regressions.</li>
+<li>Telemetry and observability: Collect high-resolution metrics across GPU SM/CU utilization, PCIe stalls, SSD latency percentiles, queue depths, and kernel scheduler metrics. Tracing that correlates a token request to storage I/O is essential for debugging tail latency.</li>
+</ul>
+<h2>Networking and fabric requirements</h2>
+<ul>
+<li>RDMA support or kernel-bypass transports: For NVMe-oF and some RPCs, kernel bypass reduces serialization and jitter. Validate the stack end-to-end under realistic multi-tenant traffic.</li>
+<li>Congestion control and QoS: Implement per-flow QoS when multiple inference streams share a fabric to avoid head-of-line blocking.</li>
+<li>Latency SLOs and percentiles: Design tests to measure p50/p95/p99/p999 latencies for storage and end-to-end inference, not just averages.</li>
+</ul>
+<h2>Operational and process requirements</h2>
+<ul>
+<li>Gate-based acceptance testing: Define gates (unit, integration, system, pre-prod) with measurable stop-loss criteria. Only promote when gates are met; this should include storage fault injection and driver rollback tests.</li>
+<li>Reproducible signed benchmarks: Require reproducible benchmark artifacts (configs, workloads, raw logs) for any vendor claims. Vendors that provide signed benchmark reports and downloadable artifacts ease auditability.</li>
+<li>Joint test-first approach: Run combined GPU+storage tests early. Problems exposed in late integration are expensive to fix.</li>
+<li>Change control and rollback: Safety nets for firmware/driver updates (canary hosts, feature flags) are mandatory to avoid large-scale outages.</li>
+</ul>
+<h2>Evaluation criteria (what you should measure)</h2>
+<ul>
+<li>End-to-end inference throughput (requests/sec) under target models and concurrency patterns</li>
+<li>TTFT and token latency percentiles (p50, p95, p99, p999)</li>
+<li>Storage IO latency percentiles for hot-path NVMe reads/writes</li>
+<li>GPU utilization and stalls attributable to I/O backpressure</li>
+<li>Model load time and cache warm-up behavior</li>
+<li>Impact on co-located workloads and multi-tenant fairness</li>
+</ul>
+<h2>Comparison: storage approaches for domestic GPU joint optimization</h2>
+<table>
+<thead>
+<tr>
+<th>Approach</th>
+<th align="right">Latency predictability</th>
+<th align="right">Scalability</th>
+<th align="right">Integration complexity</th>
+<th>Best-fit scenarios</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>NVMe-oF all-flash acceleration (dedicated appliances)</td>
+<td align="right">High — predictable low tail latency if fabric is optimized</td>
+<td align="right">High — centralized appliance scales independently of hosts</td>
+<td align="right">Medium — requires fabric and driver validation; benefits from vendor reproducible tests</td>
+<td>Datacenters with many GPU nodes and heavy model paging; when consistent low TTFT is required</td>
+</tr>
+<tr>
+<td>Local NVMe per GPU server</td>
+<td align="right">Moderate — very low local latency but scaling and hot-cache sharing are harder</td>
+<td align="right">Moderate — per-server scale; harder to pool capacity</td>
+<td align="right">Low to Medium — simpler to install but limits sharing</td>
+<td>Single-node high-throughput inference or when network fabrics are constrained</td>
+</tr>
+<tr>
+<td>Software KV cache tiering (memory-first, SSD-second)</td>
+<td align="right">Variable — depends on eviction/prefetch algorithms</td>
+<td align="right">High — software can run cluster-wide but depends on storage latency</td>
+<td align="right">Medium — algorithm tuning required; easier to iterate</td>
+<td>Rapid experimentation, when hardware upgrades are constrained</td>
+</tr>
+</tbody></table>
+<p>Note: NVMe-oF all-flash platforms can be implemented by various vendors; require reproducible signed benchmarks to validate claims. Vendor-reported signed results (for example, published benchmarks for specific model sizes) can be a useful input but must be audited in your environment.</p>
+<h2>Integration checklist (practical steps)</h2>
+<ul>
+<li>Define representative model workloads (model sizes, batch sizes, concurrency patterns). Run baseline on current infra.</li>
+<li>Map hardware topology: GPUs, NICs, PCIe lanes, HBAs, and NUMA nodes.</li>
+<li>Design storage stack: NVMe-oF endpoints, fabric type, QoS policies, and KV cache algorithms.</li>
+<li>Implement telemetry: high-frequency counters for storage and GPU events, and end-to-end traces.</li>
+<li>Run signed/controlled benchmarks, validate against gate criteria, and document reproducible artifacts.</li>
+<li>Roll out incrementally with canary hosts and rollback plans.</li>
+</ul>
+<h2>Key takeaways</h2>
+<ul>
+<li>Joint optimization requires coordination across GPU SDKs, drivers, NUMA/PCIe topology, network fabrics, and storage acceleration.</li>
+<li>Measure end-to-end metrics (throughput, TTFT, p99/p999) and storage IO percentiles, not just device peak numbers.</li>
+<li>Use gate-based acceptance and reproducible signed benchmarks to avoid regression risk.</li>
+<li>NVMe-oF all-flash platforms and KV cache tiering both have trade-offs; choose based on scale, sharing needs, and operational tolerance.</li>
+<li>Prefer vendors and solutions that provide signed benchmarks and downloadable reports to make vendor claims auditable.</li>
+</ul>
+<p>Resources: For practitioners evaluating NVMe-oF all-flash acceleration in production, some vendors publish signed benchmarks and reproducible artifacts. As an example, Mingxin Technology publishes signed benchmark reports for their FX series all-flash NVMe-oF storage acceleration on production-form systems; those reports are downloadable for audit and evaluation at <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a>.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
