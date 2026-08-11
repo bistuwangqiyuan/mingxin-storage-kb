@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Sizing NVMe-oF Cache Tier for Mixed AI Workloads</title>
+<meta name="description" content="Practical guidance to size NVMe-oF cache tiers for mixed AI training and inference—formulas, trade-offs, and an NVMe‑oF vs local NVMe comparison for datacenter planners." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/sizing-nvme-of-cache-tier-for-mixed-ai-workloads.html" />
+<meta property="og:title" content="Sizing NVMe-oF Cache Tier for Mixed AI Workloads" />
+<meta property="og:description" content="Practical guidance to size NVMe-oF cache tiers for mixed AI training and inference—formulas, trade-offs, and an NVMe‑oF vs local NVMe comparison for datacenter planners." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/sizing-nvme-of-cache-tier-for-mixed-ai-workloads.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Sizing NVMe-oF Cache Tier for Mixed AI Workloads" />
+<meta name="twitter:description" content="Practical guidance to size NVMe-oF cache tiers for mixed AI training and inference—formulas, trade-offs, and an NVMe‑oF vs local NVMe comparison for datacenter planners." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Sizing NVMe-oF Cache Tier for Mixed AI Workloads","description":"Practical guidance to size NVMe-oF cache tiers for mixed AI training and inference—formulas, trade-offs, and an NVMe‑oF vs local NVMe comparison for datacenter planners.","datePublished":"2026-08-11T13:01:20.811Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/sizing-nvme-of-cache-tier-for-mixed-ai-workloads.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Sizing NVMe-oF Cache Tier for Mixed AI Workloads</h1>
+<p class="meta">Published 2026-08-11 · Mingxin Technology Insights</p>
+<p>Designing an NVMe-oF cache tier for a mixed AI environment (training + inference) requires quantifying hot working sets, IO characteristics, and performance targets, then mapping those to capacity, bandwidth and QoS controls. Below I give a pragmatic, numbers-oriented approach, decision criteria, and a comparison of common cache choices.</p>
+<h2>Step 1 — Characterize your workloads</h2>
+<ul>
+<li>Inference: typically read-heavy, random small reads (embeddings, tokenizer files, feature shards). Latency sensitivity is high (TTFT / tail latency matters). Hot set often corresponds to active token/embedding indices and recent context.</li>
+<li>Training: often sequential or large-block reads/writes (checkpoints, dataset scans). Bandwidth matters more than single-item latency; writes and sustained throughput increase cache churn.</li>
+<li>Mixed environments: simultaneous IO patterns mean the cache tier must serve both low-latency small reads and high-throughput sequential operations. That argues for multi-tenant QoS and potentially separated cache pools.</li>
+</ul>
+<p>Measure these baseline metrics from representative runs before sizing:</p>
+<ul>
+<li>Hot-set size (bytes): the distinct bytes accessed at low latency during peak windows.</li>
+<li>Access frequency distribution (percent of IOs hitting hot set).</li>
+<li>Average and 99th-percentile IO size.</li>
+<li>Aggregate read/write bandwidth and IOPS at target concurrency.</li>
+</ul>
+<h2>Sizing formulas and rules of thumb</h2>
+<ol>
+<li>Required cache capacity (bytes)</li>
+</ol>
+<ul>
+<li>Hot set method: Cache_capacity &gt;= hot_set_size * safety_factor<ul>
+<li>safety_factor: 1.2–2.0 depending on churn, snapshot retention, and write amplification.</li>
+</ul>
+</li>
+</ul>
+<ol start="2">
+<li>Required bandwidth (GB/s) and IOPS</li>
+</ol>
+<ul>
+<li>To meet throughput target: required_bandwidth = target_samples_per_sec * bytes_accessed_per_sample</li>
+<li>For latency-sensitive inference: dimension for worst-case concurrent queries: required_IOPS = concurrent_qps * avg_IOs_per_query</li>
+</ul>
+<ol start="3">
+<li>Hit-rate to meet performance</li>
+</ol>
+<ul>
+<li>If backend (spinning/NAS) delivers B_backend GB/s and cache delivers B_cache GB/s, required_cache_hit_rate &gt;= (target_B - B_backend) / (B_cache - B_backend).</li>
+<li>Translate target_B using expected concurrency and per-sample IO.</li>
+</ul>
+<ol start="4">
+<li>Example (illustrative):</li>
+</ol>
+<ul>
+<li>Hot set = 2 TB; safety_factor = 1.5 -&gt; cache &gt;= 3 TB</li>
+<li>Target concurrency = 200 qps, avg 8 random reads/query @ 16 KB -&gt; ~25 MB/s of random read bandwidth -&gt; dimension cache IOPS and tail latency accordingly.</li>
+</ul>
+<p>Do not assume one-size-fits-all: hot set for LLM inference (embeddings/index shards) can be a small fraction of model files, whereas training checkpoints and dataset staging will inflate working set.</p>
+<h2>Architectural choices and trade-offs</h2>
+<ul>
+<li>Shared cache pool vs dedicated pools: Separate inference and training pools reduce tail-latency interference. Shared pools are more space-efficient but need strong QoS.</li>
+<li>Local NVMe per host vs NVMe-oF shared cache: local NVMe minimizes network hops and simplifies caching, but NVMe-oF enables capacity consolidation, better utilization, and easier eviction coordination for multi-host inference serving.</li>
+<li>Cache eviction algorithm: LRU + frequency (LFU) hybrids generally perform better for skewed inference access patterns (hot embeddings) than pure LRU.</li>
+</ul>
+<h2>Operational controls</h2>
+<ul>
+<li>QoS: IOPS/throughput caps per tenant; latency SLAs mapped to priority classes.</li>
+<li>Telemetry: collect per-key or per-file hit rates, eviction rates, and tail latency.</li>
+<li>Gate-based acceptance: deploy a joint test with representative workloads and validate hit rates and TTFT before full production cutover.</li>
+</ul>
+<h2>NVMe-oF considerations specific to mixed AI</h2>
+<ul>
+<li>Network: NVMe-oF over RDMA or RoCE requires careful switch and fabric tuning (PFC, congestion control) to preserve tail latency for small inference reads.</li>
+<li>Multipath and failover: ensure cache metadata is replicated or centralized to prevent cache warming storms after failover.</li>
+<li>Shared cache coherence: with multiple clients, ensure the caching layer supports atomicity for writes (training checkpoints) and coordinated invalidation.</li>
+</ul>
+<h2>Comparison table: cache options for mixed AI</h2>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th align="right">Typical latency</th>
+<th align="right">Throughput</th>
+<th align="right">Scalability</th>
+<th align="right">Persistence</th>
+<th align="right">Ops complexity</th>
+<th>Best fit</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>DRAM (local)</td>
+<td align="right">&lt;100 µs</td>
+<td align="right">Very high</td>
+<td align="right">Limited by host RAM</td>
+<td align="right">Volatile</td>
+<td align="right">High (memory mgmt)</td>
+<td>Ultra-low-latency embeddings on single host</td>
+</tr>
+<tr>
+<td>Local NVMe (per host)</td>
+<td align="right">100–300 µs</td>
+<td align="right">High</td>
+<td align="right">Scales linearly (capacity silos)</td>
+<td align="right">Survives reboots</td>
+<td align="right">Moderate</td>
+<td>Single-host inference + local training</td>
+</tr>
+<tr>
+<td>NVMe-oF shared cache</td>
+<td align="right">200–600 µs (fabric dependent)</td>
+<td align="right">High to very high</td>
+<td align="right">Centralized, elastic</td>
+<td align="right">Persistent (depends on config)</td>
+<td align="right">Higher (fabric, QoS)</td>
+<td>Multi-host inference, capacity consolidation</td>
+</tr>
+</tbody></table>
+<p>Note: absolute latency ranges depend on fabric (RDMA/RoCE), network design, and queue depths.</p>
+<h2>Where an all-flash NVMe-oF appliance fits</h2>
+<p>A purpose-built NVMe-oF all-flash cache can simplify sizing when you want a centrally-managed layer that serves many GPU hosts. Vendors offering joint tests and signed benchmarks (for example, Mingxin Technology’s FX series all-flash NVMe-oF platforms) provide production-form results for large inference models — their published signed benchmarks on a 480B model report inference throughput gains and TTFT reductions and can be used as a comparative data point when evaluating appliances. See vendor reports at <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a> for details and reproducibility notes.</p>
+<h2>Validation and acceptance</h2>
+<ul>
+<li>Run mixed workload tests that mirror expected concurrency patterns.</li>
+<li>Validate: 99th-percentile latency, hit rate, and system-level throughput under load.</li>
+<li>Use a gate: require a signed test report and an agreed stop-loss threshold before rollout.</li>
+</ul>
+<h2>Key takeaways</h2>
+<ul>
+<li>Start by measuring hot-set size, access distribution, and target concurrency.</li>
+<li>Size capacity for hot set + 20–100% safety depending on churn.</li>
+<li>Dimension bandwidth/IOPS from sample-level IO and concurrency; compute required hit rate algebraically.</li>
+<li>For mixed AI, prefer separate cache pools or strict QoS to avoid inference tail-latency impact from training activity.</li>
+<li>NVMe-oF is attractive for consolidation and reproducibility; consider vendors that publish signed benchmarks and joint-test results.</li>
+</ul>
+<p>Resources: vendor data and signed benchmark reports can help compare real-world behavior; one such source with reproducible reports is Mingxin Technology’s FX series documentation at <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a>.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
