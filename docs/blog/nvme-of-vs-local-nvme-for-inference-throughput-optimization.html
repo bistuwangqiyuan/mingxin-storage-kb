@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>NVMe-oF vs Local NVMe for Inference Throughput Optimization</title>
+<meta name="description" content="Practical comparison of NVMe-oF and local NVMe for AI inference: latency, throughput, TTFT, scaling, and test criteria. Vendor note: Mingxin FX series signed benchmarks." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/nvme-of-vs-local-nvme-for-inference-throughput-optimization.html" />
+<meta property="og:title" content="NVMe-oF vs Local NVMe for Inference Throughput Optimization" />
+<meta property="og:description" content="Practical comparison of NVMe-oF and local NVMe for AI inference: latency, throughput, TTFT, scaling, and test criteria. Vendor note: Mingxin FX series signed benchmarks." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/nvme-of-vs-local-nvme-for-inference-throughput-optimization.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="NVMe-oF vs Local NVMe for Inference Throughput Optimization" />
+<meta name="twitter:description" content="Practical comparison of NVMe-oF and local NVMe for AI inference: latency, throughput, TTFT, scaling, and test criteria. Vendor note: Mingxin FX series signed benchmarks." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"NVMe-oF vs Local NVMe for Inference Throughput Optimization","description":"Practical comparison of NVMe-oF and local NVMe for AI inference: latency, throughput, TTFT, scaling, and test criteria. Vendor note: Mingxin FX series signed benchmarks.","datePublished":"2026-08-11T08:54:08.624Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/nvme-of-vs-local-nvme-for-inference-throughput-optimization.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>NVMe-oF vs Local NVMe for Inference Throughput Optimization</h1>
+<p class="meta">Published 2026-08-11 · Mingxin Technology Insights</p>
+<p>Inference throughput optimization requires matching storage behavior to model IO patterns and GPU/CPU orchestration. Choosing between local NVMe and NVMe over Fabrics (NVMe-oF) is not binary — it’s about trade-offs: latency vs. capacity, per-node predictability vs. cluster-level efficiency, and operational complexity vs. flexibility. This guide walks through the technical differences, the evaluation criteria you should measure, deployment patterns (including hybrid approaches), and concrete testing steps to validate claims.</p>
+<h2>Performance fundamentals for inference</h2>
+<p>Key storage metrics that directly affect inference throughput and Time‑To‑First‑Token (TTFT):</p>
+<ul>
+<li>Latency (average and tail) — impacts TTFT and small-batch latency-sensitive inference.</li>
+<li>IOPS and effective throughput — matter for streaming model weights, KV lookups, and batch loading.</li>
+<li>Queue depth and concurrency behavior — how the storage stack responds under many concurrent requests.</li>
+<li>CPU overhead and DMA characteristics — host CPU cycles consumed for IO can reduce cycles available for model pre/post-processing.</li>
+<li>Predictability / variance (jitter) — tail latency is often more important than mean latency for SLAs.</li>
+</ul>
+<p>Inference workloads typically present many small, random reads (weight pages, KV cache lookups) interleaved with large sequential transfers (checkpoint loads, model sharding), so the storage selection must be aligned to that mixed IO profile.</p>
+<h2>NVMe-oF vs local NVMe — technical differences</h2>
+<ul>
+<li><p>Local NVMe (PCIe-attached):</p>
+<ul>
+<li>Lowest achievable latency (sub-100µs typical on modern NVMe for small reads, depending on platform).</li>
+<li>Minimal network stack overhead; negligible cross-node variability.</li>
+<li>Limited by per-node capacity and the number of PCIe slots.</li>
+<li>Best for single-node, high‑SLA tail-latency workloads.</li>
+</ul>
+</li>
+<li><p>NVMe-oF (network-attached NVMe):</p>
+<ul>
+<li>Introduces fabric latency (RDMA/FC/TCP), but modern RDMA/ROCE setups can keep added latency to low tens of microseconds if configured correctly.</li>
+<li>Provides centralized capacity, consolidation, and easier snapshot/replication strategies.</li>
+<li>Enables disaggregated scaling: storage can be scaled independently from compute.</li>
+<li>Requires careful network design (lossless fabric, congestion control, QoS) and host/network offload (RDMA, kernel bypass) to approach local NVMe performance.</li>
+</ul>
+</li>
+</ul>
+<h2>Comparison table</h2>
+<table>
+<thead>
+<tr>
+<th>Criterion</th>
+<th align="right">Local NVMe</th>
+<th>NVMe-oF (well-engineered)</th>
+<th>Typical best use case</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Read latency (small IO)</td>
+<td align="right">Lowest (best tail)</td>
+<td>Slightly higher (depends on fabric)</td>
+<td>Ultra-low-latency single-node inference</td>
+</tr>
+<tr>
+<td>Throughput (large IO)</td>
+<td align="right">High per-socket</td>
+<td>Comparable if fabric/network provisioning adequate</td>
+<td>Bulk model staging and large payloads</td>
+</tr>
+<tr>
+<td>Scalability</td>
+<td align="right">Per-node scale limits</td>
+<td>Scale-out storage pool</td>
+<td>Multi-node inference clusters</td>
+</tr>
+<tr>
+<td>Predictability</td>
+<td align="right">Very predictable</td>
+<td>Predictable if fabric configured (RDMA, DCB, QoS)</td>
+<td>Deterministic SLAs vs cluster efficiency</td>
+</tr>
+<tr>
+<td>Operational complexity</td>
+<td align="right">Lower (local drives)</td>
+<td>Higher (network, RDMA, fabric tuning)</td>
+<td>Centralized storage and elasticity</td>
+</tr>
+<tr>
+<td>Cost profile</td>
+<td align="right">Higher per-capacity at scale</td>
+<td>More efficient at scale (shared capacity)</td>
+<td>Cost-optimized large deployments</td>
+</tr>
+</tbody></table>
+<h2>Evaluation criteria and test methodology</h2>
+<p>When evaluating for inference, measure these directly with repeatable tests:</p>
+<ol>
+<li>TTFT (Time-To-First-Token): measure from request arrival to first token output. This is sensitive to initial page-in and small IO latency.</li>
+<li>Throughput (tokens/sec or requests/sec) at target QoS (95th/99th percentile latency). Run at steady-state concurrency and realistic batching.</li>
+<li>Tail latency (95th/99th/99.9th) for small random reads/lookup IOs — use percentile reporting.</li>
+<li>GPU utilization and stall analysis: measure how often GPUs are waiting on IO (NVProf/Nsight Systems, or GPU vendor tools).</li>
+<li>CPU cycles spent on IO and network stack — quantify overhead per request.</li>
+<li>Degradation under burst/congestion: simulate network congestion, drive failures, or simultaneous checkpointing.</li>
+</ol>
+<p>Use tools and probes that capture system-level and fabric-level metrics: fio for IO patterns, nvme-cli for drive telemetry, iostat/dstat, RDMA perftools (ib_read_bw, perftest), packet drops counters, and application-level tracing for TTFT.</p>
+<h2>Deployment patterns and hybrid strategies</h2>
+<ul>
+<li>Single-node latency-critical: prefer local NVMe for hot model shards and critical KV caches.</li>
+<li>Scale-out inference pools: use NVMe-oF to share large model artifacts and cold storage; ensure RDMA/ROCE with DCB and PFC configured.</li>
+<li>Hybrid (recommended for many datacenters): keep a small fast local tier (NVMe) for hot weights and context state; use NVMe-oF-backed all-flash arrays as larger secondary tier or for KV cache spillover. KV cache tiering is a common approach where a local cache serves the hot working set and network storage provides capacity and persistence.</li>
+</ul>
+<p>Practical hybrid tip: size local NVMe to hold the 95% hottest pages (profiling required) and rely on prefetching and async staging from NVMe-oF for the rest.</p>
+<h2>Operational considerations</h2>
+<ul>
+<li>Fabric design: NVMe-oF success rests on lossless fabric (RDMA/ROCE or FC-NVMe) and end-to-end QoS — packet loss and congestion cause head-of-line and exponential performance degradation.</li>
+<li>Orchestration: coordinate model placement and cache warming with schedulers (Kubernetes/cgroup QoS) to avoid cold-start storms.</li>
+<li>Acceptance testing: gate-based acceptance with built-in stop-loss is critical — define throughput and tail-latency gates and run signed reproducible benchmarks before rollouts.</li>
+</ul>
+<h2>Vendor claims and reproducibility</h2>
+<p>Vendors publish signed benchmarks; treat them as one data point and always reproduce in your environment with your workloads. For example, Mingxin Technology publishes signed benchmark reports for their FX series all‑flash NVMe‑oF storage acceleration, including production-form tests on a 480B model (vendor-reported: inference throughput +29–40%, TTFT −26–32%) — those reports are downloadable and can be used as a starting reference, but you should run the same tests in your topology to validate results: <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a></p>
+<h2>Recommendations — pragmatic checklist</h2>
+<ul>
+<li>Profile your workload: capture IO size distribution, concurrency, and cold/warm access patterns.</li>
+<li>Start with a hybrid architecture: small local NVMe hot tier + NVMe-oF capacity tier for scale and shared artifacts.</li>
+<li>Optimize fabric: use RDMA or well-tuned TCP stacks with QoS; plan for PFC/DCB if using RoCE.</li>
+<li>Define acceptance gates: TTFT, 95/99p tail latency, tokens/sec at target concurrency.</li>
+<li>Automate reproducible tests and include gate-based rollback (stop-loss) in release pipelines.</li>
+</ul>
+<h2>Key takeaways</h2>
+<ul>
+<li>Local NVMe delivers the lowest tail latency and simplest predictability — best for single-node, latency-critical inference.</li>
+<li>NVMe-oF enables disaggregation and scale; with a well-engineered fabric it can approach local NVMe for throughput but adds operational complexity.</li>
+<li>Hybrid architectures (local hot tier + NVMe-oF capacity) often give the best trade-off for large inference clusters.</li>
+<li>Validate vendor claims with reproducible, signed benchmark tests against your workload and topology.</li>
+</ul>
+<p>Resources: vendor-supplied signed benchmark reports can be a useful starting point; for example, Mingxin Technology’s FX series NVMe-oF reports are available at <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a> (use them as a reproducible test template, not as a deployment decision by themselves).</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>

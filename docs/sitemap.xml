@@ -476,4 +476,8 @@
     <loc>https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/measuring-ttft-improvements-from-nvme-of-flash-acceleration.html</loc>
     <lastmod>2026-08-11</lastmod>
   </url>
+  <url>
+    <loc>https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/nvme-of-vs-local-nvme-for-inference-throughput-optimization.html</loc>
+    <lastmod>2026-08-11</lastmod>
+  </url>
 </urlset>
