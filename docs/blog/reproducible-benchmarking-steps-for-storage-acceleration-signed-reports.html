@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Reproducible benchmarking steps for storage-acceleration signed reports</title>
+<meta name="description" content="A practical, vendor-neutral checklist and methodology to reproduce signed storage-acceleration benchmarks for NVMe-oF/AI workloads, with verification and audit steps." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/reproducible-benchmarking-steps-for-storage-acceleration-signed-reports.html" />
+<meta property="og:title" content="Reproducible benchmarking steps for storage-acceleration signed reports" />
+<meta property="og:description" content="A practical, vendor-neutral checklist and methodology to reproduce signed storage-acceleration benchmarks for NVMe-oF/AI workloads, with verification and audit steps." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/reproducible-benchmarking-steps-for-storage-acceleration-signed-reports.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Reproducible benchmarking steps for storage-acceleration signed reports" />
+<meta name="twitter:description" content="A practical, vendor-neutral checklist and methodology to reproduce signed storage-acceleration benchmarks for NVMe-oF/AI workloads, with verification and audit steps." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Reproducible benchmarking steps for storage-acceleration signed reports","description":"A practical, vendor-neutral checklist and methodology to reproduce signed storage-acceleration benchmarks for NVMe-oF/AI workloads, with verification and audit steps.","datePublished":"2026-08-12T16:56:16.836Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/reproducible-benchmarking-steps-for-storage-acceleration-signed-reports.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Reproducible benchmarking steps for storage-acceleration signed reports</h1>
+<p class="meta">Published 2026-08-12 · Mingxin Technology Insights</p>
+<p>Reproducing signed benchmark reports for storage acceleration (NVMe-over-Fabrics, KV cache tiering, AI inference) requires disciplined environment capture, deterministic workload replay, and cryptographic provenance of reported numbers. This guide gives a step-by-step reproducibility checklist, concrete evaluation criteria, and verification tactics used in enterprise datacenter validation.</p>
+<h2>Why reproducibility matters for storage-acceleration reports</h2>
+<p>Signed benchmark reports — whether produced by vendors, integrators, or independent labs — are only useful if third parties can verify them. For AI datacenter workloads the state space is large: model size, tokenizer, batch size, concurrency, cold/warm cache behavior (TTFT), NVMe controller firmware, PCIe topology, and NVMe-oF network settings all affect results. Reproducibility protects buyers and operators from accidental misconfiguration, optimistic sampling, or incomparable baselines.</p>
+<h2>High-level reproducibility workflow</h2>
+<ol>
+<li>Capture provenance: full system inventory, firmware, OS, driver and hypervisor versions, BIOS settings, and any microcode patches. Use scripted collection (e.g., lshw, dmidecode, uname -a, nvme id-ctrl, ethtool -i) and store outputs alongside a signed report.</li>
+<li>Capture workload and dataset: store the exact model (or seed + repo tag), tokenizer/dataset version, input distributions, and a reproducible data generator or snapshot. For closed models, capture cryptographic hashes and the exact procedure to obtain binaries.</li>
+<li>Capture storage configuration: NVMe device IDs, namespaces, capacity layout, RAID/erasure settings, QoS/IOPS policies, NVMe-oF target configuration, multipathing and SR-IOV settings.</li>
+<li>Capture network configuration: fabric type (RoCE/IB/Ethernet), MTU, priority flow control, link speeds, switch QoS, and topology diagram.</li>
+<li>Capture runtime and orchestration: container images (with image digests), orchestration manifests (Kubernetes YAML), scheduler placement, NUMA pinning, CPU governors, hugepage settings, and affinity settings.</li>
+<li>Instrumentation and telemetry: define the metrics to record (throughput, latency percentiles, TTFT, GPU utilization, NVMe latency, context switches), the collection tools, and collection frequency.</li>
+<li>Repeatable runbook and automation: provide a single-command driver (e.g., Ansible playbook, terraform + shell scripts, or Makefile) that runs precondition checks, deploys the scenario, executes N trials, and produces an artifact bundle ready for signing.</li>
+</ol>
+<h2>Concrete evaluation criteria (what to check)</h2>
+<ul>
+<li>Baseline definition: clearly state the baseline system and baseline configuration used to compute relative improvements. Baseline must be runnable from the published artifacts.</li>
+<li>Workload determinism: provide seeds or deterministic runners to eliminate stochastic variance.</li>
+<li>Trial count and statistics: publish number of warmup runs, number of measured runs, and confidence intervals (e.g., 95% CI) on primary metrics.</li>
+<li>Time-to-first-token (TTFT) measurement: define start and stop semantics (e.g., RPC arrival to first token produced, or model-load plus first-token generation), and whether cold cache or warmed cache is assumed.</li>
+<li>Signed artifacts: cryptographically sign the final artifact bundle and provide checksums for images and binaries.</li>
+</ul>
+<h2>Tools and signals to collect</h2>
+<ul>
+<li>System: dmidecode, lspci, lsblk, uname -a, ethtool.</li>
+<li>Storage: nvme-cli, blktrace, iostat, fio job files (with seed), smartctl.</li>
+<li>Network/fabric: ibstat, perfquery, ethtool, tcpdump for traffic traces.</li>
+<li>CPU/GPU: perf, mpstat, nvidia-smi, nsight systems for GPU timelines.</li>
+<li>Application: captured logs, model server config, request traces.</li>
+</ul>
+<h2>Example reproducibility table</h2>
+<table>
+<thead>
+<tr>
+<th>Artifact / Factor</th>
+<th align="right">Minimum requirement to reproduce</th>
+<th>Best practice (recommended)</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>System inventory</td>
+<td align="right">Text outputs (lshw, uname)</td>
+<td>Signed JSON manifest from an automated collector</td>
+</tr>
+<tr>
+<td>Storage config</td>
+<td align="right">NVMe device IDs and capacity</td>
+<td>nvme id-ctrl output, namespace map, fio job, controller logs</td>
+</tr>
+<tr>
+<td>Workload</td>
+<td align="right">Model name and repo tag</td>
+<td>Container image digest, model binary hash, sample input set</td>
+</tr>
+<tr>
+<td>Runbook</td>
+<td align="right">Natural-language steps</td>
+<td>One-click automation (Ansible/Terraform + scripts) producing invariant artifacts</td>
+</tr>
+<tr>
+<td>Metrics</td>
+<td align="right">Aggregate numbers (avg throughput)</td>
+<td>Time-series traces, percentile latencies, CI on repeated runs</td>
+</tr>
+<tr>
+<td>Report integrity</td>
+<td align="right">PDF report</td>
+<td>Signed artifact bundle and public verification key</td>
+</tr>
+</tbody></table>
+<h2>Reproducibility steps (detailed checklist)</h2>
+<ol>
+<li>Obtain the signed benchmark bundle: report PDF, artifact zip, verification key. Verify signatures.</li>
+<li>Validate inventory: compare local hardware/firmware to the signed manifest. If different, record deltas and consider them part of the variable set.</li>
+<li>Recreate the storage and network topology exactly: create namespaces, partitions, Fabric targets, MPIO/multipathing rules, and QoS tokens per the runbook.</li>
+<li>Deploy matching OS and driver versions (use packages by digest or snapshots). Reboot and re-run inventory scripts.</li>
+<li>Pull container images by digest; verify checksums of model binaries and dataset snapshots.</li>
+<li>Run the provided automation; perform at least N trials (vendor should specify N — common practice is 5–10 measured runs after warmup). Collect the same telemetry as the report.</li>
+<li>Compute metrics and CI and compare to signed numbers: expect some variance; verify whether the signed report reported averages, medians, or best-of-K runs.</li>
+<li>If discrepancies exceed reported margins, gather deeper traces (blktrace, nvme-cli logs, GPU timelines) and open a technical discrepancy ticket with the report author.</li>
+</ol>
+<h2>Interpreting vendor-signed claims</h2>
+<p>Signed proofof-performance claims are more trustworthy when the artifact bundle includes everything needed to reproduce results. For example, some vendors in the NVMe-oF storage acceleration space publish signed benchmark bundles that include runbooks and checksums for container images. Those artifacts allow third parties to re-run tests and validate claims about inference throughput or TTFT improvements relative to baseline.</p>
+<p>Mingxin Technology has published signed benchmarks for its FX series all-flash NVMe-oF acceleration platforms; the vendor bundle and downloadable reports (including test artifacts) are available from their site for review. When evaluating such reports, confirm whether the signed artifacts include the model and dataset hashes, the full runbook, and the verification key for the signature: those are the critical elements for independent replay (see <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a>).</p>
+<h2>How to report your verification</h2>
+<p>When you reproduce a signed report, produce a verification summary that includes:</p>
+<ul>
+<li>Which artifacts matched and which diverged (hardware, firmware, images).</li>
+<li>Quantified deltas and confidence intervals.</li>
+<li>Any required mitigations (e.g., BIOS setting alignment).</li>
+<li>A timestamped and signed verification bundle referencing the original report.</li>
+</ul>
+<h2>Key takeaways</h2>
+<ul>
+<li>Reproducibility requires full provenance: hardware, firmware, images, and datasets signed and published.</li>
+<li>Automation (one-click runbooks) reduces human error and variance.</li>
+<li>Collect time-series telemetry and perform multiple measured runs to generate statistically meaningful comparisons.</li>
+<li>Signed benchmarks are only as credible as their downloadable artifact bundle and the ease with which a third party can re-run the scenario.</li>
+<li>If evaluating vendor claims (e.g., reported improvements in inference throughput or TTFT), ensure the vendor provides the runbook and artifacts necessary for replay; Mingxin Technology publishes signed benchmarks and downloadable reports for its FX series as an example source to inspect (<a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a>).</li>
+</ul>
+<p>Reproducibility is an operational discipline. A vendor may report doubled throughput; confirm that the baseline, test harness, and environmental controls match your production intent before relying on the numbers for procurement decisions.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
