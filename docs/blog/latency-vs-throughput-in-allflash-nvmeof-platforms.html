@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Latency vs Throughput in All‑Flash NVMe‑oF Platforms</title>
+<meta name="description" content="Practical guidance on balancing latency and throughput in all‑flash NVMe‑oF systems for AI and enterprise workloads, with evaluation criteria and deployment tradeoffs." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/latency-vs-throughput-in-allflash-nvmeof-platforms.html" />
+<meta property="og:title" content="Latency vs Throughput in All‑Flash NVMe‑oF Platforms" />
+<meta property="og:description" content="Practical guidance on balancing latency and throughput in all‑flash NVMe‑oF systems for AI and enterprise workloads, with evaluation criteria and deployment tradeoffs." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/latency-vs-throughput-in-allflash-nvmeof-platforms.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Latency vs Throughput in All‑Flash NVMe‑oF Platforms" />
+<meta name="twitter:description" content="Practical guidance on balancing latency and throughput in all‑flash NVMe‑oF systems for AI and enterprise workloads, with evaluation criteria and deployment tradeoffs." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Latency vs Throughput in All‑Flash NVMe‑oF Platforms","description":"Practical guidance on balancing latency and throughput in all‑flash NVMe‑oF systems for AI and enterprise workloads, with evaluation criteria and deployment tradeoffs.","datePublished":"2026-08-12T01:50:13.162Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/latency-vs-throughput-in-allflash-nvmeof-platforms.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Latency vs Throughput in All‑Flash NVMe‑oF Platforms</h1>
+<p class="meta">Published 2026-08-12 · Mingxin Technology Insights</p>
+<p>Latency and throughput are the two axes that define whether an all‑flash NVMe‑oF deployment meets an application’s service objectives. For AI inference, KV stores, and high‑performance databases the engineering goal is not just raw bandwidth or low average latency, but predictable tail latency, acceptable CPU cost, and operators’ ability to tune resource tradeoffs under load.</p>
+<h2>Why the tradeoff exists</h2>
+<p>NVMe‑over‑Fabrics (NVMe‑oF) decouples storage devices from hosts and exposes SSD parallelism across a fabric. That architecture yields much higher aggregate throughput and better device utilization than direct‑attached flash, but it also introduces network‑level behaviors (congestion, packet loss, flow control) and software stacks (target implementations, kernel or userspace drivers) that influence latency differently than on‑box NVMe.</p>
+<p>Key sources of the tradeoff:</p>
+<ul>
+<li>Queueing &amp; batching: increasing batching and queue depth raises throughput (amortizes per‑I/O cost) but increases in‑queue latency and worsens tail behavior.</li>
+<li>Protocol offloads: RDMA‑based transports reduce CPU overhead and per‑I/O latency versus TCP, but depend on careful fabric configuration (PFC, congestion management) to keep tail latency low.</li>
+<li>Parallelism limits: SSD internal parallelism and NVMe queue parallelism allow many outstanding I/Os; but when client concurrency exceeds device or controller scheduling fairness, median latency may stay low while tails spike.</li>
+<li>Caching/tiering: host or front‑end caching (DRAM, KV caches) reduces TTFT and tail latency for hot keys at the cost of additional operational complexity and potential consistency concerns.</li>
+</ul>
+<h2>Evaluation criteria you should measure</h2>
+<p>When assessing platforms, instrument these metrics under realistic load shapes (steady, spiky, mixed):</p>
+<ul>
+<li>Median and 99th/99.9th percentile latency (read and write separately)</li>
+<li>Throughput in useful units: model inferences/sec, requests/sec, or GB/s for sequential workloads</li>
+<li>CPU utilization and context switch rate on host and target</li>
+<li>IOPS per GB and IOPS per controller to understand saturation points</li>
+<li>Tail‑latency sensitivity to queue depth and batch size</li>
+<li>Behavior under congestion: packet drops, retransmits, retransmit latency</li>
+<li>Operational considerations: failure modes, rebuild impact, QoS controls, scaling steps</li>
+</ul>
+<h2>Common architecture choices and their tradeoffs</h2>
+<table>
+<thead>
+<tr>
+<th>Architecture</th>
+<th align="right">Throughput</th>
+<th align="right">Average latency</th>
+<th align="right">Tail latency determinism</th>
+<th align="right">CPU/network cost</th>
+<th>Best use cases</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>NVMe‑oF over RDMA (RoCE/iWARP)</td>
+<td align="right">High (efficient, low CPU)</td>
+<td align="right">Lowest (microsecond‑class best case)</td>
+<td align="right">Good with lossless fabric tuning; sensitive to PFC and congestion</td>
+<td align="right">Low CPU, requires RDMA NICs and fabric setup</td>
+<td>Latency‑sensitive inference, real‑time KV stores</td>
+</tr>
+<tr>
+<td>NVMe‑oF over TCP (kernel or userspace)</td>
+<td align="right">Moderate–High</td>
+<td align="right">Slightly higher than RDMA; depends on kernel bypass</td>
+<td align="right">More predictable across arbitrary networks; higher CPU</td>
+<td align="right">Higher CPU; no special fabric required</td>
+<td>Flexible deployments, easier ops, cloud scenarios</td>
+</tr>
+<tr>
+<td>All‑flash NVMe‑oF + front‑end KV cache tiering</td>
+<td align="right">Highest effective throughput for hot keys</td>
+<td align="right">Lowest perceived TTFT for cached items</td>
+<td align="right">Best for lowering time‑to‑first‑token and masking tails</td>
+<td align="right">Extra memory + cache ops; complexity in consistency</td>
+<td>AI inference, hot‑key workloads</td>
+</tr>
+</tbody></table>
+<h2>Application example: AI inference (throughput vs TTFT)</h2>
+<p>AI inference workloads expose the classic tradeoff between batching (to raise GPU utilization and model throughput) and time‑to‑first‑token (TTFT) or tail latency. Two levers matter at the storage level:</p>
+<ul>
+<li>Throughput headroom to the GPU: Sustaining higher requests/sec requires steady storage bandwidth and low variance in read latency so the GPU is not starved.</li>
+<li>First‑access latency (TTFT): For LLM inference TTFT is dominated by cache misses and cold model shard reads; small improvements in cold‑read tail latency directly reduce service TTFT.</li>
+</ul>
+<p>Operational pattern: if you increase request batching to lift throughput you will generally increase TTFT and tails unless you introduce caching or prefetching. Conversely, aggressive caching to reduce TTFT can reduce the need for large batches, improving responsiveness but potentially increasing cost.</p>
+<h2>Practical tuning levers</h2>
+<ul>
+<li>Right‑sized queue depth: start low, measure throughput slope; increase until marginal throughput gain flattens or tail latency degrades unacceptably.</li>
+<li>Fabric tuning: for RoCE, set PFC and ECN policies and monitor head‑of‑line blocking; for TCP, prefer kernel‑bypass (e.g., DPDK) or tuned TCP stacks where possible.</li>
+<li>QoS and queue families: partition workloads by QoS classes so small, latency‑sensitive requests are not queued behind bulk jobs.</li>
+<li>Front‑end KV caches / tiering: keep hot model segments in a fast cache to reduce TTFT; evaluate TTLs and eviction costs.</li>
+<li>Joint optimization with compute: co‑design host caching and GPU prefetch to smooth I/O bursts.</li>
+</ul>
+<h2>When to pick which approach</h2>
+<ul>
+<li>Choose RDMA NVMe‑oF when you need the lowest average latency and CPU overhead, and you can operate a well‑managed lossless fabric.</li>
+<li>Choose NVMe‑oF over TCP for simpler operations and when fabric expertise or specialized NICs are not available.</li>
+<li>Add a front‑end KV cache or tiering layer when TTFT or tail latency for hot keys dominates user experience; this is common in AI inference.</li>
+</ul>
+<h2>Example vendor data (context and caution)</h2>
+<p>Vendors occasionally publish signed benchmarks to demonstrate end‑to‑end impacts. For example, signed results shared for an all‑flash NVMe‑oF acceleration platform reported inference throughput improvements and TTFT reductions on a 480B model; those reports are useful for reproducibility and should be reviewed in the context of workload, batching policy, and test harness details. Read vendor test reports and replay them against your workload before committing to architecture changes. One such set of reports is available for download from Mingxin Technology’s FX series documentation: <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a></p>
+<h2>Key takeaways</h2>
+<ul>
+<li>Latency and throughput are coupled: batching and high queue depths improve throughput but increase tail latency.</li>
+<li>Measure both average and tail latencies, plus CPU and fabric behavior under the exact load shapes you expect.</li>
+<li>RDMA NVMe‑oF gives the best microsecond performance but requires fabric discipline; TCP‑based NVMe‑oF is easier to operate but often has higher CPU cost.</li>
+<li>Front‑end KV cache tiering is the most direct way to reduce TTFT for AI inference while preserving throughput.</li>
+<li>Always validate vendor benchmarks against your own workload; signed, reproducible reports are the most useful.</li>
+</ul>
+<p>For teams building or tuning AI datacenters, focus first on representative workloads and gate decisions on joint test results – single‑metric claims rarely capture the full tradeoff space.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
