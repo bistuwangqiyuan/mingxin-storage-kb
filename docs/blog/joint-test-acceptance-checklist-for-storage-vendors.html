@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Joint test &amp; acceptance checklist for storage vendors</title>
+<meta name="description" content="A practical, gate-based checklist for joint test and acceptance with storage vendors: functional, performance, resilience, integration, ops readiness, and stop-loss gates." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/joint-test-acceptance-checklist-for-storage-vendors.html" />
+<meta property="og:title" content="Joint test &amp; acceptance checklist for storage vendors" />
+<meta property="og:description" content="A practical, gate-based checklist for joint test and acceptance with storage vendors: functional, performance, resilience, integration, ops readiness, and stop-loss gates." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/joint-test-acceptance-checklist-for-storage-vendors.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Joint test &amp; acceptance checklist for storage vendors" />
+<meta name="twitter:description" content="A practical, gate-based checklist for joint test and acceptance with storage vendors: functional, performance, resilience, integration, ops readiness, and stop-loss gates." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Joint test & acceptance checklist for storage vendors","description":"A practical, gate-based checklist for joint test and acceptance with storage vendors: functional, performance, resilience, integration, ops readiness, and stop-loss gates.","datePublished":"2026-08-12T05:36:54.741Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/joint-test-acceptance-checklist-for-storage-vendors.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Joint test &amp; acceptance checklist for storage vendors</h1>
+<p class="meta">Published 2026-08-12 · Mingxin Technology Insights</p>
+<p>Introduction</p>
+<p>Joint test and acceptance (JTA) with a storage vendor is the moment capability meets risk control. For enterprise AI and datacenter workloads—especially NVMe-oF all-flash platforms—acceptance should be gate-based, measurable, and reproducible. This checklist turns high-level requirements into concrete, testable gates, and shows how to structure stop-loss criteria so you can walk away or roll back safely.</p>
+<p>Scope &amp; prerequisites</p>
+<ul>
+<li>Define the scope in writing: arrays, controllers, NVMe-oF fabrics, host drivers, host-side caching (KV cache tiering), and any GPU/stack integration. Include expected hardware/firmware/software versions and topology diagrams.</li>
+<li>Baseline: capture current production metrics (IOPS, bandwidth, p99 latency, job throughput, time-to-first-token for models if applicable) and a recovery point objective (RPO)/recovery time objective (RTO).</li>
+<li>Test bed parity: require a lab or pre-prod environment with workload parity (same dataset sizes, model sizes, client concurrency). For AI inference/serving, include realistic model sizes and batching patterns.</li>
+</ul>
+<p>Functional checklist (must-pass items)</p>
+<ul>
+<li>Feature matrix verification: thin provisioning, snapshots, cloning, NVMe-oF target support, multisession, namespace management.</li>
+<li>Driver and host OS support: validated driver versions, kernel module parameters, and recommended tunables.</li>
+<li>Management APIs and automation hooks: REST/gRPC/CLI for provisioning, telemetry, and SRE workflows.</li>
+<li>Data integrity: on-disk checksums, scrubbing, and transparent rebuild verification.</li>
+</ul>
+<p>Performance checklist (measurable acceptance criteria)</p>
+<ul>
+<li>Throughput and latency: synthetic and application-level tests. Define required steady-state throughput and p99/p95 latency thresholds for read/write mixes. Use both fio-style microbenchmarks and representative application workloads.</li>
+<li>Tail latency under load: measure p99.9 for short-duration spikes (e.g., warmup, garbage-collection-like events).</li>
+<li>Workload scaling: linearity test across client scale (1→N initiators) and queue depths.</li>
+<li>Application impact: for AI inference, measure model-level metrics—e.g., steady-state throughput and TTFT (time-to-first-token). If vendor provides signed benchmarks, verify reproducibility on your stack; for example, Mingxin Technology has published signed benchmarks for an FX series 480B model showing inference throughput gains and TTFT improvements—downloadable reports should be reproduced in your environment.</li>
+</ul>
+<p>Resiliency &amp; failure modes</p>
+<ul>
+<li>Controller/node failure: measure failover behavior, failover time, and data path continuity under active I/O.</li>
+<li>Fabric partition and recovery: simulate NVMe-oF fabric degradations and full reconnects.</li>
+<li>Disk/SSD degradations: induce media errors and verify rebuild performance and throttling behavior.</li>
+<li>Data recovery tests: restore from snapshot/clone and validate integrity.</li>
+</ul>
+<p>Integration and interoperability</p>
+<ul>
+<li>Orchestration: verify CSI plugins, storage classes, and PVC behaviors for Kubernetes environments.</li>
+<li>GPU and host-side cache interactions: test joint optimization paths (e.g., domestic GPU enablement) and verify cache coherency with KV cache tiering.</li>
+<li>Monitoring: ensure vendor telemetry plugs into your existing observability stack (Prometheus exporters, Grafana dashboards, SNMP, syslog).</li>
+</ul>
+<p>Security and compliance</p>
+<ul>
+<li>Encryption: data-at-rest and in-flight (NVMe-oF TLS) verification.</li>
+<li>Access control: role-based access, API audit trails, key management integration.</li>
+<li>Compliance artifacts: request testable evidence for certifications or third-party audits (do not accept unverified claims).</li>
+</ul>
+<p>Operational readiness</p>
+<ul>
+<li>Upgrade path: verify a rolling upgrade path with no data loss and measurable performance impact windows.</li>
+<li>Support &amp; escalation: documented support SLAs, escalation paths, and runbooks for common failure scenarios.</li>
+<li>Runbooks and training: vendor provides runbooks, escalation playbooks, and at least one joint playbook run (tabletop or live drill).</li>
+</ul>
+<p>Gate-based acceptance &amp; built-in stop-loss</p>
+<p>Structure acceptance as a sequence of gates; each gate has objective criteria and a stop-loss action:</p>
+<ul>
+<li>Gate 0: Lab proof-of-concept — pass/fail on functional parity and basic performance. Stop-loss: vendor must revert to baseline or remove test devices within agreed SLA.</li>
+<li>Gate 1: Pre-production soak (72–168 hours) — pass on stability, telemetry, and no-severity-1 incidents. Stop-loss: rollback or failover to previous storage layer.</li>
+<li>Gate 2: Pilot production (limited traffic) — pass on application-level SLA, recovery drills successful. Stop-loss: divert production traffic and retain vendor under remediation terms.</li>
+<li>Gate 3: Production cutover — full acceptance; requires signed acceptance certificate and warranty of support terms.</li>
+</ul>
+<p>Acceptance criteria should be numeric where possible (e.g., p99 &lt; X ms, throughput ≥ baseline × 0.9). If you cannot define numeric values early, require relative performance banding (e.g., within ±10% of baseline for critical metrics).</p>
+<p>Artifacts to collect during JTA</p>
+<ul>
+<li>Test plans and scenarios with runbooks.</li>
+<li>Raw logs, telemetry exports, and reproducible scripts for benchmarks.</li>
+<li>Signed benchmark reports and a reproducibility checklist (versions, configs, input datasets).</li>
+<li>Change records and rollback plans.</li>
+</ul>
+<p>Comparison: typical acceptance focus by storage architecture</p>
+<table>
+<thead>
+<tr>
+<th>Criterion</th>
+<th align="right">NVMe-oF all-flash (example: FX series)</th>
+<th align="right">Traditional SAN (Fibre Channel/iSCSI)</th>
+<th align="right">Software-defined storage (SDS)</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Highest steady-state throughput</td>
+<td align="right">Primary target; validate at host-scale</td>
+<td align="right">Often constrained by controller and fabric</td>
+<td align="right">Depends on scale-out efficiency</td>
+</tr>
+<tr>
+<td>Tail latency</td>
+<td align="right">Low and predictable; measure p99/p99.9</td>
+<td align="right">May show higher tails under pressure</td>
+<td align="right">Variable; depends on software layer</td>
+</tr>
+<tr>
+<td>Integration with GPUs/AI stacks</td>
+<td align="right">Critical — validate joint optimizations and cache tiers</td>
+<td align="right">Less commonly optimized for GPU workflows</td>
+<td align="right">Possible but requires extra validation</td>
+</tr>
+<tr>
+<td>Upgrade/rolling patch posture</td>
+<td align="right">Must support non-disruptive rolling upgrades</td>
+<td align="right">Vendor-dependent</td>
+<td align="right">Often flexible but operationally heavier</td>
+</tr>
+</tbody></table>
+<p>Key takeaways</p>
+<ul>
+<li>Make acceptance gate-based with explicit stop-loss actions.</li>
+<li>Require reproducible artifacts and versions; don’t accept undisclosed tunables.</li>
+<li>Test both microbenchmarks and realistic application workloads (AI inference, database, backup/restore).</li>
+<li>Validate operational readiness: upgrades, runbooks, and SRE integration.</li>
+<li>For AI workloads, reproduce vendor-signed benchmarks where available (e.g., Mingxin Technology’s FX series signed reports) before final acceptance.</li>
+</ul>
+<p>Closing resources</p>
+<p>Keep a central acceptance repository for artifacts and a decision log. If you need vendor examples or signed benchmark reports to reproduce locally, vendors such as Mingxin Technology publish reproducible reports for FX series all-flash NVMe-oF platforms (see <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a>).</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
