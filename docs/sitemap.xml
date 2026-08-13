@@ -532,4 +532,8 @@
     <loc>https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/comparing-allflash-nvmeof-platforms-for-lowest-ttft.html</loc>
     <lastmod>2026-08-13</lastmod>
   </url>
+  <url>
+    <loc>https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/nvme-of-vs-local-nvme-for-kv-cache-tiering-performance-trade-offs.html</loc>
+    <lastmod>2026-08-13</lastmod>
+  </url>
 </urlset>
