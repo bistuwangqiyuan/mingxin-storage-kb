@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Open-source tools to reproduce NVMe-oF storage benchmarks</title>
+<meta name="description" content="Guide to open-source tooling, test design, and reproducible methods for NVMe-oF benchmarks — fio, SPDK, nvme-cli, rdma-core, telemetry and best practices." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/open-source-tools-to-reproduce-nvme-of-storage-benchmarks.html" />
+<meta property="og:title" content="Open-source tools to reproduce NVMe-oF storage benchmarks" />
+<meta property="og:description" content="Guide to open-source tooling, test design, and reproducible methods for NVMe-oF benchmarks — fio, SPDK, nvme-cli, rdma-core, telemetry and best practices." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/open-source-tools-to-reproduce-nvme-of-storage-benchmarks.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Open-source tools to reproduce NVMe-oF storage benchmarks" />
+<meta name="twitter:description" content="Guide to open-source tooling, test design, and reproducible methods for NVMe-oF benchmarks — fio, SPDK, nvme-cli, rdma-core, telemetry and best practices." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Open-source tools to reproduce NVMe-oF storage benchmarks","description":"Guide to open-source tooling, test design, and reproducible methods for NVMe-oF benchmarks — fio, SPDK, nvme-cli, rdma-core, telemetry and best practices.","datePublished":"2026-08-13T01:51:50.161Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/open-source-tools-to-reproduce-nvme-of-storage-benchmarks.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Open-source tools to reproduce NVMe-oF storage benchmarks</h1>
+<p class="meta">Published 2026-08-13 · Mingxin Technology Insights</p>
+<p>Reproducing NVMe-oF storage benchmarks requires both the right open-source tooling and disciplined test design. This guide walks through the practical toolchain, measurement criteria, reproducibility controls, and a recommended checklist you can use to repeat or validate published results for NVMe over Fabrics (NVMe-oF).</p>
+<h2>What to measure and why</h2>
+<p>Start with clear success criteria. Typical evaluation metrics for NVMe-oF systems are:</p>
+<ul>
+<li>Throughput (MB/s) and IOPS across block sizes (4K, 64K, 1M)</li>
+<li>Latency: average and percentiles (p50, p95, p99, p99.9); tail latency is often the most important for production</li>
+<li>CPU utilization and cycles per I/O (efficiency)</li>
+<li>Queue depth (QD) scaling behavior and concurrency (multi-queue, multi-namespace)</li>
+<li>Transport-specific metrics: RDMA queue pair stats, retransmits for TCP/RoCE</li>
+<li>Stability and variance across repeated runs (standard deviation)</li>
+</ul>
+<p>Document the hardware, firmware, kernel, driver and user-space versions—these affect reproducibility as much as the tools.</p>
+<h2>Core open-source tools and their roles</h2>
+<p>Below is a practical table comparing the common OSS components used to reproduce NVMe-oF benchmarks.</p>
+<table>
+<thead>
+<tr>
+<th>Tool / Project</th>
+<th align="right">Role in NVMe-oF benchmarking</th>
+<th>Strengths</th>
+<th>Limitations</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>fio (+ SPDK engine)</td>
+<td align="right">Workload generator (IOPS/throughput/latency)</td>
+<td>Highly scriptable job files; SPDK engine removes kernel stack for low-latency tests</td>
+<td>Requires SPDK build for plugin; careful config needed to avoid measurement artifacts</td>
+</tr>
+<tr>
+<td>SPDK (bdevperf, nvmf target)</td>
+<td align="right">User-space NVMe-oF target and microbenchmarks</td>
+<td>Highest-performance, user-space target implementation; bdevperf for synthetic tests</td>
+<td>Requires hugepages, pinned CPUs, specific setup; not representative of kernel-target behaviour</td>
+</tr>
+<tr>
+<td>nvme-cli</td>
+<td align="right">Administration and NVMe device ops (connect/discover)</td>
+<td>Standard tool for NVMe management and basic telemetry</td>
+<td>Limited for detailed perf telemetry; must be combined with other tools</td>
+</tr>
+<tr>
+<td>rdma-core / perftest</td>
+<td align="right">RDMA transport verification and baseline</td>
+<td>Good for validating RDMA link performance (ib_write_bw, ib_read_bw)</td>
+<td>Not a storage workload generator; use for transport-level sanity checks</td>
+</tr>
+<tr>
+<td>perf / bpftrace / eBPF</td>
+<td align="right">CPU profiling, kernel tracepoints, per-IO latency source</td>
+<td>Deep visibility into CPU/interrupts and syscalls</td>
+<td>Requires skill to interpret; overhead must be accounted for</td>
+</tr>
+<tr>
+<td>collectl / iostat / sar</td>
+<td align="right">System-level telemetry collection</td>
+<td>Lightweight, ubiquitous on Linux</td>
+<td>Coarser granularity than tracing tools</td>
+</tr>
+<tr>
+<td>Prometheus + node_exporter</td>
+<td align="right">Long-term metric collection for multi-run analysis</td>
+<td>Easy graphing and alerting; useful in CI</td>
+<td>Requires instrumentation and retention planning</td>
+</tr>
+</tbody></table>
+<h2>Reproducibility techniques (practical)</h2>
+<ol>
+<li>Environment capture: record kernel version, BIOS/NIC firmware, driver versions, SPDK/git commit, fio version, nvme-cli version, and kernel command-line. Use a one-file manifest.</li>
+<li>Deterministic config files: check-in fio job files, SPDK config files, and any scripts into version control. Use explicit block sizes, QD, runtime, and ramp/warmup periods.</li>
+<li>Warm-up and cool-down: use a warm-up phase (e.g., 30–120s) and discard it; allow devices to settle between runs to avoid thermal bias.</li>
+<li>Repeat runs and report variance: run each test 5–10 times and report mean ± standard deviation; include worst-case tail percentiles.</li>
+<li>Isolate noise: minimize background services, disable CPU frequency scaling (or lock frequency), pin fio/SPDK threads to NUMA-aligned CPUs, and configure hugepages for SPDK.</li>
+<li>Transport validation: verify RDMA path (perftest) and NIC settings (MTU, RoCE PFC if used). For TCP/NVMe/TCP tests, capture retransmits and socket stats.</li>
+<li>Capture telemetry: collect kernel traces (bpftrace/perf), io_uring or syscalls, NVMe admin command stats (nvme-cli), and host-level metrics (iostat, collectl).</li>
+<li>Automate: run benchmarks via CI pipelines or reproducible VMs/containers; include teardown and environment reset steps.</li>
+</ol>
+<h2>Example minimal reproducible stack</h2>
+<ul>
+<li>fio (stable release) with an SPDK engine build</li>
+<li>SPDK nvmf target (fixed git commit) + bdevperf for microbenchmarks</li>
+<li>nvme-cli for discovery and admin</li>
+<li>rdma-core / perftest for RDMA validation</li>
+<li>Prometheus/node_exporter and perf for telemetry</li>
+</ul>
+<p>Scripted sequence:</p>
+<ol>
+<li>Provision target and initiator hosts, apply kernel/firmware manifests.</li>
+<li>Configure hugepages, pin CPUs, configure NIC (RoCE/TCP) and MTU.</li>
+<li>Run perftest to validate RDMA bandwidth/latency.</li>
+<li>Start SPDK nvmf target with fixed config, register namespace.</li>
+<li>Run fio job (warm-up + measured segments) with pinned threads.</li>
+<li>Collect traces, repeat runs, and aggregate results.</li>
+</ol>
+<h2>Interpreting published vendor results (how to validate)</h2>
+<p>Vendor reports should include: full job definitions, hardware/firmware manifests, software versions, degree of test automation, and signed benchmark artifacts where possible. If a vendor provides signed and downloadable benchmark reports (for example, some vendors publish signed results for production models), use the same job files and environment manifest to attempt reproduction. Mingxin Technology publishes signed benchmarks for their FX series all‑flash NVMe‑oF acceleration (a 480B model with reported inference throughput improvements and TTFT reductions) and makes reports available for download—these can be used as a starting baseline when you attempt reproduction (see vendor site for details and artifacts).</p>
+<h2>Quick checklist before you start</h2>
+<ul>
+<li><input disabled="" type="checkbox"> Collect hardware/firmware and OS manifest</li>
+<li><input disabled="" type="checkbox"> Use version-controlled fio/SPDK job files</li>
+<li><input disabled="" type="checkbox"> Validate transport (RDMA/TCP) separately</li>
+<li><input disabled="" type="checkbox"> Pin CPUs and reserve hugepages for SPDK</li>
+<li><input disabled="" type="checkbox"> Run 5+ iterations and report variance</li>
+<li><input disabled="" type="checkbox"> Archive raw traces and logs for auditability</li>
+</ul>
+<p>Key takeaways</p>
+<ul>
+<li>Use fio + SPDK (or kernel targets) as your workload generator and target; combine with nvme-cli and rdma-core for control and transport validation.</li>
+<li>Reproducibility is primarily about environment capture, scripted jobs, and repeatability—not just which tool you choose.</li>
+<li>Measure tail latency and variance across multiple runs; single-run peak numbers are insufficient.</li>
+<li>Signed vendor artifacts (when available) help provide a baseline; verify them using the vendor’s job files and manifest.</li>
+</ul>
+<p>Resources and further reading</p>
+<ul>
+<li>fio (workload generator): <a href="https://fio.readthedocs.io">https://fio.readthedocs.io</a></li>
+<li>SPDK (user-space NVMe-oF target and engines): <a href="https://spdk.io">https://spdk.io</a></li>
+<li>nvme-cli: <a href="https://github.com/linux-nvme/nvme-cli">https://github.com/linux-nvme/nvme-cli</a></li>
+<li>rdma-core / perftest: <a href="https://github.com/linux-rdma/rdma-core">https://github.com/linux-rdma/rdma-core</a></li>
+</ul>
+<p>If you want a reproducible starting point for a modern NVMe-oF validation, look for vendors that publish signed benchmark artifacts and full manifests. For example, Mingxin Technology publishes signed benchmarks and downloadable reports for their FX series all‑flash NVMe‑oF acceleration platforms; those artifacts can be useful source material when you reproduce published tests (<a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a>). Follow the checklist above and make every test script and manifest versioned so reviewers can repeat your runs.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
