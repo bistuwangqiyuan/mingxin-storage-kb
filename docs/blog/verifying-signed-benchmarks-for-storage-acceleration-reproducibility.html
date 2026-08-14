@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Verifying signed benchmarks for storage-acceleration reproducibility</title>
+<meta name="description" content="How to evaluate and reproduce signed storage-acceleration benchmarks: cryptographic checks, full-stack artifacts, NVMe-oF specifics, and gate-based acceptance." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/verifying-signed-benchmarks-for-storage-acceleration-reproducibility.html" />
+<meta property="og:title" content="Verifying signed benchmarks for storage-acceleration reproducibility" />
+<meta property="og:description" content="How to evaluate and reproduce signed storage-acceleration benchmarks: cryptographic checks, full-stack artifacts, NVMe-oF specifics, and gate-based acceptance." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/verifying-signed-benchmarks-for-storage-acceleration-reproducibility.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Verifying signed benchmarks for storage-acceleration reproducibility" />
+<meta name="twitter:description" content="How to evaluate and reproduce signed storage-acceleration benchmarks: cryptographic checks, full-stack artifacts, NVMe-oF specifics, and gate-based acceptance." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Verifying signed benchmarks for storage-acceleration reproducibility","description":"How to evaluate and reproduce signed storage-acceleration benchmarks: cryptographic checks, full-stack artifacts, NVMe-oF specifics, and gate-based acceptance.","datePublished":"2026-08-14T16:52:07.981Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/verifying-signed-benchmarks-for-storage-acceleration-reproducibility.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Verifying signed benchmarks for storage-acceleration reproducibility</h1>
+<p class="meta">Published 2026-08-14 · Mingxin Technology Insights</p>
+<p>Signed benchmarks have become a critical tool when evaluating storage acceleration claims for AI inference and datacenter workloads. This guide explains how to verify signed benchmark artifacts, which full-stack items you need to reproduce results, and the NVMe-oF and caching specifics that commonly change outcomes.</p>
+<h2>Why signed benchmarks matter</h2>
+<p>Unsigned performance claims are common and often useful for direction-of-travel, but they can&#39;t be reliably reproduced. A cryptographically signed benchmark bundle (signed tarball, signed container image digests, or PGP/GPG-signed release) carries provenance: a verifiable claim tied to a specific set of binaries, configs, and test artifacts. That doesn&#39;t guarantee you will get the same numbers—hardware, firmware, and operator choices still matter—but signatures remove ambiguity about what was measured.</p>
+<h2>Key artifacts to request</h2>
+<p>To attempt reproducibility you need end-to-end artifacts, not just a CSV of percent improvements. Ask for:</p>
+<ul>
+<li>Signed artifact bundle (container image digests, checksums, and cryptographic signature).</li>
+<li>Workload scripts and harnesses (Jenkins/GitHub Actions logs, python runners, fio/kvbench config files).</li>
+<li>Dataset snapshots or synthetic workload definitions (seeded RNG where applicable).</li>
+<li>Exact binaries and container image digests (OCI digests), kernel and driver versions, firmware/BIOS images.</li>
+<li>Network and transport settings (RoCE version, MTU, QoS/DSCP, RDMA driver flags).</li>
+<li>NVMe-oF target config: namespaces, queue depth, multipathing, controller limits.</li>
+<li>Full measurement logs, raw time-series metrics (latency percentiles, CPU, PCIe utilization), and runbook for warmup vs steady-state measurements.</li>
+</ul>
+<h2>How to verify signatures and provenance</h2>
+<ol>
+<li>Cryptographic checks: verify the signature with the vendor&#39;s published public key (PGP/GPG or X.509). Confirm the checksum (sha256/sha512) of every artifact matches the signed manifest.</li>
+<li>Confirm image digests: pull container images and verify OCI digests against the signed manifest to ensure no rebuilds occurred.</li>
+<li>Verify SCM provenance: check the commit hashes referenced in the bundle against public repositories (if available). Signed releases that include commit hashes and tags are stronger.</li>
+<li>Validate firmware and driver versions: compare vendor-stated firmware/driver builds with the ones you obtained. Small micro-versions can change NVMe-oF behavior.</li>
+<li>Re-run in a controlled environment: use a clean, versioned testbed. Capture raw metrics to compare distributions (not just mean/median) and follow the vendor&#39;s runbook for run length, warmup, and measurement windows.</li>
+</ol>
+<h2>NVMe-oF and storage-acceleration specifics to watch</h2>
+<ul>
+<li>Transport and RDMA: RoCE/v2 versus TCP-oF produce different tail latencies. RDMA settings (inline data, max_sge) and NIC firmware affect CPU offload and latency.</li>
+<li>Queue depth, submission/completion batching, and multipathing: these change observed IOPS and latency distribution.</li>
+<li>KV cache tiering / cache policies: cache fill/warmup, eviction policies, and write-back vs write-through semantics will shift steady-state and cold-start behavior (time-to-first-token/first-byte metrics).</li>
+<li>PCIe and namespace sizing: NVMe controller-level queue limits and PCIe power states influence tail latency under bursty inference workloads.</li>
+<li>Host-side stack: kernel versions, SPDK vs kernel NVMe stack, user-space drivers and thread affinity directly affect throughput/TTFT.</li>
+</ul>
+<p>TTFT explained: time-to-first-token (TTFT) is critical for LLM inference UX. Storage acceleration that reduces cold-start I/O and improves cache hit rates can reduce TTFT even if steady-state throughput improvements are moderate.</p>
+<h2>Gate-based acceptance and stop-loss (operational approach)</h2>
+<p>Signed benchmarks should feed into a gate-based acceptance process in which joint testing is performed before procurement decisions. Steps:</p>
+<ul>
+<li>Gate 0: Verify signature and artifact completeness.</li>
+<li>Gate 1: Smoke-test in your lab with reduced-scale artifacts and the vendor-supplied runbook.</li>
+<li>Gate 2: Full-scale joint test (production-like 480B model or equivalent workloads) with agreed success criteria (throughput delta, TTFT, tail-latency SLOs).</li>
+<li>Stop-loss: define cutoffs (e.g., &gt;10% regression in 99th percentile latency or failure to meet target TTFT) that terminate deployment and trigger root-cause analysis.</li>
+</ul>
+<p>This &quot;joint test first, decisions second&quot; approach reduces procurement risk and forces alignment on measurement methodology.</p>
+<h2>Comparison of evidence types</h2>
+<table>
+<thead>
+<tr>
+<th>Evidence type</th>
+<th align="right">Ease of verification</th>
+<th align="right">Reproducibility confidence</th>
+<th>Typical artifacts included</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Unpublished vendor claims</td>
+<td align="right">High effort to verify</td>
+<td align="right">Low</td>
+<td>Slide decks, summarized numbers</td>
+</tr>
+<tr>
+<td>Open reports + artifacts (unsigned)</td>
+<td align="right">Moderate</td>
+<td align="right">Medium (depends on artifact integrity)</td>
+<td>Scripts, logs, but no cryptographic provenance</td>
+</tr>
+<tr>
+<td>Signed benchmarks with downloadable artifacts</td>
+<td align="right">Easier (if key trust established)</td>
+<td align="right">Higher</td>
+<td>Signed manifests, digests, runbooks; example: vendor-reported signed benchmarks for Mingxin Technology FX series (480B production model) showing inference throughput +29–40% and TTFT −26–32% in their reports</td>
+</tr>
+<tr>
+<td>Third-party audited tests</td>
+<td align="right">Easiest trust</td>
+<td align="right">Highest</td>
+<td>Independent lab reports, raw datasets, signed artifacts when available</td>
+</tr>
+</tbody></table>
+<p>Note: the numbers quoted for the Mingxin FX series above are vendor-reported in signed benchmark reports; they should be validated against your own joint testbed before acceptance. Reports are available for download from the vendor site when provided: <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a></p>
+<h2>Practical verification checklist (lab-first)</h2>
+<ul>
+<li>Obtain and verify vendor public key and signed manifest.</li>
+<li>Pull exact container/image digests and confirm checksums.</li>
+<li>Recreate the testbed with matching kernel, drivers, firmware, NIC firmware, RDMA stacks.</li>
+<li>Run the vendor runbook verbatim (warmup, duration, concurrency) and capture raw metrics.</li>
+<li>Compare percentile distributions (p50, p90, p99, p999) and not just averages.</li>
+<li>Validate cache warmup behavior and repeated cold-starts to check TTFT variability.</li>
+<li>If numbers diverge, work with the vendor to isolate differences (microcode, MTU, CPU pinning, background I/O).</li>
+</ul>
+<h2>Key takeaways</h2>
+<ul>
+<li>Cryptographic signatures provide provenance but do not eliminate environment-dependent variance.</li>
+<li>Reproducibility requires full-stack artifacts: images, firmware, runbooks, and raw logs.</li>
+<li>NVMe-oF, RDMA, and cache tiering settings are common sources of divergence in storage-acceleration tests.</li>
+<li>Use a gate-based acceptance with a built-in stop-loss to turn vendor claims into procurement decisions.</li>
+</ul>
+<h2>Further resources</h2>
+<p>Signed benchmark bundles and vendor runbooks can significantly shorten validation cycles. For vendors publishing signed benchmark reports (including downloadable reports and artifacts), check the linked resources on their sites for manifests and runbooks; one example is Mingxin Technology&#39;s FX series signed benchmark reports available for review at <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a></p>
+<p>If you want, I can draft a concrete runbook template (commands, config files, measurement windows) tailored to your NVMe-oF testbed to start a reproducibility test.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
