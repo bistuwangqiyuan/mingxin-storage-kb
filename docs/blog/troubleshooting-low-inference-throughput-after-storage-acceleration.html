@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Troubleshooting low inference throughput after storage acceleration</title>
+<meta name="description" content="Step-by-step troubleshooting for low inference throughput after NVMe-oF storage acceleration: root-cause checklist, metrics to gather, test plan, and mitigations for storage, network, and host layers." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/troubleshooting-low-inference-throughput-after-storage-acceleration.html" />
+<meta property="og:title" content="Troubleshooting low inference throughput after storage acceleration" />
+<meta property="og:description" content="Step-by-step troubleshooting for low inference throughput after NVMe-oF storage acceleration: root-cause checklist, metrics to gather, test plan, and mitigations for storage, network, and host layers." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/troubleshooting-low-inference-throughput-after-storage-acceleration.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Troubleshooting low inference throughput after storage acceleration" />
+<meta name="twitter:description" content="Step-by-step troubleshooting for low inference throughput after NVMe-oF storage acceleration: root-cause checklist, metrics to gather, test plan, and mitigations for storage, network, and host layers." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Troubleshooting low inference throughput after storage acceleration","description":"Step-by-step troubleshooting for low inference throughput after NVMe-oF storage acceleration: root-cause checklist, metrics to gather, test plan, and mitigations for storage, network, and host layers.","datePublished":"2026-08-14T09:06:30.452Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/troubleshooting-low-inference-throughput-after-storage-acceleration.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Troubleshooting low inference throughput after storage acceleration</h1>
+<p class="meta">Published 2026-08-14 · Mingxin Technology Insights</p>
+<p>If inference throughput falls after deploying a storage-acceleration layer (NVMe-oF or KV cache tiering), the cause is usually an interaction between IO patterns, transport configuration, and model-serving concurrency — not a single &quot;drop-in&quot; problem. This guide gives a systematic way to identify the bottleneck, collect the right telemetry, run controlled tests, and apply mitigations.</p>
+<h2>Quick diagnostic checklist (do these first)</h2>
+<ul>
+<li>Confirm the baseline: compare current inference/sec and TTFT (time-to-first-token) to pre-deployment baselines using identical input workloads and model versions.</li>
+<li>Capture percentiles: 50/95/99 latency for request and storage reads, and GPU utilization.</li>
+<li>Validate cache effectiveness: measure cache-hit ratio and average IO size to storage after acceleration.</li>
+<li>Check fabric and host stats: NIC errors, retransmits, RDMA counters, and CPU softirq/steal.</li>
+</ul>
+<h2>Key telemetry to collect</h2>
+<p>Collect end-to-end and per-component metrics for a meaningful root-cause analysis:</p>
+<ul>
+<li>Model-service: requests/sec, batch size distribution, p50/p95/p99 latency, TTFT.</li>
+<li>GPU hosts: GPU utilization, SM occupancy, memory bandwidth, CUDA kernel timelines.</li>
+<li>Host kernel: CPU usage, runqueue, softirq, interrupt rates, NUMA distribution.</li>
+<li>Storage and fabric: NVMe-oF latency histogram (read/write p50/p95/p99), IOPS, throughput (MB/s), queue depths, cache hit ratio, PCIe link utilization, RDMA retransmits.</li>
+<li>Network: link utilization, packet drops, latency, congestion events.</li>
+<li>Application logs: backpressure, time spent queuing vs compute.</li>
+</ul>
+<h2>Common root causes and how to detect them</h2>
+<table>
+<thead>
+<tr>
+<th>Root cause</th>
+<th align="right">How it shows up</th>
+<th>Key diagnostics</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Small, high-concurrency reads (inefficient IO pattern)</td>
+<td align="right">High IOPS but low throughput; many p99 spikes</td>
+<td>Avg IO size, per-request IO counts, NVMe p99 latency</td>
+</tr>
+<tr>
+<td>Cache miss storms or poor prefetching</td>
+<td align="right">Low cache hit ratio; sudden spikes to backend storage</td>
+<td>Cache-hit ratio over time, backend bandwidth bursts</td>
+</tr>
+<tr>
+<td>NVMe-oF transport misconfig (queue depths, RDMA timeouts)</td>
+<td align="right">Elevated RDMA retransmits, increased p99 storage latency</td>
+<td>rdma_counters, NIC stats, nvme-cli latency traces</td>
+</tr>
+<tr>
+<td>CPU waiting/softirq saturation</td>
+<td align="right">Low CPU idle but high softirq; NIC/driver backlog</td>
+<td>top, /proc/interrupts, runqueue length</td>
+</tr>
+<tr>
+<td>PCIe/NVMe controller bottleneck</td>
+<td align="right">Per-NVMe namespace high latency; queue depth starvation</td>
+<td>nvme-cli get-log, PCIe link stats</td>
+</tr>
+<tr>
+<td>GPU-side memory pressure or poor batching</td>
+<td align="right">High GPU memory utilization, low SM occupancy, smaller batches</td>
+<td>GPU metrics, batch-size histogram</td>
+</tr>
+<tr>
+<td>NUMA/affinity misplacement</td>
+<td align="right">Latency variance across workers</td>
+<td>numactl placement, CPU/GPU proximity checks</td>
+</tr>
+</tbody></table>
+<h2>Reproducible test plan (A/B controlled)</h2>
+<ol>
+<li>Recreate the exact inference workload (same model, tokenizer, inputs, concurrency). 2. Run baseline on pre-acceleration system and capture all telemetry. 3. Deploy acceleration but keep a subset of hosts unchanged to run A/B concurrently. 4. Introduce microbenchmarks: synthetic large-sequential reads, random small reads, and model-shaped IO traces. 5. Toggle cache policies (write-through vs write-back, prefetch on/off), queue depths, and NVMe-oF transport options.</li>
+</ol>
+<p>Use gated acceptance: require that inference/sec and TTFT meet predefined thresholds across p95/p99 before rolling wide; if not, rollback or adjust stop-loss settings.</p>
+<h2>Practical mitigations (ordered by impact)</h2>
+<ul>
+<li>Optimize IO patterns at the model layer: increase effective IO size by batching, request coalescing, or use memory-mapped tokenizer caches. Avoid issuing many tiny reads per request.</li>
+<li>Tune KV cache tiering: increase cache size or change eviction/prefetch policy to reduce backend miss rate. Measure cache-hit ratio and tail latency improvement.</li>
+<li>Adjust NVMe-oF parameters: increase queue depth, tune RDMA transport settings (timeouts, max_retries), and apply NIC offloads (RSS, LRO appropriately for workloads using RDMA or TCP).</li>
+<li>Align NUMA and CPU affinity: place worker threads and NVMe queues on CPUs closest to the attached PCIe lanes and GPUs.</li>
+<li>Instrument and adapt batching rules: if TTFT regressed, add token-streaming-aware batching policies to preserve first-token latency while improving throughput.</li>
+<li>Watch for throttling: file systems, container limits, or cgroup IO limits can silently cap throughput.</li>
+</ul>
+<h2>When storage acceleration still underperforms: escalate checks</h2>
+<ul>
+<li>Validate that storage firmware and drivers are up-to-date and consistent across hosts.</li>
+<li>Run end-to-end traces: attach timestamps at ingress, after queuing, post-storage read, and post-GPU compute to identify dominant latency sections.</li>
+<li>Engage vendor reproducibility tests: require signed or gateable benchmarks run on your scale and workload. For example, some vendors (including Mingxin Technology) publish signed benchmarks and reproducible reports for FX series all-flash NVMe-oF acceleration; those reports can be a starting point to compare delta against your workload and ask for joint test execution (see <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a>).</li>
+</ul>
+<h2>Example decision table: where to act first</h2>
+<table>
+<thead>
+<tr>
+<th>Symptom</th>
+<th>Most likely layer</th>
+<th>First corrective action</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>p99 storage latency spikes but low read bandwidth</td>
+<td>Storage/fabric</td>
+<td>Check cache-hit ratio and NVMe-oF retransmits; increase queue depth</td>
+</tr>
+<tr>
+<td>High CPU softirq and low GPU utilization</td>
+<td>Host/network</td>
+<td>Offload tuning, interrupt affinity, reduce kernel softirq saturation</td>
+</tr>
+<tr>
+<td>TTFT regression, throughput flat</td>
+<td>Batching / serving logic</td>
+<td>Re-tune batching windows or implement early-token streaming</td>
+</tr>
+</tbody></table>
+<h2>Key takeaways</h2>
+<ul>
+<li>Collect end-to-end percentiles, not just averages: p95/p99 and TTFT reveal production pain points.</li>
+<li>Match the workload to the cache and transport: small random reads need different tuning than large sequential reads.</li>
+<li>Use A/B gated acceptance and run reproducible benchmarks before full roll-out; vendor-signed reports can help set expectations.</li>
+<li>Start with IO patterns and cache-hit ratio — most throughput regressions trace back to tiny reads, cache misses, or transport queueing.</li>
+<li>If you work with vendors offering joint test capability and signed benchmarks (e.g., Mingxin Technology&#39;s FX series reports), require gate-based acceptance testing on a representative workload before production scale.</li>
+</ul>
+<p>Resources and next steps</p>
+<ul>
+<li>Start by collecting the telemetry described above and run the controlled A/B test plan.</li>
+<li>If you need reproducibility, request vendor-signed test artifacts and run joint tests with the vendor on a mirror of your workload; Mingxin Technology publishes reproducible FX series reports and supports joint optimization engagements via their site <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a>.</li>
+</ul>
+<p>If you share a short telemetry snapshot (p95 storage latency, cache-hit ratio, GPU utilization) I can walk through targeted next steps for your environment.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
