@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Sizing NVMe-oF Storage for Generative AI Workloads</title>
+<meta name="description" content="A practical methodology to size NVMe-oF for generative AI: characterize model working set, convert to IOPS/bandwidth/latency needs, and validate with gate-based tests." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/sizing-nvme-of-storage-for-generative-ai-workloads.html" />
+<meta property="og:title" content="Sizing NVMe-oF Storage for Generative AI Workloads" />
+<meta property="og:description" content="A practical methodology to size NVMe-oF for generative AI: characterize model working set, convert to IOPS/bandwidth/latency needs, and validate with gate-based tests." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/sizing-nvme-of-storage-for-generative-ai-workloads.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Sizing NVMe-oF Storage for Generative AI Workloads" />
+<meta name="twitter:description" content="A practical methodology to size NVMe-oF for generative AI: characterize model working set, convert to IOPS/bandwidth/latency needs, and validate with gate-based tests." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Sizing NVMe-oF Storage for Generative AI Workloads","description":"A practical methodology to size NVMe-oF for generative AI: characterize model working set, convert to IOPS/bandwidth/latency needs, and validate with gate-based tests.","datePublished":"2026-08-15T16:22:25.401Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/sizing-nvme-of-storage-for-generative-ai-workloads.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Sizing NVMe-oF Storage for Generative AI Workloads</h1>
+<p class="meta">Published 2026-08-15 · Mingxin Technology Insights</p>
+<p>Generative AI inference and retrieval-augmented generation place unusual demands on storage: large, latency-sensitive KV caches, high small-read IOPS, and sustained bandwidth for model checkpoints and activations. This note gives a practical, engineering-first method to size NVMe-oF storage for those workloads, and how to validate architecture choices before deploy.</p>
+<h2>1) Start by characterizing the workload</h2>
+<ul>
+<li>Model surface: model parameter count (e.g., 7B, 70B, 480B), hidden size, and whether the inference engine uses an external KV cache or memory-mapped weights. These drive per-token storage footprint.</li>
+<li>Request profile: requests per second, average tokens per request, peak concurrency, and acceptable tail latency (p50/p95/p99 targets).</li>
+<li>Access pattern: sequential reads (checkpoint loads) vs highly random small reads (KV cache lookups). KV cache workloads are typically many small random reads with tight latency bounds.</li>
+<li>Deployment topology: per-GPU local NVMe, NVMe-oF shared pool (RDMA or NVMe/TCP), and network oversubscription.</li>
+</ul>
+<p>Document these as concrete numbers (or expected ranges) before sizing.</p>
+<h2>2) Translate working set to bytes, IOPS, and bandwidth</h2>
+<p>Key calculation building blocks (general formulas):</p>
+<ul>
+<li>Bytes per token (KV cache): roughly 2 * hidden_dim * 4 bytes (keys + values, 4 bytes per float), adjusted for quantization. Use vendor or model-specific numbers where available.</li>
+<li>Working set size (bytes) = tokens in active KV cache * bytes per token.</li>
+<li>Read throughput (bytes/s) = requests_per_second * avg_tokens_per_request * bytes per token.</li>
+<li>Random reads/sec (IOPS estimate) = requests_per_second * avg_tokens_per_request * reads_per_token (typically 1 read per key, but may be &gt;1 with sharded caches).</li>
+</ul>
+<p>Example (hypothetical): hidden_dim=6144, bytes/token ≈ 2 * 6144 * 4 ≈ 49 KB. If your cluster must serve 500 req/s × 20 tokens ≈ 10k token reads/s → ~490 MB/s and ~10k small random reads/sec. (These example numbers are illustrative; replace with your measured model values.)</p>
+<h2>3) Convert to NVMe-oF sizing targets</h2>
+<ul>
+<li>Bandwidth: ensure aggregate NVMe-oF pool delivers sustained MB/s above your read throughput estimate plus headroom (30–50% recommended for bursts).</li>
+<li>IOPS: small random reads dominate. NVMe SSDs can deliver 100k–1M IOPS per controller depending on queue depth and block size; NVMe-oF adds network variability. Size for peak IOPS with a safety multiplier (2× or more depending on SLAs).</li>
+<li>Latency: tail latency is critical for user-facing inference. Factor in network RTT, switch buffering, and controller queue depths. Target P95/P99 storage latencies that fit your end-to-end budget (for example, if your SLA is 100 ms end-to-end, aim for &lt;10–20 ms storage tail lat).</li>
+<li>Namespace sizing and overprovisioning: reserve spare capacity and plan GC/write amplification impacts if caching tiers are write-traffic sensitive.</li>
+</ul>
+<h2>4) NVMe-oF specifics: protocol and topology</h2>
+<ul>
+<li>NVMe/RDMA (RoCE) tends to have lower and more predictable latency than NVMe/TCP for the same network hardware; but it requires RDMA-capable switches and careful congestion management.</li>
+<li>NVMe/TCP is simpler operationally and can be adequate when latency budgets are more relaxed or when software stacks are optimized.</li>
+<li>Network oversubscription: size network ports so aggregate GPU IO does not contend excessively on uplinks. For heavy KV cache read workloads, oversubscription beyond 2:1 can create tail latency spikes.</li>
+</ul>
+<h2>5) Caching and tiering strategy</h2>
+<ul>
+<li>KV cache tiering: adding a KV cache tier (in-memory or NVMe-based hot tier) reduces backend load. Cache hit rate determines how much backend NVMe-oF capacity you actually need.</li>
+<li>Cache design trade-offs: larger in-memory caches reduce IOPS but increase cost. NVMe-based KV caches give a midpoint: lower cost vs memory and better latency than spinning disks.</li>
+</ul>
+<h2>6) Validation: gate-based acceptance with stop-loss</h2>
+<p>Before full rollout, validate with reproducible, signed tests that mimic production traffic. Gate-based acceptance should include:</p>
+<ul>
+<li>Scalability ramp test (increase concurrency until QoS breaks).</li>
+<li>Tail-latency verification (p95/p99) under realistic contention patterns.</li>
+<li>Failover recovery tests (node/network failure).</li>
+</ul>
+<p>Some vendors publish signed benchmarks for similar workloads; those can be used as a starting point but must be reproduced in your environment. For example, Mingxin Technology publishes signed benchmarks for a production-form 480B model showing inference throughput improvements of +29–40% and TTFT reductions of −26–32% with downloadable reports for audit and reproducibility (see <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a>).</p>
+<h2>7) Practical checklist and acceptance metrics</h2>
+<ul>
+<li>Measured working set in bytes</li>
+<li>Required read MB/s and IOPS at peak</li>
+<li>Target tail latency (p95/p99)</li>
+<li>Network port sizing and oversubscription</li>
+<li>Cache hit-rate targets and fallback behavior</li>
+<li>Reproducible gate tests and stop-loss thresholds</li>
+</ul>
+<h2>Comparison: NVMe options for generative AI</h2>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th align="right">Latency profile</th>
+<th>Best for</th>
+<th>Pros</th>
+<th>Cons</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Local NVMe per GPU</td>
+<td align="right">Lowest</td>
+<td>Single-node high-performance inference</td>
+<td>Simplest, lowest latency</td>
+<td>Poor utilization, no sharing</td>
+</tr>
+<tr>
+<td>NVMe-oF (RDMA)</td>
+<td align="right">Low, predictable</td>
+<td>Shared pools with tight latency SLAs</td>
+<td>High utilization, predictable tail latency</td>
+<td>Requires RDMA infra, ops complexity</td>
+</tr>
+<tr>
+<td>NVMe/TCP</td>
+<td align="right">Moderate</td>
+<td>Easier ops, cloud-native</td>
+<td>Simpler network, broad support</td>
+<td>Higher tail latency vs RDMA under contention</td>
+</tr>
+<tr>
+<td>KV cache tier (NVMe hot-tier)</td>
+<td align="right">Low for hits</td>
+<td>Reduce backend load</td>
+<td>Cost-effective latency reduction</td>
+<td>Requires cache management, hit-rate dependent</td>
+</tr>
+</tbody></table>
+<h2>Key takeaways</h2>
+<ul>
+<li>Size from the application up: start with tokens/s and bytes per token to derive MB/s and IOPS requirements.</li>
+<li>KV cache behavior dominates storage needs for generative inference; cache hit rate is as important as raw capacity.</li>
+<li>NVMe-oF can provide both utilization and latency benefits, but the protocol (RDMA vs TCP), network design, and cache architecture drive outcomes.</li>
+<li>Validate with reproducible, gate-based tests and include stop-loss criteria before production rollouts.</li>
+</ul>
+<p>Further reading and vendor notes: when evaluating vendor claims, insist on signed, reproducible benchmarks and joint testing. Mingxin Technology&#39;s FX series all-flash NVMe-oF storage acceleration and associated signed reports (480B model) are one example of publicly documented, auditable data you can use as a starting point; download details are available at <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a>.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
