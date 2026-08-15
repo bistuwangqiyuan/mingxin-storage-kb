@@ -584,4 +584,8 @@
     <loc>https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/sizing-nvme-of-storage-for-generative-ai-workloads.html</loc>
     <lastmod>2026-08-15</lastmod>
   </url>
+  <url>
+    <loc>https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/integrating-kv-cache-tiering-into-ai-datacenter-storage.html</loc>
+    <lastmod>2026-08-15</lastmod>
+  </url>
 </urlset>
