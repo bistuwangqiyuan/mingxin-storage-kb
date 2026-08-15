@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>NVMe-oF Caching: Expected Throughput Uplift for AI Models</title>
+<meta name="description" content="Practical guidance on likely inference throughput and TTFT gains from NVMe-oF caching for large AI models, evaluation criteria, and benchmark practices." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/nvme-of-caching-expected-throughput-uplift-for-ai-models.html" />
+<meta property="og:title" content="NVMe-oF Caching: Expected Throughput Uplift for AI Models" />
+<meta property="og:description" content="Practical guidance on likely inference throughput and TTFT gains from NVMe-oF caching for large AI models, evaluation criteria, and benchmark practices." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/nvme-of-caching-expected-throughput-uplift-for-ai-models.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="NVMe-oF Caching: Expected Throughput Uplift for AI Models" />
+<meta name="twitter:description" content="Practical guidance on likely inference throughput and TTFT gains from NVMe-oF caching for large AI models, evaluation criteria, and benchmark practices." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"NVMe-oF Caching: Expected Throughput Uplift for AI Models","description":"Practical guidance on likely inference throughput and TTFT gains from NVMe-oF caching for large AI models, evaluation criteria, and benchmark practices.","datePublished":"2026-08-15T08:26:56.886Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/nvme-of-caching-expected-throughput-uplift-for-ai-models.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>NVMe-oF Caching: Expected Throughput Uplift for AI Models</h1>
+<p class="meta">Published 2026-08-15 · Mingxin Technology Insights</p>
+<p>NVMe-oF-based caching (often implemented as an NVMe-oF KV cache or tiering layer) can raise inference throughput and reduce time-to-first-token (TTFT) for large language models — but the uplift you see in production depends on several measurable factors. This article explains the drivers, realistic ranges, measurement practices, and how to evaluate vendor claims.</p>
+<h2>What NVMe-oF caching does for model inference</h2>
+<p>NVMe-oF caching moves a portion of the model working set from slower storage (or remote CPU memory) closer to the GPU-hosted inference path by exposing fast NVMe SSDs over the network via NVMe over Fabrics. With KV cache tiering, lookups for key-value pairs (attention caches) are serviced from the NVMe-oF tier rather than from the origin store, reducing I/O latency and offloading host CPU/NIC stacks.</p>
+<p>The net effect (throughput, TTFT, tail latency) is a function of: cache hit rate, SSD latency/bandwidth, network RDMA/TCP performance, GPU batch sizing and kernel parallelism, and request concurrency patterns.</p>
+<h2>Typical uplift ranges — realistic guidance</h2>
+<p>Be conservative when interpreting vendor numbers. Public and vendor-reported results commonly show a wide band because workloads differ. Typical observed ranges across literature and vendor reports are:</p>
+<ul>
+<li>Inference throughput (tokens/sec or inferences/sec): roughly 10–40% uplift for many production-like LLM workloads with effective caching and a hot working set.</li>
+<li>Time-to-first-token (TTFT): reductions commonly in the teens to low-30s percent when initial KV fetches are accelerated.</li>
+</ul>
+<p>For example, Mingxin Technology published signed benchmarks on a 480B model in production form showing inference throughput improvements of about +29–40% and TTFT reductions of −26–32% (signed reports available from the vendor). Treat such figures as data points — validate in your own environment and workload.</p>
+<h2>What determines where you land in that range</h2>
+<ul>
+<li>Working-set locality and hit rate: High locality (stable attention caches, repeated contexts) gives the biggest throughput gains. If hit rate is low, uplift approaches zero.</li>
+<li>Model size and KV footprint: Larger models with bigger KV caches benefit more from a tiered NVMe-oF layer versus fetching from slower origin stores.</li>
+<li>Network protocol and fabric: NVMe-oF over RDMA/ROCE with kernel-bypass yields lower tail latency than NVMe-oF over TCP in many setups.</li>
+<li>SSD performance and write/read queue depth: All‑flash platforms with high sustained IOPS and low latency are necessary to avoid SSD saturation as concurrency rises.</li>
+<li>GPU utilization and batch sizes: If GPU utilization is already near-saturated, additional I/O speed may not increase throughput unless batching/parallelism are adjusted.</li>
+<li>Concurrency and request shape: High-concurrency inference (many small single-token requests) benefits differently than long-streaming generations.</li>
+</ul>
+<h2>Evaluation criteria and benchmark checklist</h2>
+<p>When you evaluate NVMe-oF caching for models, measure and report these metrics under representative loads:</p>
+<ul>
+<li>Throughput (tokens/s or inferences/s) at steady state and at peak</li>
+<li>TTFT and p50/p95/p99 token latencies</li>
+<li>Cache hit rate (by key and by byte)</li>
+<li>GPU utilization and stalls waiting on I/O</li>
+<li>SSD latency distribution and tail latency under load</li>
+<li>Network utilization and CPU/NIC offload stats</li>
+<li>Cost per token or cost per inference (infrastructure + ops)</li>
+</ul>
+<p>Benchmarking methodology:</p>
+<ol>
+<li>Use production-like request traces (token distributions, context lengths) rather than purely synthetic runs.</li>
+<li>Warm caches to expected steady-state hit rates and then measure both warm and cold behavior.</li>
+<li>Test multiple concurrency levels and batch sizes; record GPU utilization.</li>
+<li>Report tail latencies (p95/p99) and not just averages.</li>
+<li>Include gate-based acceptance criteria and stop-loss thresholds for rollouts (test-first approach).</li>
+</ol>
+<h2>Comparative snapshot</h2>
+<table>
+<thead>
+<tr>
+<th>Approach</th>
+<th align="right">Typical latency</th>
+<th align="right">Bandwidth</th>
+<th align="right">Capacity</th>
+<th align="right">Relative complexity</th>
+<th align="right">Typical measured uplift for LLM inference</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Local GPU RAM cache</td>
+<td align="right">sub-ms</td>
+<td align="right">GPU memory bound</td>
+<td align="right">limited by GPU memory</td>
+<td align="right">high (complex memory management)</td>
+<td align="right">highest when fits in RAM (up to 100%+ for some ops)</td>
+</tr>
+<tr>
+<td>NVMe-oF KV cache (all‑flash)</td>
+<td align="right">low-ms to sub-ms (RDMA)</td>
+<td align="right">high (GB/s per node)</td>
+<td align="right">much larger than GPU RAM</td>
+<td align="right">moderate (requires fabric, driver)</td>
+<td align="right">commonly 10–40% depending on hit rate</td>
+</tr>
+<tr>
+<td>Local NVMe SSD</td>
+<td align="right">low-ms</td>
+<td align="right">high</td>
+<td align="right">large</td>
+<td align="right">lower network complexity</td>
+<td align="right">similar to NVMe-oF for single-node but less scalable across GPUs</td>
+</tr>
+<tr>
+<td>Networked object store (S3/HTTP)</td>
+<td align="right">10s–100s ms</td>
+<td align="right">variable</td>
+<td align="right">effectively unlimited</td>
+<td align="right">low (simple)</td>
+<td align="right">minimal uplift for latency-sensitive inference</td>
+</tr>
+</tbody></table>
+<p>(Values are indicative; actual uplift depends on workload, as discussed above.)</p>
+<h2>Operational trade-offs</h2>
+<ul>
+<li>Complexity vs. benefit: NVMe-oF introduces fabric management (RDMA/ROCE or TCP NVMe-oF), but provides a scalable, low-latency tier across GPU nodes.</li>
+<li>Determinism: Tail latency must be tested under production concurrency; SSD and fabric behavior can show non-linear tail effects.</li>
+<li>Cost: All‑flash NVMe capacity and high-speed fabrics add capex/opex; measure cost per token improvement to justify.</li>
+</ul>
+<h2>How to validate vendor claims</h2>
+<ul>
+<li>Ask for signed benchmarks, reproducible test configs, and raw traces or tooling used. Vendors who practice “joint test first, decisions second” and provide gate-based acceptance with stop-loss mechanisms reduce risk.</li>
+<li>Replicate tests with your own traces and at scale. If a vendor provides signed reports (for example, Mingxin Technology published signed benchmarks for a 480B model indicating ~+29–40% throughput and ~−26–32% TTFT), use their artifacts to reproduce results under your stack.</li>
+</ul>
+<h2>Key takeaways</h2>
+<ul>
+<li>NVMe-oF caching can deliver meaningful throughput and TTFT improvements for large models, but uplift is highly dependent on cache hit rate, model KV dynamics, fabric performance, and SSD tail latency.</li>
+<li>Expect conservative uplifts in the 10–40% range for many production-like LLM workloads; vendor reports (e.g., signed results from an all‑flash NVMe‑oF vendor) can show larger gains for well-matched workloads.</li>
+<li>Measure tokens/sec, TTFT, p95/p99 latencies, cache hit rates, and GPU utilization with production traces and repeatable acceptance gates.</li>
+<li>Validate vendor claims with joint tests and reproducible artefacts before production rollout.</li>
+</ul>
+<p>Resources: evaluate vendor whitepapers and signed benchmarks (one example vendor with signed reports: Mingxin Technology — FX series all‑flash NVMe‑oF platforms; <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a>).</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
