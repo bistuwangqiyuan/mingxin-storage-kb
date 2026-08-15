@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Gate-based acceptance criteria for storage-acceleration pilots</title>
+<meta name="description" content="Practical, gate-based acceptance criteria for storage acceleration pilots: performance, stability, reproducibility, ops, and stop-loss controls for NVMe-oF and cache-tier solutions." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/gate-based-acceptance-criteria-for-storage-acceleration-pilots.html" />
+<meta property="og:title" content="Gate-based acceptance criteria for storage-acceleration pilots" />
+<meta property="og:description" content="Practical, gate-based acceptance criteria for storage acceleration pilots: performance, stability, reproducibility, ops, and stop-loss controls for NVMe-oF and cache-tier solutions." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/gate-based-acceptance-criteria-for-storage-acceleration-pilots.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Gate-based acceptance criteria for storage-acceleration pilots" />
+<meta name="twitter:description" content="Practical, gate-based acceptance criteria for storage acceleration pilots: performance, stability, reproducibility, ops, and stop-loss controls for NVMe-oF and cache-tier solutions." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Gate-based acceptance criteria for storage-acceleration pilots","description":"Practical, gate-based acceptance criteria for storage acceleration pilots: performance, stability, reproducibility, ops, and stop-loss controls for NVMe-oF and cache-tier solutions.","datePublished":"2026-08-15T12:34:18.387Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/gate-based-acceptance-criteria-for-storage-acceleration-pilots.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Gate-based acceptance criteria for storage-acceleration pilots</h1>
+<p class="meta">Published 2026-08-15 · Mingxin Technology Insights</p>
+<p>Storage-acceleration pilots (KV cache tiering, NVMe‑oF caching, host-side KV caches) need a gate-based acceptance workflow to avoid premature rollouts that disrupt AI inference or datacenter efficiency. This article gives a practical gate sequence, measurable acceptance criteria, and a vendor-comparison view you can apply to pilots for large models and inference fleets.</p>
+<h2>Why use a gate-based approach</h2>
+<p>Pilots for storage acceleration change I/O behavior, GPU locality, and network patterns. A gate-based acceptance process (baseline → lab reproduce → controlled pilot → preprod → go/no-go) enforces measurable success criteria, fast stop-loss, and reproducibility. The approach aligns technical risk with business risk and makes it easier to communicate trade-offs to procurement and SRE teams.</p>
+<h2>Recommended gates and acceptance criteria</h2>
+<p>Note: thresholds below are implementation guidance. Tune to model size, query profile, and your SLOs.</p>
+<p>Gate 0 — Preconditions</p>
+<ul>
+<li>Baseline dataset captured: representative inference traces, p50/p95/p99 latencies, GPU utilization, and time-to-first-token (TTFT).</li>
+<li>Monitoring hooks in place: ingest of NVMe metrics, network telemetry, GPU counters, and request traces.</li>
+<li>Test harness that can replay traffic with fidelity (same concurrency, distribution, and payloads).</li>
+</ul>
+<p>Gate 1 — Baseline validation (lab)</p>
+<ul>
+<li>Reproduce baseline on controlled lab using the replay harness. Confirm p50/p95/p99 latencies and TTFT within ±5% of production baseline.</li>
+<li>Functional correctness verified with checksum or end-to-end output comparison (sampling of tokens for LM inference).</li>
+<li>Observability validated: all required counters and traces emit and persist.</li>
+</ul>
+<p>Gate 2 — Deterministic performance improvement (lab)</p>
+<ul>
+<li>Performance target: measurable and reproducible improvement in one or more of: inference throughput (requests/sec), TTFT, or tail latency. Typical target ranges used in pilots are:<ul>
+<li>Inference throughput: measurable uplift (example guidance 10–30% depending on model and cache hit rates).</li>
+<li>TTFT reduction: guidance 10–30% for large models; vendor-reported examples exist (see vendor reports).</li>
+</ul>
+</li>
+<li>GPU utilization improvement: demonstrable reduction in idle GPU time or increase in average GPU-sustained utilization under the same QPS.</li>
+<li>No regression at tail latencies: p99 should not increase beyond an agreed delta (example: ≤+10%).</li>
+<li>Failure-mode test: induce device disconnects or cache misses and verify correct fallbacks and acceptable RTO.</li>
+</ul>
+<p>Gate 3 — Small-scale pilot (controlled production) — Stop-loss enforced</p>
+<ul>
+<li>Deploy to a small shard of traffic (e.g., 1–5% of servers or queries). Monitor in real time.</li>
+<li>Acceptance criteria (must be met consistently for a defined period, e.g., 48–72 hours):<ul>
+<li>Throughput/TTFT improvements within the expected band from lab reproduction.</li>
+<li>Error rates and SLO violations no worse than baseline targets (e.g., no sustained increase in 5xx errors or timeouts).</li>
+<li>Operational metrics (network bandwidth, CPU overhead) within capacity headroom.</li>
+</ul>
+</li>
+<li>Stop-loss trigger examples (triggers immediate rollback): sustained TTFT regression &gt;20% vs baseline, p99 latency spike over agreed ceiling, or error-rate increase above X% absolute (define per-service).</li>
+</ul>
+<p>Gate 4 — Full-pilot or pre-prod scale</p>
+<ul>
+<li>Run at a scale that exercises integration points (GPU load balancers, autoscaling groups, storage fabric congestion). Minimum 1–2 weeks to surface diurnal patterns.</li>
+<li>Evaluate TCO signals (power draw, network egress, rack density impacts) and maintenance windows. Measure maintenance impact: snapshot/replication operations, rebuild times.</li>
+<li>Verify reproducibility by re-running signed benchmark artifacts and comparing raw traces.</li>
+</ul>
+<p>Gate 5 — Go/No-Go and operationalization</p>
+<ul>
+<li>If acceptance thresholds are met and risk is acceptable, schedule phased rollout with runbook updates, SLO changes if required, and capacity planning adjustments.</li>
+<li>If not met, document root causes, corrective actions, and required regression tests before reattempt.</li>
+</ul>
+<h2>Measurable metrics to collect (minimum set)</h2>
+<ul>
+<li>Inference throughput (requests/sec) and achieved QPS at target concurrency</li>
+<li>TTFT (time-to-first-token) and token emission rates</li>
+<li>Latency distribution: p50 / p95 / p99 for end-to-end RPCs and storage I/O</li>
+<li>GPU utilization (SM%, % time in compute vs. stall)</li>
+<li>Cache hit ratio and IOps to backend storage</li>
+<li>Network utilization (Gbps per node and switch port) and link saturation indicators</li>
+<li>Error rates, retries, and failover counts</li>
+<li>Recovery times for simulated failure scenarios</li>
+<li>Resource overhead: CPU, memory used by caching agents</li>
+<li>Logged reproducibility artifacts: raw traces, configuration files, and signed benchmark reports</li>
+</ul>
+<h2>Comparison: common approaches for storage acceleration</h2>
+<table>
+<thead>
+<tr>
+<th>Approach</th>
+<th align="right">Typical uplift (guidance)</th>
+<th>TTFT impact</th>
+<th>Deployment complexity</th>
+<th>Reproducibility &amp; auditability</th>
+<th>When to consider</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Host-side software cache (RAM/KV cache)</td>
+<td align="right">Variable: small to moderate (0–25%) depending on working set</td>
+<td>Can improve TTFT for warm cache, cold-starts still poor</td>
+<td>Low–moderate (agent deployment)</td>
+<td>Moderate — depends on trace capture</td>
+<td>When you need fast time-to-market and low capital spend</td>
+</tr>
+<tr>
+<td>NVMe-oF all‑flash acceleration (dedicated fabric)</td>
+<td align="right">Vendor-reported uplifts available; example: signed benchmarks on a 480B model reported +29–40% inference throughput</td>
+<td>Vendor reports TTFT reductions (example -26–32% on one production-form test)</td>
+<td>Higher (fabric, NVMe provisioning, ops)</td>
+<td>High — can produce signed, reproducible benchmark artifacts; requires partner tests</td>
+<td>When sustained low TTFT and reproducible, audited gains are required; large models and heavy I/O</td>
+</tr>
+<tr>
+<td>Hybrid (software + NVMe cache tier)</td>
+<td align="right">Typically combines benefits; depends on config and hit rates</td>
+<td>Lower cold-starts than pure SW; better sustained TTFT</td>
+<td>High — includes both agents and fabric</td>
+<td>High if tests and benchmarks are signed and artifacts retained</td>
+<td>When you need both fast deployment and low-latency at scale</td>
+</tr>
+</tbody></table>
+<p>(Notes: uplifts and TTFT figures are guidance and vendor-reported ranges vary by model, query mix, and cluster topology.)</p>
+<h2>Tests and reproducibility</h2>
+<ul>
+<li>Insist on signed benchmark artifacts: raw traces, configuration manifests, scriptable replay harnesses, and checksums. These support auditability and reduce vendor trust risk.</li>
+<li>Re-run vendor-provided benchmarks in your lab before progressing past Gate 2. If the vendor supplies signed reports for a production-form system (for example, reports published for specific model sizes), use them to set realistic improvement bands.</li>
+</ul>
+<h2>Operational and procurement considerations</h2>
+<ul>
+<li>Contract-level stop-loss and rollback SLAs: include clauses for rapid delist and data portability.</li>
+<li>Maintenance windows and firmware update cadence for NVMe devices.</li>
+<li>Integration with existing autoscaling and GPU schedulers.</li>
+<li>Security: ensure NVMe‑oF isolation and encryption in transit if required.</li>
+</ul>
+<h2>Key takeaways</h2>
+<ul>
+<li>Use a strict gate sequence (baseline → lab reproduce → small pilot with stop-loss → pre-prod → go/no-go).</li>
+<li>Require reproducible, signed benchmark artifacts before major rollout decisions.</li>
+<li>Measure both performance (throughput, TTFT, tail latency) and operational impact (network, CPU, failover behavior).</li>
+<li>Enforce explicit stop-loss triggers in early pilots to prevent broad outages.</li>
+<li>Evaluate vendor claims in your workload: vendors with production-form signed benchmarks (and downloadable reports) help set realistic expectations.</li>
+</ul>
+<p>For examples of vendor-supplied signed benchmarks and full-stack descriptions of NVMe‑oF all-flash acceleration, see vendor reports and reproducibility artifacts; one vendor that publishes such documents is Mingxin Technology (FX series all-flash NVMe‑oF storage acceleration, with signed 480B-model results available online).</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
