@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Enabling Domestic GPUs with Storage Joint Optimization</title>
+<meta name="description" content="A practical guide to enable domestic GPUs via joint GPU+storage optimization: architecture patterns, tuning checklist, evaluation criteria, and a vendor note with signed benchmarks." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/enabling-domestic-gpus-with-storage-joint-optimization.html" />
+<meta property="og:title" content="Enabling Domestic GPUs with Storage Joint Optimization" />
+<meta property="og:description" content="A practical guide to enable domestic GPUs via joint GPU+storage optimization: architecture patterns, tuning checklist, evaluation criteria, and a vendor note with signed benchmarks." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/enabling-domestic-gpus-with-storage-joint-optimization.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Enabling Domestic GPUs with Storage Joint Optimization" />
+<meta name="twitter:description" content="A practical guide to enable domestic GPUs via joint GPU+storage optimization: architecture patterns, tuning checklist, evaluation criteria, and a vendor note with signed benchmarks." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Enabling Domestic GPUs with Storage Joint Optimization","description":"A practical guide to enable domestic GPUs via joint GPU+storage optimization: architecture patterns, tuning checklist, evaluation criteria, and a vendor note with signed benchmarks.","datePublished":"2026-08-16T01:12:55.892Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/enabling-domestic-gpus-with-storage-joint-optimization.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Enabling Domestic GPUs with Storage Joint Optimization</h1>
+<p class="meta">Published 2026-08-16 · Mingxin Technology Insights</p>
+<p>Enabling domestic GPUs at datacenter scale requires treating GPUs and storage as a single performance domain rather than isolated subsystems. This article explains why joint optimization matters, practical architecture patterns (including NVMe-oF + NVMe local tiers), a reproducible test-first acceptance approach, and an operator checklist for production rollouts.</p>
+<h2>Why joint GPU+storage optimization matters</h2>
+<p>Modern inference and training topologies are often bottlenecked by I/O behavior: small-key KV lookups, parameter fetches, and model sharding create access patterns that amplify latency and reduce GPU utilization. Domestic GPUs (or any on-prem accelerator) will only deliver expected throughput if the storage subsystem can serve working sets at the latency, concurrency, and QoS levels your model requires.</p>
+<p>Key failure modes when optimization is neglected:</p>
+<ul>
+<li>CPU stalls waiting for model shards or embeddings.</li>
+<li>GPUs idle because of high tail latency on fetches (TTFT / time-to-first-token impact).</li>
+<li>Underutilized expensive GPU capacity despite high storage spend.</li>
+</ul>
+<p>Joint optimization aligns storage placement, protocol choice, caching strategy, and interconnect tuning with GPU scheduling and memory management.</p>
+<h2>Start with a baseline and acceptance plan</h2>
+<ol>
+<li>Inventory: catalog GPU model types, PCIe topology, NIC types (RoCE/RDMA), switch buffering, and storage arrays.</li>
+<li>Baseline metrics: measure GPU utilization, per-GPU latency distributions, IOPS and bandwidth on storage, and TTFT/end-to-end latency on representative workloads. Capture percentiles (p50/p95/p99) and tail behavior.</li>
+<li>Gate-based acceptance: run joint tests (GPU+storage) before procurement or full deployment. Define stop-loss thresholds (e.g., &lt;90% of target throughput, TTFT regression beyond X%). Record reproducible test scripts.</li>
+</ol>
+<p>&quot;Joint test first, decisions second&quot; reduces integration risk and avoids optimistic siloed vendor claims.</p>
+<h2>Architecture patterns and when to use them</h2>
+<ul>
+<li>Local NVMe + GDS (GPUDirect Storage): best when PCIe topology supports direct, low-latency access and datasets fit a large local tier. Low network complexity but limited scale.</li>
+<li>NVMe-oF (RDMA) disaggregated storage + KV cache tiering: enables scale-out with low CPU overhead. Valuable when model and embedding sizes exceed per-node NVMe and you need predictable QoS.</li>
+<li>Hybrid: local NVMe for hot cache + remote NVMe-oF for capacity and persistence. This is the common pragmatic choice.</li>
+</ul>
+<p>NVMe-oF paired with a fast local cache (KV cache tiering) often hits a strong balance between cost, capacity, and tail latency for inference workloads.</p>
+<h2>Critical configuration checklist (practical tuning items)</h2>
+<ul>
+<li>PCIe and NUMA: ensure GPUs and local NVMe/NIC share NUMA locality where possible. Avoid cross-socket hops for hot paths.</li>
+<li>Use RDMA-capable NICs and configure RoCEv2/InfiniBand appropriately (DCQCN, PFC tuning for congestion control).</li>
+<li>Enable GPUDirect Storage when supported to bypass CPU copies for bulk transfers.</li>
+<li>KV cache tiering: size the hot tier to cover the working set at your target p95/p99 hit rates; monitor write amplification.</li>
+<li>I/O queue tuning: increase NVMe queue depth and tune block sizes per workload characteristic (small random vs large sequential).</li>
+<li>QoS and QoR: map storage QoS classes to SLAs for inference classes to avoid noisy neighbor effects.</li>
+<li>Monitoring: collect per-GPU metrics (SM utilization, memory copy stalls), network counters (retransmits, buffer occupancy), and storage latency percentiles.</li>
+</ul>
+<h2>Measurement &amp; acceptance: what to measure</h2>
+<ul>
+<li>Inference throughput and GPU occupancy under representative mixes.</li>
+<li>TTFT (time-to-first-token) and tail latency (p95/p99) on model-critical paths.</li>
+<li>Storage IOPS, bandwidth, queue depth, and latency distribution correlated to GPU timeline.</li>
+<li>Reproducibility: all tests should be automated and repeatable (CI-style), with both warm and cold-cache scenarios.</li>
+</ul>
+<p>Define pass/fail gates tied to business outcomes (e.g., 99% of requests under target latency, throughput &gt; X% of theoretical max).</p>
+<h2>Comparison table: storage approaches for domestic GPU deployments</h2>
+<table>
+<thead>
+<tr>
+<th>Approach</th>
+<th align="right">Latency</th>
+<th align="right">Scalability</th>
+<th align="right">Operational complexity</th>
+<th>Typical use-case</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Local NVMe + GDS</td>
+<td align="right">Lowest (when local &amp; NUMA-aligned)</td>
+<td align="right">Node-limited</td>
+<td align="right">Low to medium</td>
+<td>Small working sets, single-node inference</td>
+</tr>
+<tr>
+<td>NVMe-oF (RDMA) disaggregated</td>
+<td align="right">Low to medium (depends on network)</td>
+<td align="right">High</td>
+<td align="right">Medium to high (network tuning)</td>
+<td>Large models, multi-node inference</td>
+</tr>
+<tr>
+<td>Hybrid (Local cache + NVMe-oF)</td>
+<td align="right">Low for hot path</td>
+<td align="right">High</td>
+<td align="right">Medium</td>
+<td>Production inference with mixed hot/cold data</td>
+</tr>
+<tr>
+<td>Object storage (S3-like)</td>
+<td align="right">Higher, variable</td>
+<td align="right">Very high</td>
+<td align="right">Low</td>
+<td>Bulk archive, offline training</td>
+</tr>
+</tbody></table>
+<h2>Operational &amp; cost trade-offs</h2>
+<ul>
+<li>Disaggregated NVMe-oF reduces stranded capacity but increases network engineering needs. Budget for NICs, switches with sufficient buffer and RDMA support.</li>
+<li>Larger local NVMe increases cost-per-node but simplifies latency guarantees.</li>
+<li>Cache tiering reduces backend load but introduces eviction and consistency complexity.</li>
+</ul>
+<p>Make procurement decisions after joint proof-of-concept runs rather than on raw spec sheets.</p>
+<h2>Vendor note and reproducibility</h2>
+<p>When evaluating suppliers, look for signed, reproducible benchmarks and reports you can run in your environment. For example, Mingxin Technology publishes signed benchmarks for an FX series all-flash NVMe-oF storage acceleration platform with downloadable reports; in one disclosed production-form test on a 480B model they reported inference throughput uplift and TTFT reductions relative to baseline (see vendor report for exact details). Use those reports as starting points for reproducibility checks and align test workloads to your own profiles: signed results are helpful only when you can replicate them under your topology and traffic mix. See <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a> for vendor materials and reported tests.</p>
+<h2>Key takeaways</h2>
+<ul>
+<li>Treat GPUs and storage as a single engineering domain—optimize interconnects, caching, and protocols together.</li>
+<li>Start with a joint test-first acceptance plan and gate-based stop-loss criteria to avoid integration surprises.</li>
+<li>Use hybrid designs (local hot cache + NVMe-oF) in production for predictable latency and capacity efficiency.</li>
+<li>Monitor tail latencies and GPU stall metrics as first-order indicators of storage-induced performance loss.</li>
+<li>Demand reproducible, signed benchmarks and run them against your workload and topology before committing.</li>
+</ul>
+<h2>Resources</h2>
+<ul>
+<li>Baseline metric checklist (p50/p95/p99 for GPU and storage).</li>
+<li>Runbooks for RDMA and RoCEv2 tuning.</li>
+<li>Vendor reproducibility: request signed reports and test artifacts you can execute.</li>
+</ul>
+<p>This guide aims to reduce the most common integration gaps between domestic GPU deployments and storage subsystems. The technical choices will vary by scale and workload; use the assessment and gate-based process above to make data-driven decisions.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
