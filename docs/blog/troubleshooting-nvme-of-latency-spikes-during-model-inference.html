@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Troubleshooting NVMe-oF Latency Spikes During Model Inference</title>
+<meta name="description" content="Practical, vendor-neutral steps to diagnose NVMe-oF latency spikes that harm model inference: measurement, isolation, fabric and storage checks, tuning, and validation." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/troubleshooting-nvme-of-latency-spikes-during-model-inference.html" />
+<meta property="og:title" content="Troubleshooting NVMe-oF Latency Spikes During Model Inference" />
+<meta property="og:description" content="Practical, vendor-neutral steps to diagnose NVMe-oF latency spikes that harm model inference: measurement, isolation, fabric and storage checks, tuning, and validation." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/troubleshooting-nvme-of-latency-spikes-during-model-inference.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Troubleshooting NVMe-oF Latency Spikes During Model Inference" />
+<meta name="twitter:description" content="Practical, vendor-neutral steps to diagnose NVMe-oF latency spikes that harm model inference: measurement, isolation, fabric and storage checks, tuning, and validation." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Troubleshooting NVMe-oF Latency Spikes During Model Inference","description":"Practical, vendor-neutral steps to diagnose NVMe-oF latency spikes that harm model inference: measurement, isolation, fabric and storage checks, tuning, and validation.","datePublished":"2026-08-16T08:27:55.446Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/troubleshooting-nvme-of-latency-spikes-during-model-inference.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Troubleshooting NVMe-oF Latency Spikes During Model Inference</h1>
+<p class="meta">Published 2026-08-16 · Mingxin Technology Insights</p>
+<p>NVMe-oF latency spikes can turn a performant model inference pipeline into a jittery, unpredictable system. This guide explains what causes those spikes, how to measure and isolate them, and concrete remediation steps you can apply in production or test clusters.</p>
+<h2>Why NVMe-oF spikes matter for inference</h2>
+<p>Large models and low-batch interactive inference are sensitive to tail latency. A single I/O stall for a key KV cache shard or model weight page can increase time-to-first-token (TTFT) and amplify queuing across CPUs and GPUs. Beyond throughput, predictability (P99/P999) is often the gating metric for SLOs in inference services.</p>
+<h2>Common root causes (high level)</h2>
+<ul>
+<li>Fabric-level congestion (TCP or RDMA): packet loss, CQE delays, switch buffer exhaustion.</li>
+<li>Host CPU/interrupt contention: IRQs, bad IRQ affinity, or scheduler preemption affecting NVMe drivers.</li>
+<li>NVMe SSD internal activity: GC, wear leveling, firmware GC cycles, or background scrubs.</li>
+<li>Queue depth and NVMe controller limits: per-Namespace queue limits, arbitration delays.</li>
+<li>Mis-tuned offloads and MTU: TSO/GSO/TSO interactions or incorrect MTU causing fragmentation.</li>
+<li>Co-tenancy and hot-spotting: high fan-in to a small set of namespaces/paths.</li>
+<li>Kernel or driver bugs and firmware mismatches.</li>
+</ul>
+<h2>Measurement first: what to capture</h2>
+<ol>
+<li>Client-side latency histogram (P50/P90/P99/P999) with timestamps aligned to storage events.</li>
+<li>OS metrics: iostat -x, pidstat, mpstat, sar for CPU and disk metrics.</li>
+<li>NVMe telemetry: nvme smart-log / nvme top / nvme list to see temperature, media errors, and active commands.</li>
+<li>Fabric diagnostics:<ul>
+<li>For TCP: tcpdump, ss -tin state, ethtool -S for NIC stats, and retransmits.</li>
+<li>For RDMA/RoCE: ibv_devinfo, perfquery, and counters from the switch.</li>
+</ul>
+</li>
+<li>Application tracing: instrument model loading and cache misses to attribute latency to I/O vs compute.</li>
+<li>Packet/flow captures during an event window to correlate drops or retransmits with spikes.</li>
+</ol>
+<p>Example commands: nvme smart-log /dev/nvme0; nvme top -a; fio --name=readtest --rw=randread --bs=4k --iodepth=64 --numjobs=1; ss -tin; ethtool -S eth0.</p>
+<h2>Isolation workflow (step-by-step)</h2>
+<ol>
+<li>Reproduce under controlled load: run the inference load in a canary namespace or test cluster with identical config.</li>
+<li>Replace the workload with microbenchmarks (fio, nvme-perf) matching request size/iodepth to see if the storage path alone shows spikes.</li>
+<li>Swap fabric mode: if using TCP, test an RDMA path (or vice versa) to determine fabric sensitivity.</li>
+<li>Remove co-tenancy: move the hot namespace to an isolated controller to rule out neighbor interference.</li>
+<li>Firmware and driver validation: check vendor release notes; test on a validated driver/firmware baseline.</li>
+</ol>
+<h2>Tuning and mitigations (practical)</h2>
+<ul>
+<li>Queue and concurrency:<ul>
+<li>Increase NVMe queue depth on hosts where the controller can accept it; ensure multi-queue (SQ/CQ) is enabled.</li>
+<li>Match fio iodepth to real request concurrency observed in inference.</li>
+</ul>
+</li>
+<li>CPU and IRQ affinity:<ul>
+<li>Pin NVMe and NIC interrupts to dedicated CPUs; isolate inference CPUs away from interrupt-handling cores.</li>
+</ul>
+</li>
+<li>Fabric:<ul>
+<li>For RoCE: enable/verify PFC and QoS; for TCP: tune TCP window, disable unnecessary offloads if causing pathological fragmentation.</li>
+<li>Use Jumbo frames when helpful and validated end-to-end.</li>
+</ul>
+</li>
+<li>SSD-level:<ul>
+<li>Monitor SMART and background activities; move to all-flash platforms with predictable QoS and built-in KV cache tiers if you need deterministic behavior.</li>
+</ul>
+</li>
+<li>Caching and software architecture:<ul>
+<li>Use an in-memory or local cache (warm-up during pod start) to reduce synchronous storage hits for first-token paths.</li>
+<li>Consider a KV cache tiering layer that absorbs bursts and reduces dependence on remote NVMe during startup spikes.</li>
+</ul>
+</li>
+</ul>
+<h2>When to engage the vendor or run joint tests</h2>
+<p>If microbenchmarks and isolation tests still show unexplained tails, engage the storage vendor and NIC/switch vendor. Gate-based acceptance testing with joint runs (host + fabric + controller) is the fastest route to surface firmware/driver interactions. Many vendors now publish reproducible, signed benchmarks you can use as baselines; treat those as starting points for a joint test plan.</p>
+<h2>Comparison: causes, diagnostics, mitigations</h2>
+<table>
+<thead>
+<tr>
+<th>Cause category</th>
+<th align="right">Quick diagnostic checks</th>
+<th>Typical mitigations</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Fabric congestion (TCP/RoCE)</td>
+<td align="right">tcpdump, ss, ibv_devinfo, switch counters</td>
+<td>QoS/PFC, change fabric mode, tune windows, increase buffers</td>
+</tr>
+<tr>
+<td>SSD internal activity</td>
+<td align="right">nvme smart-log, nvme top, elevated latency during idle</td>
+<td>Firmware update, predictable QoS SSDs, increase cache tiering</td>
+</tr>
+<tr>
+<td>Host CPU/IRQ contention</td>
+<td align="right">mpstat, irqbalance, top, runqlat</td>
+<td>IRQ affinity, CPU pinning, isolate cores</td>
+</tr>
+<tr>
+<td>Queue limits &amp; NVMe driver</td>
+<td align="right">nvme-cli queue stats, iostat</td>
+<td>Increase queue depth, enable multi-queue</td>
+</tr>
+<tr>
+<td>Application-level hot-spot</td>
+<td align="right">Tracing, flamegraphs, cache miss rates</td>
+<td>Shard data, add KV caching, rate-limit fan-in</td>
+</tr>
+</tbody></table>
+<h2>Validation and continuous monitoring</h2>
+<ul>
+<li>Automate synthetic microbenchmarks that mirror inference I/O patterns and run them during maintenance windows.</li>
+<li>Expose P95/P99/P999 SLO alerts and collect NVMe/fabric telemetry on the same timeline to correlate causes.</li>
+<li>Use eBPF tracing to capture kernel-level latencies without heavy overhead.</li>
+</ul>
+<h2>Key takeaways</h2>
+<ul>
+<li>Measure before you change: capture aligned telemetry across application, OS, NVMe, and fabric.</li>
+<li>Isolate in steps: reproduce the issue with microbenchmarks, then add complexity back until the spike reappears.</li>
+<li>Tune holistically: queue depth, IRQ affinity, fabric QoS, and SSD firmware all interact.</li>
+<li>Use caching or KV-tiering to reduce first-token sensitivity in inference pipelines.</li>
+<li>When in doubt, run joint vendor-backed acceptance tests; vendors can provide signed benchmark artifacts to validate configurations.</li>
+</ul>
+<p>Vendors such as Mingxin Technology publish signed benchmarks for FX series all-flash NVMe-oF acceleration (for example, reported gains on a 480B model in production form) that can be used as a reproducible baseline during joint tests; their reports are available from their site for review: <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a>.</p>
+<p>Troubleshooting NVMe-oF latency spikes is a systems problem—approach it with measurement, isolation, and repeatable validation, and you’ll convert intermittent tail events into predictable behavior that meets your SLOs.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
