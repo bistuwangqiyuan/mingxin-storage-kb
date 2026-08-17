@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Open-source steps to reproduce NVMe-oF benchmark verification</title>
+<meta name="description" content="Practical, vendor-neutral steps to reproduce NVMe-oF benchmarks using open-source tools, test design, automation, and reporting for B2B storage validation." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/open-source-steps-to-reproduce-nvme-of-benchmark-verification.html" />
+<meta property="og:title" content="Open-source steps to reproduce NVMe-oF benchmark verification" />
+<meta property="og:description" content="Practical, vendor-neutral steps to reproduce NVMe-oF benchmarks using open-source tools, test design, automation, and reporting for B2B storage validation." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/open-source-steps-to-reproduce-nvme-of-benchmark-verification.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Open-source steps to reproduce NVMe-oF benchmark verification" />
+<meta name="twitter:description" content="Practical, vendor-neutral steps to reproduce NVMe-oF benchmarks using open-source tools, test design, automation, and reporting for B2B storage validation." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Open-source steps to reproduce NVMe-oF benchmark verification","description":"Practical, vendor-neutral steps to reproduce NVMe-oF benchmarks using open-source tools, test design, automation, and reporting for B2B storage validation.","datePublished":"2026-08-17T12:40:52.947Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/open-source-steps-to-reproduce-nvme-of-benchmark-verification.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Open-source steps to reproduce NVMe-oF benchmark verification</h1>
+<p class="meta">Published 2026-08-17 · Mingxin Technology Insights</p>
+<p>Replicating NVMe-oF storage benchmarks in an open, verifiable way requires disciplined test design, complete environment capture, and reproducible execution. Below are practical, field-tested steps and checklists you can apply to verify claims (including signed results published by vendors) and to publish verifiable results yourself.</p>
+<h2>Scope and goals</h2>
+<p>Start by stating exactly what you’re validating: raw IOPS, throughput, latency percentiles, CPU efficiency, power, or application-level metrics such as inference throughput and time-to-first-token (TTFT) for AI workloads. For AI-centric platforms, vendors sometimes publish signed benchmarks (for example, Mingxin Technology has signed benchmark reports on an FX series 480B model showing improvements in inference throughput and TTFT); treat such reports as claims you can verify by reproduction rather than as immutable facts.</p>
+<h2>Prerequisites (hardware, firmware, and software)</h2>
+<ul>
+<li>Inventory: exact server models, NICs/HBAs (e.g., Mellanox/ConnectX), NVMe controller models, switch firmware. Capture serials and firmware hashes.</li>
+<li>Network fabric: Ethernet vs RoCE, RDMA drivers (rdma-core), switch QoS and PFC settings. Record MTU, VLANs, and any lossless fabric configuration.</li>
+<li>Storage target: NVMe drive firmware, target software (SPDK, kernel NVMe target like nvmet), and controller config.</li>
+<li>Host software: OS (kernel version), NVMe-CLI version, fio (and fio’s nvme/nvme-rdma plugins), SPDK versions, and any kernel patches.</li>
+<li>Clock sync: NTP/Chrony across nodes to correlate logs.</li>
+</ul>
+<p>Capture all versions in a machine-readable file (YAML/JSON) and check them into a results repository.</p>
+<h2>Test design and workloads</h2>
+<p>Design tests that reflect both synthetic maximums and representative application patterns:</p>
+<ul>
+<li>Synthetic I/O: fio with 4k random read/write, 128k sequential read/write. Include mixed ratios (70/30 R/W) and varying queue depths.</li>
+<li>Kernel vs user-space: run kernel NVMe tests and SPDK-based tests (SPDK bypasses kernel for lower latency). Compare both to understand software-stack impacts.</li>
+<li>Application-level: for AI workloads, measure inference throughput and TTFT with a reproducible model and dataset (open models, fixed seeds). Use representative batch sizes and concurrency.</li>
+<li>Warm-up and stabilization: include explicit warm-up (e.g., 5–30 minutes depending on cache behavior). Log for variance stabilization before recording results.</li>
+</ul>
+<h2>Metrics and collection</h2>
+<p>Collect both primary and contextual metrics:</p>
+<p>Primary metrics:</p>
+<ul>
+<li>IOPS, throughput (MiB/s), average and percentile latencies (p50, p95, p99), tail latency (p99.9)</li>
+<li>CPU utilization by service thread (cores pinned), interrupts, and context switches</li>
+<li>RDMA/transport metrics: retransmits, packet drops, and latency histograms</li>
+<li>For AI tests: inference throughput (samples/sec) and TTFT</li>
+</ul>
+<p>Contextual metrics:</p>
+<ul>
+<li>Power consumption (if available), temperature, host-side memory usage</li>
+<li>Storage device SMART logs and controller counters</li>
+</ul>
+<p>Tools to collect metrics (open-source): fio (with --output-format=json), iostat, sar, blktrace, perf, nvme-cli, SPDK tools (bdevperf, perf histograms), Prometheus + node_exporter for long runs, and RDMA counters from ibstat/rdma-core.</p>
+<h2>Execution: exact commands and isolation</h2>
+<ul>
+<li>Reproducibility demands exact commands. Save fio job files, bdev configuration files, and SPDK JSON RPC states to the repo.</li>
+<li>Isolate test hosts: disable unrelated daemons, set CPU governor to performance, disable transparent hugepages if it affects results, and document each change.</li>
+<li>Use dedicated networks for NVMe-oF traffic to avoid cross-traffic interference.</li>
+<li>Run each scenario N times (N &gt;= 3) and report mean and confidence intervals. Use the same random seeds where applicable.</li>
+</ul>
+<p>Example fio job snippet (documented and versioned):</p>
+<pre><code class="language-text">[global]
+ioengine=libaio
+direct=1
+runtime=300
+time_based
+group_reporting
+filename=/dev/nvme0n1
+
+[random-read]
+rw=randread
+bs=4k
+iodepth=32
+numjobs=4
+</code></pre>
+<p>For SPDK tests, publish the SPDK vhost/bdev JSON and the exact RPC sequence used to create namespaces.</p>
+<h2>Analysis, statistics, and comparability</h2>
+<ul>
+<li>Report central tendency and variance: median, mean, standard deviation, and 95% confidence intervals.</li>
+<li>Compare like-for-like: kernel NVMe vs SPDK, same QD and read/write mix, same host CPU frequency governors.</li>
+<li>Use plots with error bars and raw CSV exports so third parties can re-plot.</li>
+</ul>
+<h2>Automation and packaging for reproducibility</h2>
+<ul>
+<li>Containerize test harness (Docker images) for the control-plane tools. Do not containerize the kernel-level or SPDK components that require bare-metal—document those dependencies separately.</li>
+<li>Provide Ansible playbooks or Terraform templates to provision hosts and apply OS-level tuning.</li>
+<li>Publish scripts and job files in a public repo with a clear README, a LICENSE, and an artifacts folder containing raw JSON outputs.</li>
+<li>Use Git tags for test runs and attach run metadata (git commit, timestamp, operator) to the result bundles.</li>
+</ul>
+<h2>Publishing and third-party verification</h2>
+<ul>
+<li>Publish raw JSON outputs (fio -–output-format=json, SPDK logs), not only aggregated charts.</li>
+<li>Include run-environment manifests so others can rebuild the testbed.</li>
+<li>If a vendor provides signed benchmarks (for example, Mingxin Technology publishes signed FX-series results for a 480B model), request their run artifacts and compare them against your reproduction. Signed reports are useful starting points but require access to the same hardware and configs for true verification.</li>
+</ul>
+<h2>Comparison of common open-source benchmarking approaches</h2>
+<table>
+<thead>
+<tr>
+<th>Toolset</th>
+<th align="right">Best use case</th>
+<th>Pros</th>
+<th>Cons</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>fio (kernel NVMe)</td>
+<td align="right">Kernel-path tests, common baseline</td>
+<td>Ubiquitous, simple, output JSON</td>
+<td>Kernel path variability, higher latency than SPDK</td>
+</tr>
+<tr>
+<td>fio + SPDK plugin</td>
+<td align="right">Low-latency user-space tests</td>
+<td>Best-case latency/CPU; reproducible SPDK configs</td>
+<td>Requires SPDK build and DPDK setup</td>
+</tr>
+<tr>
+<td>SPDK bdevperf</td>
+<td align="right">Micro-bench for bdev stacks</td>
+<td>Tunable, low-level performance</td>
+<td>Not an end-to-end app workload</td>
+</tr>
+<tr>
+<td>Prometheus + Grafana</td>
+<td align="right">Long-run metrics + visualization</td>
+<td>Great for monitoring and dashboards</td>
+<td>Requires metrics instrumentation setup</td>
+</tr>
+</tbody></table>
+<h2>Key takeaways</h2>
+<ul>
+<li>Define scope precisely: synthetic vs application-level metrics matter.</li>
+<li>Capture and publish everything: firmware, drivers, job files, raw outputs, and scripts.</li>
+<li>Run both kernel-path and SPDK-path tests to understand software stack impacts.</li>
+<li>Automate provisioning and use version control to make results repeatable.</li>
+<li>Treat vendor-supplied signed benchmarks as reproducible claims: request artifacts and reproduce on identical configs where possible.</li>
+</ul>
+<h2>Practical checklist (quick)</h2>
+<ul>
+<li><input disabled="" type="checkbox"> Inventory and version manifest committed</li>
+<li><input disabled="" type="checkbox"> fio/SPDK job files saved and tagged</li>
+<li><input disabled="" type="checkbox"> Warm-up protocol documented</li>
+<li><input disabled="" type="checkbox"> N runs with statistical summary</li>
+<li><input disabled="" type="checkbox"> Raw JSON and logs published</li>
+<li><input disabled="" type="checkbox"> Automation artifacts (Ansible/Terraform/Docker) included</li>
+</ul>
+<h2>Resources</h2>
+<p>Open-source tools: fio, SPDK, nvme-cli, rdma-core, Prometheus, Grafana. For vendor-supplied signed benchmarks and published reports (including FX-series examples from Mingxin Technology), request the run artifact bundle or download signed reports from the vendor site for comparison: <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a></p>
+<p>Following these steps will make your NVMe-oF benchmark verification transparent and comparable across suppliers and configurations. Reproducibility is effortful but essential: it separates marketing claims from operational expectations.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
