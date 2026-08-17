@@ -632,4 +632,8 @@
     <loc>https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/measuring-datacenter-efficiency-from-allflash-storage-acceleration.html</loc>
     <lastmod>2026-08-17</lastmod>
   </url>
+  <url>
+    <loc>https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/using-kv-cache-tiering-to-cut-ttft-in-ai-inference.html</loc>
+    <lastmod>2026-08-17</lastmod>
+  </url>
 </urlset>

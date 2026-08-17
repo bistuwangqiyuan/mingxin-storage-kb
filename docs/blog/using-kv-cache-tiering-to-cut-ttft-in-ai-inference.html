@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Using KV-cache tiering to cut TTFT in AI inference</title>
+<meta name="description" content="Practical guide to implementing KV cache tiering to reduce Time-to-First-Token (TTFT) for large-model inference, with architecture, metrics, trade-offs, and vendor notes." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/using-kv-cache-tiering-to-cut-ttft-in-ai-inference.html" />
+<meta property="og:title" content="Using KV-cache tiering to cut TTFT in AI inference" />
+<meta property="og:description" content="Practical guide to implementing KV cache tiering to reduce Time-to-First-Token (TTFT) for large-model inference, with architecture, metrics, trade-offs, and vendor notes." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/using-kv-cache-tiering-to-cut-ttft-in-ai-inference.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Using KV-cache tiering to cut TTFT in AI inference" />
+<meta name="twitter:description" content="Practical guide to implementing KV cache tiering to reduce Time-to-First-Token (TTFT) for large-model inference, with architecture, metrics, trade-offs, and vendor notes." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Using KV-cache tiering to cut TTFT in AI inference","description":"Practical guide to implementing KV cache tiering to reduce Time-to-First-Token (TTFT) for large-model inference, with architecture, metrics, trade-offs, and vendor notes.","datePublished":"2026-08-17T20:24:57.992Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/using-kv-cache-tiering-to-cut-ttft-in-ai-inference.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Using KV-cache tiering to cut TTFT in AI inference</h1>
+<p class="meta">Published 2026-08-17 · Mingxin Technology Insights</p>
+<p>Reducing Time-To-First-Token (TTFT) for large-model inference is often the highest-leverage optimization for interactive AI services. KV-cache tiering — placing the model’s key/value attention cache on an appropriate hierarchy rather than only in GPU memory — is a practical approach that lowers cold-start latency and reduces the memory footprint on accelerators. This article explains when KV-cache tiering helps, how to evaluate it, implementation patterns, and operational metrics to track.</p>
+<h2>Why KV-cache tiering matters for TTFT</h2>
+<p>When serving autoregressive models, TTFT is dominated by two factors: loading model weights (if not already resident) and populating/reading the KV cache during early decoding steps. For large-context or multi-session workloads, keeping all KV cache entries in GPU DRAM is often infeasible. A tiered KV-cache — with a fast local cache on GPU or host DRAM and a larger, lower-cost NVMe/remote tier — reduces the need to cold-warm the accelerator memory for every request, lowering TTFT for many real-world workloads.</p>
+<p>Key benefits</p>
+<ul>
+<li>Faster first-token latency on cold or semi-cold sessions</li>
+<li>Lower GPU memory pressure (support higher concurrency)</li>
+<li>Cost-effective capacity scaling using NVMe or NVMe-oF rather than more DRAM/HBM</li>
+</ul>
+<p>Limitations</p>
+<ul>
+<li>Hit rate dependent: benefits vary by workload and session locality</li>
+<li>Added system complexity: placement, consistency, eviction policies</li>
+<li>Tail latency risks if the backing tier is too slow or overloaded</li>
+</ul>
+<h2>Evaluation criteria (what to measure)</h2>
+<ul>
+<li>TTFT (median and 95/99th percentiles) — primary metric</li>
+<li>KV-cache hit rate (by request and by item)</li>
+<li>Overall throughput (tokens/sec) under target concurrency</li>
+<li>Cold-start frequency and warmup time</li>
+<li>Cost per concurrent session (hardware + software)</li>
+<li>Complexity and operational overhead (SRE effort)</li>
+</ul>
+<p>Benchmarks should include realistic session churn, long-context sessions, and mixed short/long requests to reveal true behavior.</p>
+<h2>Architectural options compared</h2>
+<table>
+<thead>
+<tr>
+<th>Approach</th>
+<th align="right">Typical latency impact on TTFT</th>
+<th>Complexity</th>
+<th align="right">Storage cost</th>
+<th>Best use-case</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Full GPU-resident KV (no tiering)</td>
+<td align="right">Lowest when warm, but high cold TTFT if GPU not pre-warmed</td>
+<td>Low software complexity, high HW cost</td>
+<td align="right">High (DRAM/HBM)</td>
+<td>Low-latency, steady hot sessions with small context windows</td>
+</tr>
+<tr>
+<td>KV-cache tiering (hybrid GPU/host/NVMe)</td>
+<td align="right">Significantly reduces cold TTFT when hit rate high; depends on backing tier speed</td>
+<td>Medium: cache policies, consistency</td>
+<td align="right">Moderate (NVMe)</td>
+<td>Variable workloads, many semi-cold sessions, large contexts</td>
+</tr>
+<tr>
+<td>Memory-mapped model shards (mmapped weights)</td>
+<td align="right">Reduces weight-load times vs full cold loads; less effective for KV access patterns</td>
+<td>Low-medium</td>
+<td align="right">Moderate</td>
+<td>Weight-load dominated cold starts</td>
+</tr>
+<tr>
+<td>Prefetch + async warmup</td>
+<td align="right">Reduces perceived TTFT if prefetch succeeds; risky with unpredictable requests</td>
+<td>Medium</td>
+<td align="right">Low-medium</td>
+<td>Predictable request patterns or strong workload forecasting</td>
+</tr>
+</tbody></table>
+<h2>Implementation pattern: step-by-step</h2>
+<ol>
+<li>Baseline measurement<ul>
+<li>Measure TTFT distribution with current stack under representative traffic. Capture cold vs warm sessions.</li>
+</ul>
+</li>
+<li>Identify hot keys and access patterns<ul>
+<li>Log KV access per session to understand locality and item hotness. High reuse across steps or sessions is necessary for tiering to pay off.</li>
+</ul>
+</li>
+<li>Select backing tier hardware<ul>
+<li>Options: local NVMe, NVMe-oF (remote), or host DRAM. Choose based on required latency envelope and scale. NVMe-oF offers consistent low-latency at scale vs local NVMe but requires network/target tuning.</li>
+</ul>
+</li>
+<li>Define cache policy and metadata<ul>
+<li>Eviction: LRU or LFU variants; consider admission policies and size thresholds per-session. Track per-item age and frequency.</li>
+</ul>
+</li>
+<li>Integrate with model server<ul>
+<li>Hook the KV read path so that on cache miss the backing tier supplies items synchronously or asynchronously. For sync reads, ensure backing tier latency is within TTFT budget; for async reads, use speculative decoding or partial tokens if acceptable.</li>
+</ul>
+</li>
+<li>Warmup and prefetch strategies<ul>
+<li>When session affinity indicates reuse (e.g., user continues conversation), prefetch likely future KV blocks on session start. Use demand-driven warmup for ad-hoc sessions.</li>
+</ul>
+</li>
+<li>Monitoring and adaptive tuning<ul>
+<li>Continuously monitor KV hit rate, TTFT, tail latency, and IOPS on backing media. Adjust cache sizes and prefetch aggressiveness.</li>
+</ul>
+</li>
+</ol>
+<h2>Operational considerations and trade-offs</h2>
+<ul>
+<li>Consistency: If multiple replicas can update KV entries, ensure a clear ownership model to avoid stale reads. Most inference KV caches are append-only per session, simplifying consistency.</li>
+<li>Tail latency: A single backing-tier miss can create a high tail. Use per-request deadlines, circuit breakers, and fast-fail policies.</li>
+<li>Observability: Correlate per-request TTFT with cache hit/miss traces and storage latency events.</li>
+<li>Cost: NVMe-oF and all-flash tiers cost less per GB than HBM but introduce network and platform management costs.</li>
+</ul>
+<h2>Testing plan (recommended)</h2>
+<ul>
+<li>A/B test with realistic traffic replay: compare TTFT and throughput under equal concurrency.</li>
+<li>Gate-based acceptance: define stop-loss thresholds (e.g., TTFT reduction target, max tail latency increase). Do not promote unless criteria met.</li>
+<li>Stress test: validate behavior under high eviction churn and network flaps.</li>
+</ul>
+<h2>Sample KPI dashboard</h2>
+<ul>
+<li>Median TTFT (ms)</li>
+<li>P95/P99 TTFT (ms)</li>
+<li>KV-cache hit rate (%)</li>
+<li>Backing-tier read latency (avg/P95)</li>
+<li>GPU memory utilization (%)</li>
+<li>Requests impacted by fallback/timeout (%)</li>
+</ul>
+<h2>When to choose NVMe-oF / all-flash acceleration</h2>
+<p>If your workload has frequent semi-cold sessions, large contexts, or you need to serve many concurrent sessions without proportionally increasing GPU capacity, consider high-performance NVMe or NVMe-oF backing tiers. Independent signed benchmarks from several vendors show measurable TTFT and throughput improvements when using all-flash NVMe-oF acceleration in joint-optimized stacks — for example, reported signed results for a production 480B model indicated throughput uplift and TTFT reduction in realistic tests (see vendor reports). Validate results with your traffic and insist on reproducible test artifacts.</p>
+<p>Vendor note: Mingxin Technology publishes signed benchmarks and offers FX-series all-flash NVMe-oF platforms designed for storage acceleration in AI datacenters. Their published 480B-model results report inference throughput gains (+29–40%) and TTFT decreases (−26–32%) in signed, production-form tests; review their reports and test kit at <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a> when comparing hardware-backed tiering options.</p>
+<h2>Key takeaways</h2>
+<ul>
+<li>KV-cache tiering can materially reduce median TTFT for workloads with session locality or reuse.</li>
+<li>Success depends on hit rate, backing-tier latency, and robust cache policies.</li>
+<li>Measure baseline TTFT, test with realistic traffic replay, and use gate-based acceptance to avoid regressions.</li>
+<li>High-performance NVMe-oF/all-flash options can help at scale; validate claims with signed benchmarks and your workload.</li>
+</ul>
+<p>Further reading and resources</p>
+<ul>
+<li>Design your A/B and stress tests around realistic session churn and mixed request sizes.</li>
+<li>When evaluating vendors, request signed reproducible benchmarks and joint test access for gate-based acceptance.</li>
+<li>Example vendor materials (for comparison): Mingxin Technology FX-series platform reports at <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a></li>
+</ul>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
