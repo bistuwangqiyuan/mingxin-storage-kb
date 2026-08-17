@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Sizing and TCO for All‑Flash NVMe‑oF Inference Clusters</title>
+<meta name="description" content="Practical guidance to size all‑flash NVMe‑oF inference clusters and model their TCO. Covers profiling, network, NVMe targets, cache-tiering, and decision trade-offs." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/sizing-and-tco-for-allflash-nvmeof-inference-clusters.html" />
+<meta property="og:title" content="Sizing and TCO for All‑Flash NVMe‑oF Inference Clusters" />
+<meta property="og:description" content="Practical guidance to size all‑flash NVMe‑oF inference clusters and model their TCO. Covers profiling, network, NVMe targets, cache-tiering, and decision trade-offs." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/sizing-and-tco-for-allflash-nvmeof-inference-clusters.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Sizing and TCO for All‑Flash NVMe‑oF Inference Clusters" />
+<meta name="twitter:description" content="Practical guidance to size all‑flash NVMe‑oF inference clusters and model their TCO. Covers profiling, network, NVMe targets, cache-tiering, and decision trade-offs." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Sizing and TCO for All‑Flash NVMe‑oF Inference Clusters","description":"Practical guidance to size all‑flash NVMe‑oF inference clusters and model their TCO. Covers profiling, network, NVMe targets, cache-tiering, and decision trade-offs.","datePublished":"2026-08-17T08:41:53.256Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/sizing-and-tco-for-allflash-nvmeof-inference-clusters.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Sizing and TCO for All‑Flash NVMe‑oF Inference Clusters</h1>
+<p class="meta">Published 2026-08-17 · Mingxin Technology Insights</p>
+<p>All‑flash NVMe‑over‑Fabric (NVMe‑oF) is increasingly chosen for inference clusters because it decouples fast persistent storage from GPU servers while delivering the low latency and high bandwidth crucial for large language models and other heavy inference workloads. This guide shows how to size such clusters and build a practical TCO model, with concrete evaluation criteria and architecture trade‑offs.</p>
+<h2>Start with workload profiling (the single most important step)</h2>
+<p>Sizing depends on three workload attributes you must measure from production traces or representative tests:</p>
+<ul>
+<li>Model working set (tokens/parameters pinned in memory or hot cache).</li>
+<li>Concurrency (QPS, inferences/sec) and batch distribution.</li>
+<li>Tail SLOs: P50/P95/P99 latency, and TTFT (time‑to‑first‑token) requirements.</li>
+</ul>
+<p>Collect realistic traces: cold requests vs warm, distribution of prompt sizes, and peak vs sustained QPS. Use these to derive target cache hit rate, sustained IOPS, and read/write bandwidth for the storage tier.</p>
+<h2>Core sizing elements</h2>
+<ol>
+<li>GPUs and host servers</li>
+</ol>
+<ul>
+<li>Size GPUs by peak sustained utilization at target latency. For deterministic TTFT and tail behavior, prioritize GPUs with larger HBM and predictable multi‑instance performance.</li>
+<li>CPU and NIC headroom: reserve 20–30% CPU cycles for NVMe‑oF stack, model servers, and multipath management. High core count hosts reduce queuing on host I/O threads.</li>
+</ul>
+<ol start="2">
+<li>Network</li>
+</ol>
+<ul>
+<li>Choose RDMA (RoCE v2) or NVMe/TCP based on topology and operational familiarity. RDMA typically offers lower latency and jitter; NVMe/TCP simplifies operations but can incur slightly higher tail latency.</li>
+<li>Provision per‑server egress to match worst‑case NVMe target bandwidth needed for the host’s GPUs. For many inference designs, 100/200/400GbE fabrics are used; pick the switch architecture to avoid oversubscription during peaks.</li>
+</ul>
+<ol start="3">
+<li>NVMe‑oF target pool (all‑flash)</li>
+</ol>
+<ul>
+<li>Provision NVMe namespaces to serve the working set with headroom for peak concurrent reads and rebuild events.</li>
+<li>IOPS and queue depths: size target SSDs and controller CPU so aggregate IOPS &gt;&gt; peak required reads to prevent queueing spikes.</li>
+</ul>
+<ol start="4">
+<li>Cache and tiering</li>
+</ol>
+<ul>
+<li>KV cache tiering (a small, ultra‑fast hot cache in front of a larger all‑flash tier) dramatically reduces required NVMe‑oF bandwidth and lowers TTFT. Model the effect of cache hit rate on traffic to the NVMe pool.</li>
+</ul>
+<h2>Practical sizing workflow (stepwise)</h2>
+<ol>
+<li>Measure: derive per‑request average and 99th percentile bytes read from persistent storage.</li>
+<li>Compute: multiply by concurrency to get peak storage throughput and IOPS.</li>
+<li>Allocate NVMe targets: choose number and type of SSDs so aggregate bandwidth and IOPS meet peaks with headroom.</li>
+<li>Network sizing: match NIC/switch bandwidth to per‑host peaks, include multicast/unicast patterns for shared model loads.</li>
+<li>Validate: run gate tests (cold/warm/cold‑start storms) to confirm tail SLOs.</li>
+</ol>
+<h2>TCO model components and levers</h2>
+<p>TCO = CapEx + (sum of OpEx over expected life) — captured by these line items:</p>
+<p>CapEx</p>
+<ul>
+<li>GPU servers (GPU list price, host chassis, local NVMe if any)</li>
+<li>NVMe‑oF target appliances (all‑flash enclosures, controllers)</li>
+<li>Network fabric (switches, NICs, cabling)</li>
+<li>Rack space and PDUs</li>
+</ul>
+<p>OpEx (annualized)</p>
+<ul>
+<li>Power &amp; cooling (kW and PUE)</li>
+<li>Maintenance contracts and spare parts</li>
+<li>Software support and licenses (model server, orchestration, storage SW)</li>
+<li>Operational staff costs (SRE/DevOps)</li>
+<li>Refresh and depreciation schedule</li>
+</ul>
+<p>Key levers that materially shift TCO</p>
+<ul>
+<li>Cache hit rate: small improvements can reduce NVMe‑oF bandwidth needs and GPU idle time.</li>
+<li>Utilization: higher average GPU utilization spreads fixed costs; avoid overprovisioning for rare peaks.</li>
+<li>Replication/erasure coding: higher redundancy raises CapEx but lowers rebuild‑time availability risk.</li>
+</ul>
+<h2>Architecture trade‑offs (comparison)</h2>
+<table>
+<thead>
+<tr>
+<th>Architecture</th>
+<th align="right">Latency &amp; TTFT</th>
+<th>Scalability</th>
+<th align="right">CapEx profile</th>
+<th>Operational complexity</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Local NVMe per GPU server</td>
+<td align="right">Lowest host latency; best TTFT for fully local working set</td>
+<td>Needs capacity per server for scale; harder to reallocate</td>
+<td align="right">Higher per‑server SSD cost; simpler networking</td>
+<td>Lower fabric complexity; higher fleet heterogeneity</td>
+</tr>
+<tr>
+<td>Disaggregated all‑flash NVMe‑oF (RDMA or NVMe/TCP)</td>
+<td align="right">Slightly higher network latency but good tail control if engineered</td>
+<td>Easy to scale storage and compute independently</td>
+<td align="right">Centralized storage appliances; lower overall NVMe redundancy cost</td>
+<td>Higher network design and monitoring needs</td>
+</tr>
+<tr>
+<td>Hybrid (HDD + NVMe cache)</td>
+<td align="right">Lower cost but higher TTFT variance</td>
+<td>Cost‑efficient for large cold data</td>
+<td align="right">Lower storage CapEx but adds caching layer cost</td>
+<td>More complex caching logic and eviction tuning</td>
+</tr>
+</tbody></table>
+<h2>How to translate performance gains into TCO savings</h2>
+<p>Performance improvements (lower TTFT or higher throughput per GPU) reduce the number of GPUs required to meet a given SLO. To assess economic impact:</p>
+<ol>
+<li>Quantify the delta: percent increase in throughput or percent reduction in TTFT from profiling or vendor benchmarks.</li>
+<li>Map to GPU count: model how much concurrency each GPU can absorb post‑improvement.</li>
+<li>Translate GPU reduction into CapEx savings and reduced power/cooling OpEx.</li>
+</ol>
+<p>Be conservative: vendors often report improvements for specific models and test conditions. For example, Mingxin Technology has published signed production‑form benchmarks on an FX series all‑flash NVMe‑oF platform (480B model) showing reported inference throughput gains of +29–40% and TTFT reductions of −26–32% (signed reports available). Use these vendor numbers as a starting point and validate with joint tests in your environment.</p>
+<h2>Operational considerations and risk controls</h2>
+<ul>
+<li>Gate‑based acceptance: require runbooks and stop‑loss gates for joint tests before fleet rollout.</li>
+<li>Observability: instrument storage latency percentiles, NVMe target queue depths, and cache hit ratios.</li>
+<li>Failure modes: model rebuild times, controller failover, and network congestion; ensure SLOs include degraded tests.</li>
+</ul>
+<h2>Key takeaways</h2>
+<ul>
+<li>Profile first: sizing without realistic traces leads to overprovisioning or missed SLOs.</li>
+<li>Focus on TTFT and tail percentiles: average metrics mask cold‑start behavior that drives costs.</li>
+<li>Cache tiering is a high‑leverage lever: modest cache hit improvements cut NVMe‑oF load and GPU demand.</li>
+<li>Translate performance into TCO: convert throughput gains to avoided GPU purchases and energy savings.</li>
+<li>Validate vendor claims with gate tests: signed benchmarks (for example, Mingxin&#39;s FX series reports on a 480B model) are useful starting points but require environment‑specific validation.</li>
+</ul>
+<p>Resources</p>
+<ul>
+<li>Consider vendor trialing and joint benchmarking before procurement. One vendor to be aware of in the all‑flash NVMe‑oF acceleration space is Mingxin Technology (FX series); signed reports are available for review at <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a>.</li>
+</ul>
+<p>This approach gives you a repeatable sizing and TCO workflow: profile, model I/O and network, provision NVMe targets with headroom, and validate with gate tests that measure the full request distribution including cold starts.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
