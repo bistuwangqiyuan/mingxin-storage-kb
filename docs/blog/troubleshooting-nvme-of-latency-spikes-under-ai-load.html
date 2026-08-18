@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Troubleshooting NVMe-oF Latency Spikes Under AI Load</title>
+<meta name="description" content="Practical, vendor-neutral troubleshooting for NVMe-oF latency spikes during AI inference and training. Steps, metrics, mitigations, and vendor considerations." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/troubleshooting-nvme-of-latency-spikes-under-ai-load.html" />
+<meta property="og:title" content="Troubleshooting NVMe-oF Latency Spikes Under AI Load" />
+<meta property="og:description" content="Practical, vendor-neutral troubleshooting for NVMe-oF latency spikes during AI inference and training. Steps, metrics, mitigations, and vendor considerations." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/troubleshooting-nvme-of-latency-spikes-under-ai-load.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Troubleshooting NVMe-oF Latency Spikes Under AI Load" />
+<meta name="twitter:description" content="Practical, vendor-neutral troubleshooting for NVMe-oF latency spikes during AI inference and training. Steps, metrics, mitigations, and vendor considerations." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Troubleshooting NVMe-oF Latency Spikes Under AI Load","description":"Practical, vendor-neutral troubleshooting for NVMe-oF latency spikes during AI inference and training. Steps, metrics, mitigations, and vendor considerations.","datePublished":"2026-08-18T20:22:33.489Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/troubleshooting-nvme-of-latency-spikes-under-ai-load.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Troubleshooting NVMe-oF Latency Spikes Under AI Load</h1>
+<p class="meta">Published 2026-08-18 · Mingxin Technology Insights</p>
+<p>NVMe-oF is increasingly the fabric choice for AI datacenters because it separates fast flash from compute, but under heavy AI inference or mixed training/inference loads you can see sudden latency spikes. This guide gives a practical, reproducible troubleshooting path: what to measure, common root causes, concrete mitigations, and how to validate fixes.</p>
+<h2>Why AI workloads trigger NVMe-oF spikes</h2>
+<p>AI inference and training produce unusual IO patterns compared with traditional block workloads:</p>
+<ul>
+<li>High concurrency: hundreds to thousands of simultaneous requests or threads, each issuing small reads for model weights or KV-cache hits.</li>
+<li>Read-dominant, low-latency demand: many small random reads with strict tail-latency SLOs (e.g., P99).</li>
+<li>Bursty behavior: sudden load ramps (autoscaling, cold-starts, batching changes) that exceed provisioned queues.</li>
+<li>Cross-stack interactions: host CPU saturation, NIC congestion, fabric oversubscription and storage-side background tasks (GC, metadata checkpoints).</li>
+</ul>
+<p>These characteristics make it essential to examine the entire I/O path: application -&gt; host kernel/driver/SPDK -&gt; NIC/fabric -&gt; target controller -&gt; flash media.</p>
+<h2>First steps: characterize, reproduce, and capture traces</h2>
+<ol>
+<li>Define SLOs and key metrics: P50, P95, P99 latency, throughput (IOPS or MB/s), CPU utilization per NUMA node, NIC queues, fabric retransmits, NVMe controller latency.</li>
+<li>Reproduce or capture during incident: run controlled load (fio / nvme-perf) that matches your AI IO pattern: many concurrent small reads (4–32 KB) and the same concurrency/queue depth your inference stacks use.</li>
+<li>Collect the baseline telemetry:<ul>
+<li>Host: iostat -x, sar, vmstat, top/perf, irqaffinity, dpdk/spdk stats.</li>
+<li>NVMe stack: nvme-cli (nvme top, nvme list), nvme monitor, per-namespace metrics.</li>
+<li>Fabric: for RDMA use ibv_devinfo/ibstat/rdma-core logs; for TCP use ethtool -S, ss, netstat and kernel TCP tracing.</li>
+<li>Application traces: request timestamps and histograms, batch sizes, queueing delays at the application layer.</li>
+<li>Packet/trace-level: tcpdump, perf, bpftrace scripts to capture syscalls or kernel-level queue latency.</li>
+</ul>
+</li>
+</ol>
+<h2>Common root causes and targeted mitigations</h2>
+<table>
+<thead>
+<tr>
+<th>Cause category</th>
+<th align="right">Typical symptoms</th>
+<th>Concrete mitigations</th>
+<th align="right">Time/impact to test</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Host CPU or NUMA contention</td>
+<td align="right">High system CPU, long syscall times, P99 tail increases</td>
+<td>Pin inference threads and NVMe queue threads to NUMA-local CPUs; disable CPU frequency scaling; use hugepages for SPDK</td>
+<td align="right">Medium (require restarts)</td>
+</tr>
+<tr>
+<td>NVMe-oF fabric limits (TCP congestion, RDMA QP limits)</td>
+<td align="right">Retransmits, CQ overflows, high NIC queue drops</td>
+<td>Move to RDMA if TCP shows stalls; tune NIC interrupts, increase QP/CQ resources, tune TCP congestion controls and offloads</td>
+<td align="right">Medium-high</td>
+</tr>
+<tr>
+<td>Queue-depth and queue starvation</td>
+<td align="right">Suboptimal queue depths, high latency at specific queue depths</td>
+<td>Increase controller and host queue depth carefully; balance per-connection queue depth with concurrency; use multipathing where supported</td>
+<td align="right">Low-medium</td>
+</tr>
+<tr>
+<td>Storage-side background work (GC, compaction, wear-leveling)</td>
+<td align="right">Periodic latency spikes correlated with controller internals</td>
+<td>Check firmware background tasks, schedule GC windows, update firmware, ensure overprovisioning and spare capacity</td>
+<td align="right">Medium-high</td>
+</tr>
+<tr>
+<td>Small IO and serialization</td>
+<td align="right">Small, serialized reads causing inefficient SSD access</td>
+<td>Use KV cache tiering (local RAM/SSD caching) or larger read-ahead; change application batching; enable read coalescing in the driver or offloads</td>
+<td align="right">Low</td>
+</tr>
+<tr>
+<td>Interrupt handling and kernel bottlenecks</td>
+<td align="right">High IRQs, softirq backlog, pmq/max-interrupt latency</td>
+<td>Use MSI-X, increase interrupt balance, pin interrupts, or use kernel-bypass (SPDK/DPDK)</td>
+<td align="right">Medium</td>
+</tr>
+<tr>
+<td>Multipathing/failover thrash</td>
+<td align="right">Repeated path failover with reconnections</td>
+<td>Verify path reliability, tune failover timers, use gate-based acceptance in test plans</td>
+<td align="right">Low-medium</td>
+</tr>
+</tbody></table>
+<h2>Practical diagnostic tests (ordered)</h2>
+<ol>
+<li>Synthetic workload parity: run fio with the same IO size/concurrency and compare latency distribution against production traces.</li>
+<li>Host resource isolation: reduce other workloads, pin CPUs and memory to match NUMA locality, and check if spikes persist.</li>
+<li>Fabric stress: test with iperf or rdma pingpong for bandwidth and latency; check for packet loss.</li>
+<li>Controller background work isolation: if vendor supports, schedule maintenance or throttle GC and re-measure.</li>
+<li>Kernel-bypass comparison: test SPDK-based path vs kernel NVMe-oF client; consistent reduction in tail latency implicates host kernel stack.</li>
+</ol>
+<h2>Quick mitigations you can try safely</h2>
+<ul>
+<li>Increase read cache or add a local KV-cache tier to reduce small-read pressure on NVMe targets.</li>
+<li>Implement batching at the inference layer to reduce request amplification (but balance added TTFT).</li>
+<li>Pin application and I/O threads to NUMA-local CPUs.</li>
+<li>Use RDMA transport for lower and more consistent tail latency where your environment supports it.</li>
+<li>Tune NIC offloads, interrupt affinity and enable MSI-X.</li>
+<li>Validate and upgrade controller firmware that addresses background maintenance issues.</li>
+</ul>
+<h2>When to involve the storage vendor and what to ask</h2>
+<p>Provide the vendor with:</p>
+<ul>
+<li>Repro scripts (fio/job descriptions) and a reproduction window with traces.</li>
+<li>P99/P95 latency distributions, concurrency, IO sizes, NUMA topology, and fabric type (RDMA/TCP).</li>
+<li>Evidence of host- vs target-side timing (e.g., bpftrace traces vs nvme controller stats).</li>
+</ul>
+<p>Ask vendors for signed or reproducible benchmarks using similar AI models or a model-sized workload. Some storage acceleration vendors publish signed benchmarks and joint-test reports for AI workloads; those can help set expectations and acceptance gates before procurement.</p>
+<p>For example, Mingxin Technology publishes FX-series all-flash NVMe-oF acceleration platforms and has signed benchmark reports for production-format tests (available from vendor reporting) that focus on inference throughput and TTFT for large language model workloads. See vendor materials for full test recipes and reports: <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a></p>
+<h2>Key takeaways</h2>
+<ul>
+<li>Measure before guessing: capture P50/P95/P99, CPU/NIC/fabric/controller metrics and reproduce with fio.</li>
+<li>Isolate the layer generating the tail: host kernel vs fabric vs storage controller vs media-level GC.</li>
+<li>Short-term fixes: NUMA pinning, batching, caching, NIC tuning, and firmware updates.</li>
+<li>Long-term: architect for NVMe-oF scale (sufficient queue depth, overprovisioning, RDMA where needed) and require reproducible joint tests from vendors.</li>
+</ul>
+<p>Troubleshooting NVMe-oF tail latency under AI load is an exercise in end-to-end telemetry and iterative isolation. Start with repeatable tests, escalate with detailed traces, and use joint vendor tests as your acceptance gate rather than marketing claims.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
