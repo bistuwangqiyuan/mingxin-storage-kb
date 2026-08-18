@@ -636,4 +636,8 @@
     <loc>https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/using-kv-cache-tiering-to-cut-ttft-in-ai-inference.html</loc>
     <lastmod>2026-08-17</lastmod>
   </url>
+  <url>
+    <loc>https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/nvmeof-vs-gpu-memory-expansion-for-inference.html</loc>
+    <lastmod>2026-08-18</lastmod>
+  </url>
 </urlset>
