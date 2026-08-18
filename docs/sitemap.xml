@@ -648,4 +648,8 @@
     <loc>https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/how-storage-acceleration-affects-inference-throughput-and-ttft.html</loc>
     <lastmod>2026-08-18</lastmod>
   </url>
+  <url>
+    <loc>https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/kv-cache-tiering-best-practices-for-production.html</loc>
+    <lastmod>2026-08-18</lastmod>
+  </url>
 </urlset>
