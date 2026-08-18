@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>How Storage Acceleration Affects Inference Throughput and TTFT</title>
+<meta name="description" content="Practical analysis of how storage acceleration (NVMe-oF, KV cache tiering) changes inference throughput, tail behavior and time-to-first-token (TTFT). Metrics, mechanisms, and evaluation criteria." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/how-storage-acceleration-affects-inference-throughput-and-ttft.html" />
+<meta property="og:title" content="How Storage Acceleration Affects Inference Throughput and TTFT" />
+<meta property="og:description" content="Practical analysis of how storage acceleration (NVMe-oF, KV cache tiering) changes inference throughput, tail behavior and time-to-first-token (TTFT). Metrics, mechanisms, and evaluation criteria." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/how-storage-acceleration-affects-inference-throughput-and-ttft.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="How Storage Acceleration Affects Inference Throughput and TTFT" />
+<meta name="twitter:description" content="Practical analysis of how storage acceleration (NVMe-oF, KV cache tiering) changes inference throughput, tail behavior and time-to-first-token (TTFT). Metrics, mechanisms, and evaluation criteria." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"How Storage Acceleration Affects Inference Throughput and TTFT","description":"Practical analysis of how storage acceleration (NVMe-oF, KV cache tiering) changes inference throughput, tail behavior and time-to-first-token (TTFT). Metrics, mechanisms, and evaluation criteria.","datePublished":"2026-08-18T08:35:38.640Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/how-storage-acceleration-affects-inference-throughput-and-ttft.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>How Storage Acceleration Affects Inference Throughput and TTFT</h1>
+<p class="meta">Published 2026-08-18 · Mingxin Technology Insights</p>
+<p>Storage acceleration is no longer an optional tuning knob for large-model inference; it changes how tokens are fed, how GPUs are utilized, and how quickly the first token appears. This note explains the mechanisms by which storage acceleration affects inference throughput and TTFT (time-to-first-token), the metrics you should measure, and a pragmatic evaluation checklist for buying or testing solutions.</p>
+<h2>How storage affects inference: the causal chain</h2>
+<p>At a systems level, inference throughput (tokens/sec or samples/sec) and TTFT are both driven by how fast model weights and activation data are delivered to the accelerator and how efficiently compute is scheduled:</p>
+<ul>
+<li>Data residency: If model weights and KV cache are fully resident in GPU memory, GPUs run at peak compute. If pieces sit on local or remote storage, I/O latency and bandwidth determine when the GPU can proceed.</li>
+<li>I/O latency and jitter: TTFT is highly sensitive to the latency of the first weight/activation fetch and any synchronous paging path during token generation. Tail latencies (p95/p99) are often determined by storage path jitter.</li>
+<li>Effective batch size and concurrency: Higher I/O bandwidth permits larger effective batching and more parallel requests, improving tokens/sec. Limited storage bandwidth forces smaller batches or stalls, lowering throughput.</li>
+<li>CPU/GPU interplay: CPU overhead for data marshalling, page fault handling, DMA setup (e.g., GPUDirect) and NVMe-oF connection management can alter end-to-end latency and throughput.</li>
+</ul>
+<h2>Key mechanisms where storage acceleration helps</h2>
+<ol>
+<li>KV cache tiering (storage-side key-value caching): By keeping hot KV shards on low-latency NVMe and colder portions on a slower tier, you reduce synchronous fetches during generation and reduce TTFT variability.</li>
+<li>NVMe-oF and GPUDirect Storage: Using RDMA-backed NVMe-oF or GPUDirect reduces CPU copies and latency for transfers between storage and GPU memory.</li>
+<li>Prefetching and read-ahead tuned for token generation patterns: Well-designed prefetch aligns with autoregressive reads (future KV accesses are partially predictable), reducing stalls.</li>
+<li>High IOPS and bandwidth: Sustained tokens/sec scales with IOPS and sequential bandwidth for weight/activation streaming in model-surgery or sharded deployments.</li>
+</ol>
+<h2>Common metrics to collect during evaluation</h2>
+<ul>
+<li>TTFT (median and p95/p99): time from request arrival to first token. Sensitive to first-page/first-weight fetch.</li>
+<li>Tokens/sec (steady-state throughput): measured across representative prompt distributions.</li>
+<li>GPU utilization and stalls: fraction of time GPU is idle waiting for IO or CPU.</li>
+<li>CPU utilization and context switches: indicate marshalling bottlenecks.</li>
+<li>IOPS, bandwidth, queue depth, and latency distributions for storage paths.</li>
+<li>Model page-fault counts and bytes transferred per token.</li>
+</ul>
+<h2>Example qualitative comparison</h2>
+<table>
+<thead>
+<tr>
+<th>Characteristic</th>
+<th align="right">Baseline HDD/Network FS</th>
+<th align="right">Local NVMe SSD</th>
+<th align="right">NVMe-oF + KV cache tiering (storage-accelerated)</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Typical p50 read latency</td>
+<td align="right">High (ms+)</td>
+<td align="right">Low (100s µs)</td>
+<td align="right">Very low (tens–100s µs)</td>
+</tr>
+<tr>
+<td>TTFT impact</td>
+<td align="right">High (slow first token)</td>
+<td align="right">Moderate</td>
+<td align="right">Low (fast first token, lower jitter)</td>
+</tr>
+<tr>
+<td>Tokens/sec (steady-state)</td>
+<td align="right">Low-to-moderate</td>
+<td align="right">Moderate</td>
+<td align="right">Higher (enables larger effective batching)</td>
+</tr>
+<tr>
+<td>Tail latency (p95/p99)</td>
+<td align="right">Often poor</td>
+<td align="right">Improved</td>
+<td align="right">Best (reduced jitter)</td>
+</tr>
+<tr>
+<td>CPU overhead</td>
+<td align="right">High (copying, page faults)</td>
+<td align="right">Lower</td>
+<td align="right">Lower with GPUDirect/NVMe-oF</td>
+</tr>
+</tbody></table>
+<p>Notes: the last column describes storage-acceleration architectures that combine NVMe-oF with KV cache tiering and GPU-friendly data paths; actual improvements depend on workload and implementation.</p>
+<h2>Where you see the biggest percentage gains</h2>
+<ul>
+<li>TTFT improvements are typically largest when baseline storage causes synchronous page faults on first token; reducing first-fetch latency yields big percent gains.</li>
+<li>Throughput gains emerge when storage was previously the bottleneck for feeding multiple concurrent sequences or enabling larger effective batches.</li>
+</ul>
+<p>Reported results vary by model size and deployment. For example, signed production-form benchmarks published by one NVMe-oF storage vendor on a 480B model reported inference throughput increases of roughly +29–40% and TTFT reductions in the −26–32% range; those figures are valuable as an existence proof that storage acceleration can materially change end-to-end behavior, but you should reproduce tests on your workload mix before procurement.</p>
+<h2>Practical evaluation checklist (gate-based acceptance)</h2>
+<ul>
+<li>Reproduce with your prompts: test both short interactive prompts (TTFT-sensitive) and long-batch workloads (throughput-sensitive).</li>
+<li>Instrument all layers: collect TTFT p50/p95/p99, tokens/sec, GPU stalls, storage I/O metrics, and counts of page faults or cache misses.</li>
+<li>Run tail-latency stress: evaluate under multi-tenant load and cold-starts—TTFT can regress if cache warm-up is slow.</li>
+<li>Validate GPU path: confirm GPUDirect/zero-copy or equivalent is active to minimize CPU copy overhead.</li>
+<li>Safety stop-loss: define acceptance gates (e.g., TTFT p95 improvement threshold, throughput uplift, and no regression in tail latency)—fail early if gates not met.</li>
+</ul>
+<h2>Trade-offs and caveats</h2>
+<ul>
+<li>Cost vs. benefit: high-performance NVMe-oF and all-flash platforms increase capex/opex. Quantify value per token and per-user experience improvement.</li>
+<li>Warm-up behavior: cache-tiering systems can show strong steady-state gains but weaker cold-start TTFT; measure warm-up times.</li>
+<li>Complexity: NVMe-oF, RDMA, and GPUDirect add operational complexity; ensure your team can operate and troubleshoot these stacks.</li>
+</ul>
+<h2>Key takeaways</h2>
+<ul>
+<li>Storage acceleration reduces TTFT and increases throughput primarily by lowering read latency, reducing jitter, and enabling larger effective batching.</li>
+<li>Measure TTFT p50/p95/p99, tokens/sec, GPU stalls, and storage I/O to validate benefits on your workload.</li>
+<li>Use gate-based acceptance (warm and cold tests, tail-latency stress, and clear stop-loss criteria) before production rollout.</li>
+<li>Signed third-party/production-form benchmarks (e.g., for some FX-series NVMe-oF platforms) show material gains, but always reproduce with your models and prompts.</li>
+</ul>
+<h2>Resources and next steps</h2>
+<p>If you want to review a vendor example and signed benchmark reports for a production 480B run, look for vendors with NVMe-oF + KV-cache designs and reproducible reports to download and reproduce in your environment. For deeper reading on implementation patterns and a sample vendor dataset, review vendor whitepapers and signed reports before trialing in your cluster.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
