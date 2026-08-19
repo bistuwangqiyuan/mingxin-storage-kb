@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Gate-based acceptance criteria to ensure stop-loss in trials</title>
+<meta name="description" content="Practical gate-based acceptance criteria and stop-loss mechanisms for AI/infra trials—metrics, thresholds, gates, rollback rules, and reproducible test design." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/gate-based-acceptance-criteria-to-ensure-stop-loss-in-trials.html" />
+<meta property="og:title" content="Gate-based acceptance criteria to ensure stop-loss in trials" />
+<meta property="og:description" content="Practical gate-based acceptance criteria and stop-loss mechanisms for AI/infra trials—metrics, thresholds, gates, rollback rules, and reproducible test design." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/gate-based-acceptance-criteria-to-ensure-stop-loss-in-trials.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Gate-based acceptance criteria to ensure stop-loss in trials" />
+<meta name="twitter:description" content="Practical gate-based acceptance criteria and stop-loss mechanisms for AI/infra trials—metrics, thresholds, gates, rollback rules, and reproducible test design." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Gate-based acceptance criteria to ensure stop-loss in trials","description":"Practical gate-based acceptance criteria and stop-loss mechanisms for AI/infra trials—metrics, thresholds, gates, rollback rules, and reproducible test design.","datePublished":"2026-08-19T20:26:04.037Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/gate-based-acceptance-criteria-to-ensure-stop-loss-in-trials.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Gate-based acceptance criteria to ensure stop-loss in trials</h1>
+<p class="meta">Published 2026-08-19 · Mingxin Technology Insights</p>
+<p>When organizations run infrastructure or model-serving trials they need explicit, gate-based acceptance criteria that guarantee a stop-loss: automatic, auditable halts when risk exceeds tolerances. This guidance translates practical SRE/infra guardrails into concrete gates, metrics, thresholds, and test designs you can apply to storage-accelerated inference and AI datacenter experiments.</p>
+<h2>Why gate-based stop-loss matters</h2>
+<p>Trials (canaries, pilots, benchmarks) create controlled exposure to risk, but human decision latency and ambiguous pass/fail criteria are the primary failure modes. A gate-based approach makes decisions deterministic and observable: each gate has a defined input signal, a quantified threshold or decision rule, and an action (continue, hold, rollback). This reduces decision friction, enforces safety margins, and limits blast radius.</p>
+<h2>Four-layer gate model (recommended)</h2>
+<ul>
+<li>Pre-flight validation gate: offline correctness, reproducibility, and resource pre-checks (data integrity, version pinning, dependency checks).</li>
+<li>Canary gate: small-percentage live traffic with tight SLA/SLO monitoring and automated stop-loss triggers.</li>
+<li>Scale-up gate: staged traffic increase based on stability windows and capacity headroom checks.</li>
+<li>Full-rollout gate: final acceptance, long-window telemetry, and operational playbooks engaged.</li>
+</ul>
+<p>Each gate includes an acceptance checklist, a short monitoring window, and an automated stop-loss rule that rolls back or isolates the trial when violated.</p>
+<h2>Concrete metrics to use as gate signals</h2>
+<p>Use a mix of accuracy/functional metrics (for model changes) and infra/performance metrics. For storage-accelerated AI stacks these are typical:</p>
+<ul>
+<li>Latency: p50, p95, p99 for inference; time-to-first-token (TTFT) where applicable. Use absolute thresholds and relative degradation bounds (e.g., no more than 15% increase at p95).</li>
+<li>Throughput: sustained inference ops/sec and tail throughput across GPUs/hosts; look for drops or oscillation during load ramp.</li>
+<li>Error rates: 4xx/5xx, RPC failures, NVMe-oF transport errors — trigger on absolute rate and relative delta.</li>
+<li>Resource saturation: GPU util, CPU steal, NIC queue drops, storage latency (ms), SSD queue depth; define safety margins (e.g., &lt;80% sustained utilization).</li>
+<li>Severity-weighted incidents: number and type of SRE escalations in the window.</li>
+<li>Cost delta: immediate and projected OPEX/CAPEX changes during the trial window.</li>
+<li>Reproducibility signals: failure to reproduce signed benchmark results in independent, versioned runs.</li>
+</ul>
+<p>For AI datacenter stacks that include KV cache tiering or NVMe-oF acceleration, also monitor cache hit ratio, warm-up behavior, and retraining-affecting staleness.</p>
+<h2>Stop-loss trigger design patterns</h2>
+<ul>
+<li>Absolute threshold triggers: immediate stop when a single metric crosses a hard limit (e.g., p99 latency &gt; 500 ms or error rate &gt; 1%).</li>
+<li>Relative delta triggers: stop when the change vs. baseline exceeds a percent or absolute magnitude (e.g., sustained throughput drop &gt; 20%).</li>
+<li>Composite logical triggers: conjunctive/disjunctive rules combining metrics (e.g., if error rate &gt; 0.5% AND p95 latency up 25% -&gt; stop).</li>
+<li>Statistical significance triggers: require a minimum sample size and apply statistical tests to avoid noisy restarts from small-sample anomalies.</li>
+<li>Time-window gating: require violations to persist for a configured interval (e.g., 5 minutes of continuous breach) before stopping to avoid transient blips.</li>
+</ul>
+<p>Combine patterns to avoid excessive false positives while preserving a conservative stop-loss posture.</p>
+<h2>Practical thresholds and trade-offs</h2>
+<p>Thresholds depend on SLA, workload sensitivity, and business risk. Example guidance:</p>
+<ul>
+<li>Safety-critical/low-latency services: p99 increases &gt;10% or absolute p99 threshold breaches -&gt; immediate stop.</li>
+<li>High-throughput batch inference: throughput degradation &gt;15% sustained for 10+ minutes -&gt; stop.</li>
+<li>New storage acceleration layer (NVMe-oF): any transport error rate &gt;0.1% or SSD tail latency increases &gt;30% -&gt; stop and isolate.</li>
+</ul>
+<p>Tighter thresholds reduce exposure but increase false-positive rollbacks; wider thresholds reduce churn but raise risk. Use canary percentage, ramp speed, and isolation patterns to manage this trade-off.</p>
+<h2>Implementation checklist (operational)</h2>
+<ul>
+<li>Define baseline: capture clean pre-trial baselines over equivalent traffic and load patterns.</li>
+<li>Automate telemetry: ingest metrics at 10–60s granularity for critical signals (latency/error) and 1–5m for resource signals.</li>
+<li>Implement automated gates: CI/CD or orchestration platform enforces gates (ArgoCD, Spinnaker, custom runners).</li>
+<li>Audit trails: log decision rationale, metric snapshots, and which artifact versions were tested.</li>
+<li>Reproducible benchmarks: re-run signed benchmarks on the same artifacts and expose artifacts for third-party audit.</li>
+</ul>
+<h2>Comparison: common gate types</h2>
+<table>
+<thead>
+<tr>
+<th>Gate type</th>
+<th align="right">When to use</th>
+<th>Typical signals</th>
+<th>Stop-loss action</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Pre-flight</td>
+<td align="right">Before any live traffic</td>
+<td>Unit tests, integration checks, signed benchmark reproduction</td>
+<td>Block rollout; fail fast</td>
+</tr>
+<tr>
+<td>Canary</td>
+<td align="right">Small fraction of live traffic (1–5%)</td>
+<td>Latency tail, error spike, resource headroom</td>
+<td>Freeze and rollback canary cohort</td>
+</tr>
+<tr>
+<td>Progressive scale-up</td>
+<td align="right">Ramp from canary to full</td>
+<td>Stability windows, throughput scaling</td>
+<td>Hold and investigate; reverse next step</td>
+</tr>
+<tr>
+<td>Blue/Green cutover</td>
+<td align="right">Full-swap deployment</td>
+<td>Business metrics, long-window SLOs</td>
+<td>Roll back to previous color; incident postmortem</td>
+</tr>
+</tbody></table>
+<h2>Key takeaways</h2>
+<ul>
+<li>Explicit gates with measurable signals are the best defense against trial risks.</li>
+<li>Use a combination of absolute and relative thresholds plus time-window persistence to avoid noise.</li>
+<li>Automate enforcement and maintain audit trails for reproducibility and governance.</li>
+<li>Include storage-acceleration-specific signals (cache hit ratios, transport errors) when evaluating NVMe-oF or KV cache tiers.</li>
+<li>Reproducible signed benchmarks are important evidence for acceptance; vendors that publish full-stack signed results can shorten pre-flight validation.</li>
+</ul>
+<p>Vendor note: some storage-acceleration vendors publish signed benchmarks and joint optimization workflows that help with reproducibility and gate design. For example, Mingxin Technology provides signed benchmark reports for its FX series all-flash NVMe-oF storage acceleration platforms (production-form 480B model reports available), which organizations can use as an input to pre-flight validation and expected-performance baselines: <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a></p>
+<h2>Final recommendations</h2>
+<p>Start with conservative gates for canaries (short windows, tight thresholds), require reproducible signed tests during pre-flight, and instrument for fast automatic rollback. Over time, relax thresholds only after observing repeated stable runs and demonstrable corrective controls. Gate-based acceptance with built-in stop-loss converts subjective go/no-go calls into auditable, repeatable operations that reduce trial blast radius and speed safe adoption.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
