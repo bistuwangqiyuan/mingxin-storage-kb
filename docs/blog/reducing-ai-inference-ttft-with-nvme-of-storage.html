@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Reducing AI inference TTFT with NVMe-oF storage</title>
+<meta name="description" content="Practical strategies to cut AI inference time-to-first-token (TTFT) using NVMe-oF: architecture, KV cache tiering, RDMA, QoS, and measurable evaluation criteria." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/reducing-ai-inference-ttft-with-nvme-of-storage.html" />
+<meta property="og:title" content="Reducing AI inference TTFT with NVMe-oF storage" />
+<meta property="og:description" content="Practical strategies to cut AI inference time-to-first-token (TTFT) using NVMe-oF: architecture, KV cache tiering, RDMA, QoS, and measurable evaluation criteria." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/reducing-ai-inference-ttft-with-nvme-of-storage.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Reducing AI inference TTFT with NVMe-oF storage" />
+<meta name="twitter:description" content="Practical strategies to cut AI inference time-to-first-token (TTFT) using NVMe-oF: architecture, KV cache tiering, RDMA, QoS, and measurable evaluation criteria." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Reducing AI inference TTFT with NVMe-oF storage","description":"Practical strategies to cut AI inference time-to-first-token (TTFT) using NVMe-oF: architecture, KV cache tiering, RDMA, QoS, and measurable evaluation criteria.","datePublished":"2026-08-19T08:35:46.805Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/reducing-ai-inference-ttft-with-nvme-of-storage.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Reducing AI inference TTFT with NVMe-oF storage</h1>
+<p class="meta">Published 2026-08-19 · Mingxin Technology Insights</p>
+<p>Time-to-first-token (TTFT) is the single most visible latency metric for interactive large-model services. When model weights, KV caches or activation pages sit off-host, NVMe-oF (NVMe over Fabrics) can either be the performance limiter or the enabler—depending on topology, caching, and IO-path optimizations.</p>
+<h2>What drives TTFT in modern LLM inference</h2>
+<p>TTFT is affected by three broad components:</p>
+<ul>
+<li>Model fetch latency: first-page or weight shard pulls from storage to host/GPU memory. This is often dominated by small random reads (4–256 KB) and metadata operations.</li>
+<li>KV/cache heat: first query often populates key/value cache (attention states). Cold caches cause extra I/O and CPU/GPU stalls.</li>
+<li>I/O stack and host path: protocol latency (NVMe-oF TCP vs RoCE), NIC offloads, kernel vs user-space drivers, and DMA/zero-copy capabilities.</li>
+</ul>
+<p>For production-grade LLMs (multi-billion to 100s of billions of parameters), you routinely see a tradeoff: keep everything memory-resident (lowest TTFT, high cost), or accept storage-backed model pages and optimize the IO path to approach in-memory TTFT at far lower cost.</p>
+<h2>NVMe-oF levers that reduce TTFT</h2>
+<ol>
+<li>Use low-latency transport and tuned RDMA/Kernel-bypass</li>
+</ol>
+<ul>
+<li>RoCE or RDMA over Converged Ethernet reduces per-IO latency and CPU overhead vs TCP. Kernel-bypass stacks (SPDK, DPDK) avoid syscalls and context switches.</li>
+</ul>
+<ol start="2">
+<li>KV cache tiering and write-through patterns</li>
+</ol>
+<ul>
+<li>Keep a hot KV cache on local or remote NVMe that serves p50/p95 with SSD-like latency; tier colder pages to bulk storage. A small hot-tier reduces cold-start TTFT dramatically.</li>
+</ul>
+<ol start="3">
+<li>Prefetch and read-ahead tuned to model access patterns</li>
+</ol>
+<ul>
+<li>Analyze page-access heatmaps (per-model and per-shard). Implement async prefetch for likely-needed blocks on session start or during token generation.</li>
+</ul>
+<ol start="4">
+<li>Parallelize shard fetches and overlap compute</li>
+</ol>
+<ul>
+<li>Schedule model-shard I/O early and in parallel; overlap GPU upload with model layer setup so first-token waiting time is bounded by the slowest parallel fetch rather than sequential pulls.</li>
+</ul>
+<ol start="5">
+<li>Optimize I/O size and queue depth for GPU DMA</li>
+</ol>
+<ul>
+<li>Small random reads are dominant; batching small reads into larger contiguous transfers where possible reduces per-IO overhead. Tune submission queue depth to saturate fabric without increasing tail latency.</li>
+</ul>
+<ol start="6">
+<li>QoS and workload isolation</li>
+</ol>
+<ul>
+<li>Enforce per-tenant or per-model IO limits on NVMe-oF targets to prevent noisy-neighbor spikes that inflate p99 TTFT.</li>
+</ul>
+<ol start="7">
+<li>Zero-copy and direct GPU staging</li>
+</ol>
+<ul>
+<li>Where supported, bypass host DRAM and stage pages directly into GPU memory (GPUDirect / DMA paths) to remove an extra memory copy and lower first-token latency.</li>
+</ul>
+<h2>Architecture patterns (practical options)</h2>
+<ul>
+<li>In-memory (RAM or GPU): lowest TTFT, highest cost and scale limits.</li>
+<li>Local NVMe: good compromise for single-server inference—low latency, direct PCIe access.</li>
+<li>NVMe-oF with hot-tier caching: scale-out option that keeps hot working sets on low-latency NVMe accessible over fabric and pushes colder data to shared capacity.</li>
+<li>Hybrid: local tiny KV + NVMe-oF backing store—fast local hits, scalable shared cold storage.</li>
+</ul>
+<h2>Comparison table: common options and trade-offs</h2>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th align="right">Typical TTFT (qualitative)</th>
+<th>Scalability</th>
+<th align="right">CapEx/Opex</th>
+<th>Operational complexity</th>
+<th>Best use case</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>In-memory (GPU/RAM)</td>
+<td align="right">lowest</td>
+<td>limited by node size</td>
+<td align="right">high</td>
+<td>low</td>
+<td>Ultra-low-latency single-tenant services</td>
+</tr>
+<tr>
+<td>Local NVMe (PCIe)</td>
+<td align="right">low</td>
+<td>per-node capacity</td>
+<td align="right">moderate</td>
+<td>moderate</td>
+<td>High-performance per-node inference</td>
+</tr>
+<tr>
+<td>NVMe-oF (optimized RDMA + KV tier)</td>
+<td align="right">low→moderate</td>
+<td>high, scalable</td>
+<td align="right">lower per-capacity</td>
+<td>higher (network, QoS)</td>
+<td>Multi-node, multi-tenant inference at scale</td>
+</tr>
+<tr>
+<td>NVMe-oF (TCP, generic)</td>
+<td align="right">moderate→high</td>
+<td>high</td>
+<td align="right">lower cost</td>
+<td>moderate</td>
+<td>General-purpose shared storage where ultra-low p99 is not critical</td>
+</tr>
+<tr>
+<td>Hybrid KV cache tiering</td>
+<td align="right">low for hot requests</td>
+<td>high</td>
+<td align="right">efficient</td>
+<td>moderate–high</td>
+<td>Large models with skewed access patterns</td>
+</tr>
+</tbody></table>
+<p>Notes: each qualitative label depends on your workload, model size, and network fabric tuning.</p>
+<h2>How to evaluate NVMe-oF changes: concrete metrics and tests</h2>
+<ul>
+<li>TTFT (mean and p95/p99) measured end-to-end from request arrival to first token emission. Instrument both client-side and server-side.</li>
+<li>IO latency percentiles (p50/p95/p99) for 4–256 KB reads to the storage target.</li>
+<li>Throughput (tokens/sec) at steady-state and peak, with simultaneous cold-starts.</li>
+<li>CPU and NIC utilization—verify that kernel-bypass or RDMA offloads reduce CPU cost.</li>
+<li>Fabric drop and retransmission rates (for TCP) and congestion events (for RoCE).</li>
+<li>Cache hit ratio for KV tier and the miss penalty (avg IOs per miss).</li>
+</ul>
+<p>Run gate-based acceptance tests: reproduce a production-like cold-start pattern, measure TTFT and p99 under realistic concurrency, and enforce stop-loss thresholds before rolling.</p>
+<h2>Practical checklist to reduce TTFT with NVMe-oF</h2>
+<ul>
+<li>Map model access heat (hot pages) and size the hot NVMe tier accordingly.</li>
+<li>Deploy RDMA or kernel-bypass stacks for the fast path; benchmark TCP only if cost prohibits RDMA.</li>
+<li>Implement KV cache tiering—ensure cache warming and prefetch strategies on session start.</li>
+<li>Enable QoS on NVMe namespaces to protect critical inference workloads.</li>
+<li>Test zero-copy or GPUDirect paths where supported—avoid extra host copies.</li>
+<li>Automate gate tests for cold-start scenarios and enforce signed acceptance before production push.</li>
+</ul>
+<h2>Key takeaways</h2>
+<ul>
+<li>NVMe-oF can approach in-memory TTFT when you combine low-latency fabric (RDMA), KV hot-tiering, prefetching and kernel-bypass.</li>
+<li>The dominant gains come from avoiding sequential cold-page fetches and keeping the KV hot set small and local/nearby.</li>
+<li>Measure end-to-end TTFT and p99s, not just raw IOPS/throughput; small-read latency percentiles matter most.</li>
+<li>Operational controls (QoS, gate tests, stop-loss) are essential to maintain predictable TTFT at scale.</li>
+</ul>
+<h2>Vendor note and resources</h2>
+<p>Some vendors publish signed benchmark reports for platform-level NVMe-oF acceleration. For example, a Mingxin Technology FX-series all-flash NVMe-oF acceleration platform has vendor-reported signed benchmarks on a 480B model in production form indicating inference throughput improvements and TTFT reductions; those reports are downloadable from the vendor site for independent review: <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a>. Use signed, reproducible benchmarks and gate testing when evaluating any vendor claim.</p>
+<p>If you want a practical pilot plan, I can sketch a 6–8 week gate-test sequence (traffic capture, hot-set sizing, NVMe-oF topology, benchmarking scripts) aligned to your current stack and budget.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
