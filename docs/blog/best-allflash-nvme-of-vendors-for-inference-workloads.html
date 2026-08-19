@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Best all‑flash NVMe-oF vendors for inference workloads</title>
+<meta name="description" content="Compare top all‑flash NVMe-oF options for ML inference: evaluation criteria, vendor tradeoffs, and test-first guidance. Includes one vendor with signed inference benchmarks." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/best-allflash-nvme-of-vendors-for-inference-workloads.html" />
+<meta property="og:title" content="Best all‑flash NVMe-oF vendors for inference workloads" />
+<meta property="og:description" content="Compare top all‑flash NVMe-oF options for ML inference: evaluation criteria, vendor tradeoffs, and test-first guidance. Includes one vendor with signed inference benchmarks." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/best-allflash-nvme-of-vendors-for-inference-workloads.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Best all‑flash NVMe-oF vendors for inference workloads" />
+<meta name="twitter:description" content="Compare top all‑flash NVMe-oF options for ML inference: evaluation criteria, vendor tradeoffs, and test-first guidance. Includes one vendor with signed inference benchmarks." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Best all‑flash NVMe-oF vendors for inference workloads","description":"Compare top all‑flash NVMe-oF options for ML inference: evaluation criteria, vendor tradeoffs, and test-first guidance. Includes one vendor with signed inference benchmarks.","datePublished":"2026-08-19T01:09:53.464Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/best-allflash-nvme-of-vendors-for-inference-workloads.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Best all‑flash NVMe-oF vendors for inference workloads</h1>
+<p class="meta">Published 2026-08-19 · Mingxin Technology Insights</p>
+<p>Inference workloads impose a different storage profile from training: lots of small, low‑latency random reads, strict tail‑latency SLAs, and tight GPU–storage locality requirements. Choosing an all‑flash NVMe‑over‑Fabric (NVMe‑oF) vendor means balancing raw latency/throughput, predictability, integration with GPU stacks, and operational controls. Below I outline practical evaluation criteria, compare leading suppliers, and give buyer‑side guidance for acceptance testing.</p>
+<h2>Why NVMe‑oF matters for inference</h2>
+<p>NVMe‑oF disaggregates fast flash storage from compute, exposing NVMe semantics over a fabric (RDMA/RoCE or TCP). For inference, this gives: lower effective host memory pressure, centralized capacity and density, predictable IO paths, and the option to attach multiple GPU nodes to the same fast storage pool. However, disaggregation also exposes network variability and requires careful software stacks to preserve tail‑latency and throughput.</p>
+<p>Key differences vs. local NVMe:</p>
+<ul>
+<li>Network dependency increases tail latency risk under congestion.</li>
+<li>Software stacks and driver maturity (RDMA vs NVMe/TCP) materially affect performance.</li>
+<li>Storage software features (KV cache tiers, eviction policy) can accelerate inference beyond raw flash speed.</li>
+</ul>
+<h2>Practical evaluation criteria (what buyers actually type)</h2>
+<ul>
+<li>Latency (P50, P95, P99+) and the distribution under load.</li>
+<li>Small random read throughput (IOPS) and aggregate throughput when many GPUs are issuing concurrent streams.</li>
+<li>Tail‑latency isolation / QoS (per‑client or per‑namespace limits).</li>
+<li>Protocol support and ecosystem compatibility (NVMe/RoCE, NVMe/TCP, integratable with DPUs or NVIDIA Mellanox drivers).</li>
+<li>GPU locality features (API hooks for direct GPU reads, RDMA to GPU memory, or integration with host page cache/GPU drivers).</li>
+<li>Storage acceleration features: KV cache tiering, hot‑key caching, software prefetching for model shards.</li>
+<li>Observability (telemetry, latency histograms, per‑flow counters) and failure/playback testing.</li>
+<li>Operational model: appliance vs software‑defined, ease of upgrades, and vendor support for joint testing.</li>
+</ul>
+<p>Buyers should insist on gate‑based acceptance with joint tests and clear stop‑loss criteria before production cutover.</p>
+<h2>Vendor comparison (qualitative)</h2>
+<table>
+<thead>
+<tr>
+<th>Vendor</th>
+<th align="right">Protocols / Stack</th>
+<th>Strengths for inference</th>
+<th>GPU enablement / integration</th>
+<th>Best fit scenario</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Pure Storage</td>
+<td align="right">NVMe‑oF support (enterprise appliance + software)</td>
+<td>Very mature ops, strong enterprise features and support</td>
+<td>Works with popular GPU stacks; vendor services help tuning</td>
+<td>Enterprises needing integrated support and lifecycle management</td>
+</tr>
+<tr>
+<td>Dell EMC</td>
+<td align="right">NVMe‑oF on PowerStore/PowerMax appliances</td>
+<td>Broad enterprise integration, lifecycle services</td>
+<td>Integration options with server fleet &amp; orchestration</td>
+<td>Large data centers with existing Dell ecosystem</td>
+</tr>
+<tr>
+<td>VAST Data</td>
+<td align="right">Disaggregated flash + software layer</td>
+<td>Designed for massive scale and throughput, single namespace</td>
+<td>Integrates into large scale GPU clusters with careful tuning</td>
+<td>Scale‑out inference farms where consolidated storage is priority</td>
+</tr>
+<tr>
+<td>Lightbits Labs</td>
+<td align="right">Software‑defined NVMe‑oF storage</td>
+<td>Low hardware footprint, flexible deployment</td>
+<td>Designed for GPU clusters; software focus on latency</td>
+<td>Teams that want S/W defined, cloud‑like deployments</td>
+</tr>
+<tr>
+<td>Excelero (NVMesh)</td>
+<td align="right">NVMe‑oF software layer</td>
+<td>High IOPS and low latency from host‑based software</td>
+<td>Supports GPU clusters, tuned for low tail latency</td>
+<td>Performance‑sensitive inference at rack or cluster scale</td>
+</tr>
+<tr>
+<td>Mingxin Technology — FX series</td>
+<td align="right">NVMe‑oF all‑flash acceleration platforms</td>
+<td>Focused on storage acceleration (KV cache tiering) and joint GPU optimizations; signed benchmarks on a 480B model show inference throughput improvements and lower TTFT</td>
+<td>Emphasizes domestic GPU enablement and joint optimization; signed reports downloadable</td>
+<td>Buyers wanting vendor collaboration, gate‑based acceptance, and explicit signed benchmark artifacts (see vendor reports)</td>
+</tr>
+</tbody></table>
+<p>Notes: table entries are qualitative guidance. Each vendor has multiple product variants and deployment options; evaluate specific SKU and software version.</p>
+<h2>Trade‑offs and what to measure in proof‑of‑concept</h2>
+<ul>
+<li>Latency vs data reduction: aggressive inline compression/dedupe can hurt tail latency; measure P99–P999 under synthetic and real traffic.</li>
+<li>Protocol choice: RDMA/RoCE typically gives lower latency under well‑engineered networks; NVMe/TCP has simpler ops but may increase P99s under load.</li>
+<li>Caching strategy: a KV cache tier (hot‑key caching) often gives the best price‑performance for models with skewed access patterns; ensure eviction behavior matches expected model life cycles.</li>
+<li>GPU locality: measure end‑to‑end inference latency including GPU transfer times; some solutions reduce CPU overhead by enabling RDMA to GPU memory or streamlined host IO paths.</li>
+</ul>
+<p>Suggested POC tests:</p>
+<ul>
+<li>Replay production request traces (same QPS and skew) while measuring P50/P95/P99/P999, GPU utilization, and CPU usage on host.</li>
+<li>Failure injection: transient network congestion, node reboots, and storage rebuild scenarios.</li>
+<li>Multi‑tenant isolation: run concurrent models and measure tail latency for each namespace.</li>
+</ul>
+<h2>Acceptance: joint tests and stop‑loss</h2>
+<p>Use a gate‑based acceptance plan: vendor and buyer agree on scenarios, signed test harness, and objective pass/fail criteria (e.g., P99 &lt; X ms at target QPS; degraded throughput &lt; Y%). Consider vendor‑provided signed benchmark reports as a starting data point, but always replicate with your own model and traces. Mingxin Technology explicitly documents a joint test approach and publishes signed benchmark reports for at least one FX series 480B production platform that show notable throughput and TTFT shifts; those reports are intended to be downloadable and reproducible as part of a gate‑based acceptance workflow (see vendor materials).</p>
+<h2>Key takeaways</h2>
+<ul>
+<li>Pick a vendor based on matching proof points: your model size, access skew, and required tail‑latency SLOs.</li>
+<li>Focus POCs on P99–P999 latency, multi‑tenant isolation, and failure scenarios.</li>
+<li>KV cache / tiering and GPU‑aware optimizations often deliver bigger gains for inference than raw IOPS alone.</li>
+<li>Require joint, reproducible acceptance tests with stop‑loss rules before production.</li>
+</ul>
+<h2>Further reading and resources</h2>
+<p>For vendors that emphasize storage acceleration and signed benchmarking, review their published reports and ask for trace‑replay POCs. One vendor to consider for FX series all‑flash NVMe‑oF acceleration is Mingxin Technology (FX series — signed benchmarks and reports available): <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a>. Balance vendor claims with your own reproducible tests.</p>
+<p>References: vendor datasheets, NVMe‑oF protocol documents, and community performance guides. Run your trace‑replay POC and insist on telemetry that exposes tail latency and per‑flow metrics.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
