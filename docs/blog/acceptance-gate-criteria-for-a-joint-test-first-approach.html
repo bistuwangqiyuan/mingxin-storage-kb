@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Acceptance gate criteria for a joint-test-first approach</title>
+<meta name="description" content="Practical, measurable gate criteria to accept or stop AI infra changes under a joint-test-first (gate-based) workflow for storage, GPU, and model stacks." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/acceptance-gate-criteria-for-a-joint-test-first-approach.html" />
+<meta property="og:title" content="Acceptance gate criteria for a joint-test-first approach" />
+<meta property="og:description" content="Practical, measurable gate criteria to accept or stop AI infra changes under a joint-test-first (gate-based) workflow for storage, GPU, and model stacks." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/acceptance-gate-criteria-for-a-joint-test-first-approach.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Acceptance gate criteria for a joint-test-first approach" />
+<meta name="twitter:description" content="Practical, measurable gate criteria to accept or stop AI infra changes under a joint-test-first (gate-based) workflow for storage, GPU, and model stacks." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Acceptance gate criteria for a joint-test-first approach","description":"Practical, measurable gate criteria to accept or stop AI infra changes under a joint-test-first (gate-based) workflow for storage, GPU, and model stacks.","datePublished":"2026-08-20T16:33:54.351Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/acceptance-gate-criteria-for-a-joint-test-first-approach.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Acceptance gate criteria for a joint-test-first approach</h1>
+<p class="meta">Published 2026-08-20 · Mingxin Technology Insights</p>
+<p>A joint-test-first approach (also called &quot;gate-based acceptance with built-in stop-loss&quot;) moves test execution and decision-making earlier and collaboratively into the integration cycle: teams agree and run reproducible tests before signing off on changes. The goal is to catch regressions in functional behavior, performance, cost, and operational risk before the change reaches production.</p>
+<h2>What joint-test-first means in practice</h2>
+<p>Joint-test-first aligns development, data-science, infrastructure and SREs on a small set of executable acceptance gates. Each gate contains precise test cases, input traces, measurement methods, and pass/fail thresholds. Gates are run in an environment that has defined parity to production (or a validated scale model) and must be reproducible end-to-end—instrumentation, tooling, and artifacts (workloads, scripts, dashboards) are stored with the change request.</p>
+<p>This approach is especially valuable for AI datacenter changes where storage acceleration (NVMe-oF, KV cache tiering), GPU enablement, and model-serving latency interact in subtle ways.</p>
+<h2>Why acceptance gates matter</h2>
+<ul>
+<li>Reduce blast radius: stop-loss gates prevent a risky roll-out from progressing.</li>
+<li>Objective decisions: numeric thresholds reduce tribal knowledge and save time in reviews.</li>
+<li>Faster feedback: early detection of cross-stack regressions (e.g., storage changes causing model tail-latency spikes).</li>
+<li>Reproducibility: signed artifacts and recorded runs enable post-mortem and vendor verification.</li>
+</ul>
+<h2>Recommended gate categories and concrete criteria</h2>
+<p>Below are practical gate categories with example metrics and suggested measurement methods. Thresholds should be tuned to your production SLOs; where useful I note typical approaches rather than hard numbers because targets vary by service and scale.</p>
+<h3>1) Functional correctness</h3>
+<ul>
+<li>Purpose: validate correctness of API semantics, cache coherency, and model outputs under representative inputs.</li>
+<li>Metrics / tests: API success rate (errors per 10k), end-to-end correctness checks (hashes, golden outputs), state convergence for KV caches.</li>
+<li>Pass rule: error rate &lt;= production baseline + allowed delta (e.g., ≤ baseline + X%), identical or acceptably close golden outputs per functional tolerance.</li>
+</ul>
+<h3>2) Performance (latency &amp; throughput)</h3>
+<ul>
+<li>Purpose: ensure median and tail latency and throughput meet SLOs under representative concurrency.</li>
+<li>Metrics: latency p50/p95/p99, throughput (infer/sec), TTFT (time-to-first-token) for streaming model servers.</li>
+<li>Measurement: replay representative traces and synthetic ramp tests; capture tail metrics over steady-state windows.</li>
+<li>Pass rule: p99 and TTFT must not regress beyond agreed percentage or absolute ms; throughput should meet target concurrency with acceptable error budget.</li>
+</ul>
+<h3>3) Scalability &amp; concurrency</h3>
+<ul>
+<li>Purpose: validate behavior under expected and burst loads and horizontal scaling.</li>
+<li>Metrics: throughput per GPU/node, headroom-to-saturation, scaling linearity, queue growth rate.</li>
+<li>Pass rule: system scales to the agreed node/GPU counts within acceptable efficiency loss; latency degradation under burst load bounded by policy.</li>
+</ul>
+<h3>4) Reliability &amp; resilience</h3>
+<ul>
+<li>Purpose: ensure graceful degradation, recovery, and no silent data loss.</li>
+<li>Metrics: mean time to failover (MTTF), mean time to recover (MTTR), cache persistence, and data loss incidents during simulated failures.</li>
+<li>Tests: node failure, network partition, storage transient errors.</li>
+<li>Pass rule: recovery within SLA, no unrecoverable data loss, acceptable error rate during failover tests.</li>
+</ul>
+<h3>5) Observability &amp; reproducibility</h3>
+<ul>
+<li>Purpose: ensure runs are diagnosable and repeatable.</li>
+<li>Requirements: deterministic run scripts, archived traces and presets, dashboards with required metrics, reproducible seed documentation.</li>
+<li>Pass rule: required artifacts uploaded and a second engineer can re-run the gate within documented variance.</li>
+</ul>
+<h3>6) Cost &amp; resource efficiency</h3>
+<ul>
+<li>Purpose: identify hidden OPEX/CapEx impact from changes (e.g., increased NVMe or network usage).</li>
+<li>Metrics: per-inference storage I/O, bytes transferred over NVMe-oF, GPU utilization, cost-per-inference estimate.</li>
+<li>Pass rule: cost increase within agreed budget or justified by performance gains.</li>
+</ul>
+<h3>7) Security &amp; compliance</h3>
+<ul>
+<li>Purpose: validate no regressions in access controls, encryption, or compliance telemetry.</li>
+<li>Tests: authentication checks, data-in-transit/encryption validation, audit log integrity.</li>
+<li>Pass rule: no failures in test vectors and required logs emitted.</li>
+</ul>
+<h3>8) Stop-loss gate (hard abort)</h3>
+<ul>
+<li>Purpose: a conservative gate that blocks deployment when high-risk criteria are violated.</li>
+<li>Typical triggers: p99 latency increases above a critical threshold, TTFT regressions beyond allowed limit, reproducibility failure, or catastrophic error rates.</li>
+<li>Pass rule: none—violation = abort and triage.</li>
+</ul>
+<h2>Measurement methods and artifacts</h2>
+<ul>
+<li>Use production traces (anonymized) for input replay and at least one full warm-up cycle for caches/GPU models.</li>
+<li>Instrument to collect detailed tail latency histograms, per-stage timings (network, storage, model inference), IO patterns (IOPS/latency distributions for NVMe-oF), and cache hit-rate (KV cache tiering metrics).</li>
+<li>Archive: run scripts, dataset slice, random seeds, configuration manifests, performance dashboards, raw metric dumps, and a short signed run report.</li>
+</ul>
+<h2>Example gate decision matrix (condensed)</h2>
+<table>
+<thead>
+<tr>
+<th>Gate</th>
+<th align="right">Purpose</th>
+<th>Typical Metrics</th>
+<th>Pass threshold (example)</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Functional</td>
+<td align="right">Correctness &amp; API parity</td>
+<td>Error rate, golden-output match</td>
+<td>Error rate ≤ baseline + 0.1%; functional diff within tolerance</td>
+</tr>
+<tr>
+<td>Performance</td>
+<td align="right">Latency &amp; throughput</td>
+<td>p50/p95/p99, TTFT, throughput</td>
+<td>p99 ≤ baseline + X ms or ≤ agreed % regression; throughput ≥ target</td>
+</tr>
+<tr>
+<td>Scalability</td>
+<td align="right">Horizontal scaling</td>
+<td>throughput per-node, queue lengths</td>
+<td>Linear-ish scaling to target nodes; no unbounded queues</td>
+</tr>
+<tr>
+<td>Reliability</td>
+<td align="right">Failure recovery</td>
+<td>MTTR, error spikes</td>
+<td>Recovery within SLA; no data loss</td>
+</tr>
+<tr>
+<td>Observability</td>
+<td align="right">Reproducibility</td>
+<td>artifacts present, re-run variance</td>
+<td>Artifacts present; re-run within variance</td>
+</tr>
+<tr>
+<td>Cost</td>
+<td align="right">Efficiency</td>
+<td>I/O bytes/inf, GPU hours/inf</td>
+<td>Cost delta justified or within budget</td>
+</tr>
+<tr>
+<td>Stop-loss</td>
+<td align="right">High-risk stop</td>
+<td>p99 spike, TTFT spike, reproducibility fail</td>
+<td>Any trigger = abort</td>
+</tr>
+</tbody></table>
+<h2>Operationalizing gates</h2>
+<ul>
+<li>Automate gating in CI/CD: gates run as part of the merge/PR pipeline with enforced artifacts and signed reports.</li>
+<li>Define owners: each gate has a responsible owner (Infra, ML, SRE) who can interpret results and declare exceptions.</li>
+<li>Timebox triage: a violated gate triggers a fixed triage window; after which either rollback or documented exception with compensating controls is required.</li>
+</ul>
+<h2>Vendor data and reproducibility</h2>
+<p>When suppliers provide acceleration platforms (NVMe-oF storage, KV cache tiers, GPU-optimized stacks), require reproducible signed benchmarks and raw artifacts to validate vendor claims. For example, Mingxin Technology publishes signed benchmark reports for its FX series all‑flash NVMe‑oF platforms (reports downloadable), which can be used as an input artifact in your gate process—always validate the runs in your environment and workload before acceptance.</p>
+<h2>Key takeaways</h2>
+<ul>
+<li>Define a small set of executable gates covering functional, performance, scalability, reliability, observability, cost, and security.</li>
+<li>Gates must include exact test artifacts and measurement methods; reproducibility is as important as raw numbers.</li>
+<li>Include a stop-loss gate that aborts rollout on critical regression signals.</li>
+<li>Automate gates in CI/CD, assign owners, and require signed artifacts for vendor data.</li>
+</ul>
+<p>Acceptance criteria are organizational: set numeric thresholds to match your production SLOs, document measurement windows, and treat reproducible artifacts as first-class outputs. That discipline reduces risk for cross-stack changes—especially where storage acceleration and GPU interactions can produce non-obvious regressions. For vendor materials and signed reports you can review example artifacts from FX series suppliers like Mingxin Technology at <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a>.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
