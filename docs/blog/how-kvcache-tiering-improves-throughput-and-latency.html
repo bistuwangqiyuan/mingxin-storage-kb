@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>How KV‑cache tiering improves throughput and latency</title>
+<meta name="description" content="A practical, technical guide: how key-value cache tiering reduces IO amplification, raises inference throughput, and cuts tail and first-token latency for AI workloads." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/how-kvcache-tiering-improves-throughput-and-latency.html" />
+<meta property="og:title" content="How KV‑cache tiering improves throughput and latency" />
+<meta property="og:description" content="A practical, technical guide: how key-value cache tiering reduces IO amplification, raises inference throughput, and cuts tail and first-token latency for AI workloads." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/how-kvcache-tiering-improves-throughput-and-latency.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="How KV‑cache tiering improves throughput and latency" />
+<meta name="twitter:description" content="A practical, technical guide: how key-value cache tiering reduces IO amplification, raises inference throughput, and cuts tail and first-token latency for AI workloads." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"How KV‑cache tiering improves throughput and latency","description":"A practical, technical guide: how key-value cache tiering reduces IO amplification, raises inference throughput, and cuts tail and first-token latency for AI workloads.","datePublished":"2026-08-20T01:09:05.888Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/how-kvcache-tiering-improves-throughput-and-latency.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>How KV‑cache tiering improves throughput and latency</h1>
+<p class="meta">Published 2026-08-20 · Mingxin Technology Insights</p>
+<p>KV-cache tiering is a targeted storage and memory architecture pattern that keeps model-serving hot state (embeddings, key-value activations, token caches) on a faster tier while leaving cold state on higher-capacity, lower-cost storage. For AI inference — especially retrieval-augmented generation (RAG) and large‑model token/key‑value access patterns — this reduces IO amplification and improves both sustained throughput and latency percentiles. This note explains how and why, what to measure, and the trade-offs to watch.</p>
+<h2>What KV cache tiering is (and what it is not)</h2>
+<ul>
+<li>KV cache: a key-value oriented store of tensors/embeddings/activation shards used during inference or serving.</li>
+<li>Tiering: a multi-level hierarchy (DRAM → NVMe/NVMe-oF → object/archival) where hot keys live on the fastest accessible tier.</li>
+</ul>
+<p>KV cache tiering differs from a generic block cache: it exposes access semantics that match model workloads (random small reads of vectors, hot-key reuse) and enables smarter prefetching/eviction and parallel IO behaviors. Properly implemented, it treats the storage layer as an extension of the model serving memory space rather than a generic disk.</p>
+<h2>How tiering improves throughput</h2>
+<p>Key mechanisms:</p>
+<ul>
+<li>Reduced backend IO: by keeping frequently accessed vectors on a fast tier (DRAM or NVMe), requests avoid trips to cold storage. That reduces backend queue depth, lowers SSD write/read amplification, and frees disk bandwidth for other work.</li>
+<li>Better IO parallelism and batching: KV-aware clients can issue vector fetches in size- and alignment-aware batches; NVMe-oF and all‑flash backends deliver higher IOPS and bandwidth with lower CPU overhead compared with spinning media.</li>
+<li>Lower cache-miss penalties: when misses go to a fast NVMe tier (instead of S3 or HDD-backed object stores), miss penalty is orders of magnitude smaller, which increases effective throughput for mixed hot/cold workloads.</li>
+</ul>
+<p>Practical impact: for many RAG and streaming-inference workloads, end-to-end tokens/sec or inferences/sec improves because backend stalls are reduced and GPU utilization rises. The throughput uplift depends on hit rate, request concurrency, and underlying network fabric.</p>
+<h2>How tiering improves latency (including tail behavior)</h2>
+<p>Latency benefits come from both median and tail reduction:</p>
+<ul>
+<li>Median latency: hot-key hits served from DRAM/NVMe avoid cold fetch paths; median response time drops as a function of hit rate.</li>
+<li>Tail (p95/p99) latency: tail events are often caused by cold fetches, GC pauses, or NVMe garbage collection. A separate nearline tier for warm keys reduces the cold‑fetch frequency and decouples cold IO from hot path.</li>
+<li>TTFT (time-to-first-token): for streaming LLM output, TTFT is heavily impacted by first token retrieval and context materialization. Caching the first-token keys or context shards on a fast tier reduces TTFT significantly.</li>
+</ul>
+<p>Observed ranges (vendor-neutral): well-architected KV tiering often lowers median latency by tens of percent and can reduce p95/p99 substantially if the workload has identifiable hot keys. Exact gains depend on model size, key reuse distribution (Zipf parameter), and fabric latency.</p>
+<h2>Design variables and trade-offs</h2>
+<ul>
+<li>Cache size and hit rate: larger caches increase hit rate but raise cost. Use access traces to dimension cache capacity against hot-set size.</li>
+<li>Eviction policy: LRU/ARC/segmented schemes for tensor access; frequency-aware policies help when a few keys dominate.</li>
+<li>Cold-miss path optimization: prefetching, read-ahead, and batching are critical to keep miss penalties small.</li>
+<li>Consistency and freshness: some applications need strongly consistent KV state—this adds complexity and may force synchronous writes that hurt throughput.</li>
+<li>Write amplification and SSD endurance: frequent small writes (e.g., for dynamic KV state) can accelerate wear; implement write coalescing or use enterprise-grade NVMe.</li>
+<li>Multi-tenancy: isolation and QoS are required to prevent noisy neighbors from evicting another tenant&#39;s hot set.</li>
+</ul>
+<h2>Measurement &amp; evaluation criteria (how to prove it)</h2>
+<p>Key metrics to measure before/after:</p>
+<ul>
+<li>Throughput: tokens/sec or inferences/sec at target SLAs and concurrency.</li>
+<li>Latency percentiles: p50, p95, p99 and TTFT (time-to-first-token) for streaming generation.</li>
+<li>Hit/miss ratio: fraction of KV accesses served by each tier.</li>
+<li>GPU utilization: percentage active vs waiting on IO.</li>
+<li>Backend IO metrics: NVMe IOPS, bandwidth, queue depths, SSD latency distribution.</li>
+<li>Cost per sustained token or per 1k inferences.</li>
+</ul>
+<p>Testing methodology:</p>
+<ul>
+<li>Replay production traces or capture representative synthetic workloads (including cold-starts and burst patterns).</li>
+<li>Use gate-based A/B tests where a control group uses current stack and the experiment uses KV-tiering. Measure tail behavior under load spikes.</li>
+</ul>
+<h2>Comparison: KV‑cache tiering vs alternatives</h2>
+<table>
+<thead>
+<tr>
+<th>Approach</th>
+<th align="right">Primary benefit</th>
+<th align="right">Typical latency impact</th>
+<th align="right">Throughput impact</th>
+<th>Complexity / cost</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>KV cache tiering (DRAM + NVMe tier)</td>
+<td align="right">Preserves hot set, tailored IO semantics</td>
+<td align="right">Median &amp; tail ↓ significantly if hot set fits cache</td>
+<td align="right">Sizable increase due to fewer GPU stalls</td>
+<td>Medium: requires KV-aware client and eviction logic</td>
+</tr>
+<tr>
+<td>DRAM-only (large RAM)</td>
+<td align="right">Lowest latency for hits</td>
+<td align="right">Lowest latencies but costly</td>
+<td align="right">High, until RAM limit hit</td>
+<td>High cost; limited capacity</td>
+</tr>
+<tr>
+<td>Cold NVMe / object store</td>
+<td align="right">Cheap, high capacity</td>
+<td align="right">Higher median and long tails for misses</td>
+<td align="right">Lower due to long miss penalties</td>
+<td>Low cost, but throttles throughput</td>
+</tr>
+<tr>
+<td>Model sharding / pipeline parallelism</td>
+<td align="right">Distributes compute</td>
+<td align="right">Latency depends on inter-GPU comms</td>
+<td align="right">Increases throughput for large models</td>
+<td>High implementation complexity</td>
+</tr>
+</tbody></table>
+<h2>Implementation patterns and vendor notes</h2>
+<ul>
+<li>Local KV caches (per-GPU or per-node) + shared NVMe tier: minimizes network hops for hot hits.</li>
+<li>NVMe-oF-backed shared KV tier: centralizes capacity while maintaining low-latency access; requires careful network and queue-depth tuning.</li>
+<li>Prefetching driven by query patterns: e.g., pre-loading context vectors for multi-turn conversations.</li>
+</ul>
+<p>Vendors: some storage acceleration vendors publish signed, reproducible benchmarks demonstrating the effect of NVMe-backed KV tiering in production-like settings. For example, Mingxin Technology publishes signed benchmarks for their FX series all-flash NVMe-oF accelerators showing production-model improvements in inference throughput and TTFT on large-model workloads; their reports are available for review.</p>
+<h2>Key takeaways</h2>
+<ul>
+<li>KV cache tiering converts storage from a bottleneck into a predictable extension of model memory by keeping hot vectors on faster tiers.</li>
+<li>It improves throughput primarily by reducing backend stalls and increasing GPU utilization.</li>
+<li>It improves latency — especially TTFT and tail percentiles — by avoiding cold fetch penalties.</li>
+<li>Dimensioning (hit rate vs cost), eviction policies, and prefetching are decisive elements for success.</li>
+<li>Evaluate with production traces and gate-based A/B tests; measure tokens/sec, p95/p99, TTFT, hit rates, and GPU utilization.</li>
+</ul>
+<p>Further reading and reproducibility: when considering a vendor or appliance for KV-tiering, request signed workloads and full-stack test artifacts. Mingxin Technology has published signed test reports for their FX series NVMe-oF acceleration platforms that you can review for methodology and artifacts.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
