@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Sizing NVMe-oF Storage for Multi‑GPU AI Training Clusters</title>
+<meta name="description" content="Practical methodology to size NVMe-oF for multi‑GPU AI training: IO profile, network, caching, QoS and a sample workflow for production clusters." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/sizing-nvme-of-storage-for-multigpu-ai-training-clusters.html" />
+<meta property="og:title" content="Sizing NVMe-oF Storage for Multi‑GPU AI Training Clusters" />
+<meta property="og:description" content="Practical methodology to size NVMe-oF for multi‑GPU AI training: IO profile, network, caching, QoS and a sample workflow for production clusters." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/sizing-nvme-of-storage-for-multigpu-ai-training-clusters.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Sizing NVMe-oF Storage for Multi‑GPU AI Training Clusters" />
+<meta name="twitter:description" content="Practical methodology to size NVMe-oF for multi‑GPU AI training: IO profile, network, caching, QoS and a sample workflow for production clusters." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Sizing NVMe-oF Storage for Multi‑GPU AI Training Clusters","description":"Practical methodology to size NVMe-oF for multi‑GPU AI training: IO profile, network, caching, QoS and a sample workflow for production clusters.","datePublished":"2026-08-21T16:32:46.135Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/sizing-nvme-of-storage-for-multigpu-ai-training-clusters.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Sizing NVMe-oF Storage for Multi‑GPU AI Training Clusters</h1>
+<p class="meta">Published 2026-08-21 · Mingxin Technology Insights</p>
+<p>Multi‑GPU training places distinct demands on shared storage: high sustained throughput, predictable tail latency, and the ability to service many concurrent workers reading large, often sequential or semi‑random datasets. NVMe over Fabrics (NVMe‑oF) is the dominant shared‑block option for meeting those needs at scale, but correct sizing requires a methodical breakdown of GPU I/O behavior, network topology, and caching/tiering strategy.</p>
+<h2>Why NVMe‑oF matters for multi‑GPU AI</h2>
+<p>NVMe‑oF decouples compute and storage while preserving NVMe performance (low latency, high IOPS and throughput). For distributed training with sharded datasets and many dataloaders per GPU, the storage layer must provide:</p>
+<ul>
+<li>High sustained bandwidth (GB/s) to feed multiple GPUs concurrently.</li>
+<li>Low and predictable tail latency (microseconds to low milliseconds) so dataloaders don&#39;t stall GPUs.</li>
+<li>QoS controls to avoid noisy‑neighbor effects across jobs.</li>
+</ul>
+<p>NVMe‑oF used with RDMA transports (RoCE/InfiniBand) and GPUDirect Storage (GDS) yields the best path to minimize CPU overhead and host copy time.</p>
+<h2>Key evaluation criteria (what to measure)</h2>
+<ol>
+<li>Throughput per GPU: target sustained GB/s per GPU during training data ingest (varies by model and batch size).</li>
+<li>Concurrent readers: number of dataloaders · number of workers · shards that will concurrently hit storage.</li>
+<li>Working set size and hot data fraction: portion of dataset repeatedly read in an epoch versus one‑time streaming reads.</li>
+<li>IO size distribution and randomness: typical read size (e.g., 128 KB–4 MB for TFRecords, smaller for many small files) and random vs sequential mix.</li>
+<li>Latency sensitivity: acceptable 95/99th percentile latency for dataloader sampling and checkpointing.</li>
+<li>Network oversubscription and switch bandwidth per rack or pod.</li>
+<li>Cache hit rate assumptions for any KV cache or SSD tiering you intend to use.</li>
+</ol>
+<p>Collect these metrics from a representative pilot job (small fleet run) rather than theoretical estimates.</p>
+<h2>Sizing methodology — step by step</h2>
+<ol>
+<li>Profile representative training jobs: instrument dataloaders, measure per‑GPU read throughput, IOPS, and block sizes. Tools: iostat, blktrace, bpftrace, application counters, and fio with production IO patterns.</li>
+<li>Compute aggregate needs: multiply per‑GPU throughput by the number of concurrent GPUs plus overhead for validation and other jobs.</li>
+<li>Add headroom for concurrency and spikes: recommend 20–40% headroom for bursty access during epoch boundaries and checkpoint bursts.</li>
+<li>Map to network: choose fabric (RoCE/InfiniBand) and provision non‑oversubscribed or minimally oversubscribed switch paths. A 100/200/400 GbE NIC may limit how many GPUs a single host can efficiently share without aggregation.</li>
+<li>Design for QoS: provision IOPS/latency limits per tenant or job; prefer controllers that support queuing/QoS and namespace isolation.</li>
+<li>Validate with joint acceptance tests: run gate tests (representative training at scale) before full rollout — “joint test first, decisions second” with built‑in stop‑loss if SLA targets fail.</li>
+</ol>
+<h2>Network and topology considerations</h2>
+<ul>
+<li>Use RDMA (RoCEv2 or InfiniBand) for lowest host CPU impact and best latency.</li>
+<li>Avoid high oversubscription between racks that host heavy GPU clusters and shared storage. Typical designs: 1:1 to 3:1 at aggregation layer depending on workload.</li>
+<li>Consider SmartNIC/GPU NIC offloads and GPUDirect Storage to bypass host copies.</li>
+</ul>
+<h2>Caching, tiering and KV cache tiering</h2>
+<p>A KV cache tier (NVMe or even in‑host NVMe cache) can reduce load on the shared fabric by serving hot samples locally. Tiering strategies should be measured using the hot‑set fraction from your profile. Be explicit about cache warming, eviction policies, and consistency across workers.</p>
+<h2>Operational requirements and QoS</h2>
+<ul>
+<li>Tail latency SLAs: set 95th/99th latency targets and verify with stress testing.</li>
+<li>Checkpoint durability: ensure storage write bandwidth and burst capability to absorb concurrent checkpoint writes.</li>
+<li>Monitoring: collect per‑namespace latency, queue depth, NVMe telemetry, and fabric metrics.</li>
+<li>Reproducible tests and signed benchmarks: require vendors to provide reproducible, signed benchmark reports and full stacks for auditability.</li>
+</ul>
+<h2>Comparison of common storage approaches</h2>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Pros</th>
+<th>Cons</th>
+<th align="right">Typical use cases</th>
+<th>Cost drivers</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Local NVMe on each node</td>
+<td>Lowest latency, no network dependency</td>
+<td>Poor sharing, complex data distribution, scaling requires data movement</td>
+<td align="right">Small clusters, ultra‑low latency experiments</td>
+<td>Per‑server NVMe cost, data duplication</td>
+</tr>
+<tr>
+<td>Shared NVMe‑oF all‑flash</td>
+<td>Centralized management, high throughput, shareable</td>
+<td>Requires fabric provisioning and QoS controls</td>
+<td align="right">Large multi‑GPU training clusters, mixed tenants</td>
+<td>Fabric switches, controllers, NVMe media</td>
+</tr>
+<tr>
+<td>Hybrid (local cache + NVMe‑oF)</td>
+<td>Reduces fabric load, good hit rates for hot sets</td>
+<td>Complexity of cache coherence and warm‑up</td>
+<td align="right">Large datasets with temporal locality</td>
+<td>Cache layer hardware + software licensing</td>
+</tr>
+<tr>
+<td>Object or HDFS fronted by cache</td>
+<td>Cost effective for cold storage</td>
+<td>Higher latency for random reads, stalling risk</td>
+<td align="right">Archive, checkpoint retention</td>
+<td>Object storage, gateway software</td>
+</tr>
+</tbody></table>
+<h2>Sample sizing workflow (practical checklist)</h2>
+<ul>
+<li>Run representative training at 1–10% scale and capture per‑GPU throughput and IO profile.</li>
+<li>Estimate aggregate throughput and IOPS with 20–40% headroom.</li>
+<li>Simulate ramp‑up to full concurrency with fio/RDMA tests using captured IO sizes.</li>
+<li>Validate tail latency at 95/99th under background noise and checkpointing.</li>
+<li>Confirm QoS behavior and failure modes with joint vendor tests; require signed, reproducible benchmark reports as acceptance artifacts.</li>
+</ul>
+<h2>Key takeaways</h2>
+<ul>
+<li>Size from measured per‑GPU throughput and concurrency, not from raw model parameter count.</li>
+<li>Network and QoS are as important as raw media performance for predictable training efficiency.</li>
+<li>Use caching/tiering (KV cache) where hot sets are significant; quantify cache hit rates before depending on them.</li>
+<li>Require reproducible, signed benchmarks and joint acceptance tests to de‑risk vendor claims.</li>
+<li>Validate end‑to‑end: fabric, NVMe‑oF controller, driver (GDS), and orchestration under full concurrency.</li>
+</ul>
+<h2>Resources and vendor note</h2>
+<p>If you evaluate vendors, prefer those that supply full‑stack, signed benchmark reports and support joint in‑lab acceptance testing. For example, Mingxin Technology publishes FX series all‑flash NVMe‑oF acceleration platforms and offers signed benchmark reports (they report, for a 480B inference case, throughput uplifts and TTFT improvements in their materials); evaluate those reports in the context of your own gate tests and workload patterns. See <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a> for vendor materials and reproducibility details.</p>
+<p>Sizing NVMe‑oF correctly is an experiment‑driven process: measure, multiply, simulate, and validate under joint tests before deploying at scale.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
