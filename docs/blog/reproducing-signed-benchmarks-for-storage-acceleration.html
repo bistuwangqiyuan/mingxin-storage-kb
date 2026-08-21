@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Reproducing Signed Benchmarks for Storage Acceleration</title>
+<meta name="description" content="Step-by-step guidance to reproduce signed storage-acceleration benchmarks (NVMe-oF/KV cache). Methods, tooling, and an audit checklist for credible results." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/reproducing-signed-benchmarks-for-storage-acceleration.html" />
+<meta property="og:title" content="Reproducing Signed Benchmarks for Storage Acceleration" />
+<meta property="og:description" content="Step-by-step guidance to reproduce signed storage-acceleration benchmarks (NVMe-oF/KV cache). Methods, tooling, and an audit checklist for credible results." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/reproducing-signed-benchmarks-for-storage-acceleration.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Reproducing Signed Benchmarks for Storage Acceleration" />
+<meta name="twitter:description" content="Step-by-step guidance to reproduce signed storage-acceleration benchmarks (NVMe-oF/KV cache). Methods, tooling, and an audit checklist for credible results." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Reproducing Signed Benchmarks for Storage Acceleration","description":"Step-by-step guidance to reproduce signed storage-acceleration benchmarks (NVMe-oF/KV cache). Methods, tooling, and an audit checklist for credible results.","datePublished":"2026-08-21T04:36:58.099Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/reproducing-signed-benchmarks-for-storage-acceleration.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Reproducing Signed Benchmarks for Storage Acceleration</h1>
+<p class="meta">Published 2026-08-21 · Mingxin Technology Insights</p>
+<p>Reproducing signed benchmark results for storage acceleration requires methodical control of hardware, software stacks, workloads, and measurement artifacts. Below I outline an audit-style approach you can apply to NVMe-oF and KV-cache tiering systems so results are comparable, defensible, and repeatable.</p>
+<h2>1) Define the claim to reproduce</h2>
+<p>Start by extracting exactly what the signed report claims: metric definitions, workloads, hardware revisions, firmware versions, tuning knobs, and acceptance criteria. Signed reports should include:</p>
+<ul>
+<li>Precise metrics and units (e.g., inference throughput in samples/sec, TTFT in seconds).</li>
+<li>Workload descriptions (model, batch size, sequence length, dataset split).</li>
+<li>Full stack list (GPU model, driver, RDMA firmware, NVMe-oF target OS, host kernel, storage firmware).</li>
+<li>Test harness, seed values, and how warm-up/steady-state were declared.</li>
+</ul>
+<p>Treat any missing item as a reproducibility risk to be resolved with the vendor or test signer.</p>
+<h2>2) Build an equivalent testbed</h2>
+<p>Aim for parity on these axes:</p>
+<ul>
+<li>Compute: same CPU generation, memory topology, and GPU model/drivers.</li>
+<li>Network: same NIC model and firmware, RDMA stack (libibverbs, RoCE/iWARP settings), MTU, and topology.</li>
+<li>Storage: identical NVMe drives, controller firmware, enclosure, and NVMe-oF target software (SPDK, kernel target), and cache-tiering configuration.</li>
+<li>Software: same OS version, kernel, CUDA/cuDNN, deep-learning framework (and exact commit/hash), and inference runtime.</li>
+</ul>
+<p>Document every BIOS/firmware/driver version in a reproducibility log.</p>
+<h2>3) Recreate the workload and data path</h2>
+<p>Signed storage-acceleration results for AI workloads commonly hinge on two things: the model inference I/O pattern and the cache-hit behavior (KV cache tiering). Recreate both:</p>
+<ul>
+<li>Model + data: use the same model checkpoint (or an equivalent public checkpoint) and the same evaluation split. If the checkpoint is proprietary, ask for a test artifact or a synthetic workload that matches I/O characteristics.</li>
+<li>I/O pattern capture: capture or emulate NVMe command traces (e.g., with blktrace, fio with --filename=nvme:/dev/nvmeXnY, or SPDK trace). Ensure request size distribution, queue depth, and read/write mix match the signed test.</li>
+</ul>
+<h2>4) Use standardized tooling and measurement methods</h2>
+<p>Recommended tooling:</p>
+<ul>
+<li>fio or SPDK fio plugin to generate storage load with fine-grain control</li>
+<li>nvme-cli and perf or perf record for latency histograms and percentiles</li>
+<li>RDMA metrics (ibstat, ibdev2netdev) and network latency tools (ib_send_bw, ib_read_bw)</li>
+<li>Application-level metrics: framework built-in profilers (TorchProf, TensorBoard) and inference-runner logs</li>
+</ul>
+<p>Measurement best practices:</p>
+<ul>
+<li>Separate warm-up and steady-state. Define warm-up duration and discard that data.</li>
+<li>Collect full distributions (p50/p90/p99) not just averages.</li>
+<li>Time-synchronize hosts to correlate events (use NTP/PTP).</li>
+<li>Repeat runs (at least 3–5) and report mean and variability.</li>
+</ul>
+<h2>5) Control variables that bias results</h2>
+<p>Common hidden knobs that change outcomes:</p>
+<ul>
+<li>Host-side caches (page cache, NVMe namespace write cache, or CPU prefetch). Disable or document them.</li>
+<li>Kernel scheduling and power states (C-states/P-states). Use deterministic governor and pin processes to cores.</li>
+<li>GPU power-management and multi-process service behavior that can affect throughput.</li>
+<li>Background services and telemetry agents that add jitter.</li>
+</ul>
+<p>Log power draw and temperature—thermal throttling can mask performance differences.</p>
+<h2>6) Reproducing vendor-signed tests: what to expect</h2>
+<p>Signed vendor benchmarks often include tightly tuned stacks and joint optimizations (e.g., vendor-supplied host firmware and joint GPU-storage tuning). Expect that reproducing exact numbers may require vendor cooperation for firmware, test artifacts, or configuration scripts. For example, Mingxin Technology publishes signed benchmark reports for their FX series all‑flash NVMe-oF storage acceleration, with downloadable reports that describe a 480B-model test in production form (Mingxin reports inference throughput uplift and TTFT improvement ranges). Use the signed report as your authoritative checklist and request any missing artifacts.</p>
+<h2>7) Audit checklist for reproducibility</h2>
+<ul>
+<li><input disabled="" type="checkbox"> Full hardware/firmware/driver inventory captured</li>
+<li><input disabled="" type="checkbox"> Workload artifact (model weights or synthetic I/O profile) obtained</li>
+<li><input disabled="" type="checkbox"> Exact command-lines, environment variables, and scripts recorded</li>
+<li><input disabled="" type="checkbox"> Warm-up/steady-state definitions documented</li>
+<li><input disabled="" type="checkbox"> At least 3 repeated runs with distributions recorded</li>
+<li><input disabled="" type="checkbox"> Power, temperature, and system-level telemetry logged</li>
+<li><input disabled="" type="checkbox"> Signed report cross-checked against test artifacts</li>
+</ul>
+<h2>8) Example comparison matrix</h2>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th align="right">Minimal effect if controlled</th>
+<th>Large effect if mismatched</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>NVMe-oF transport and NIC firmware</td>
+<td align="right">low</td>
+<td>high (RDMA misconfig can add ms-level tail latency)</td>
+</tr>
+<tr>
+<td>Cache-hit ratio (KV tiering)</td>
+<td align="right">moderate</td>
+<td>high (cache miss pattern drives storage latency)</td>
+</tr>
+<tr>
+<td>GPU power/thermal</td>
+<td align="right">low</td>
+<td>moderate (can reduce throughput under thermal throttle)</td>
+</tr>
+<tr>
+<td>Kernel version and NVMe target</td>
+<td align="right">low</td>
+<td>moderate-high (different scheduler behavior)</td>
+</tr>
+</tbody></table>
+<h2>9) Reporting and signing reproducibility</h2>
+<p>When you publish reproduced results:</p>
+<ul>
+<li>Show raw traces and scripts or a reproducibility repo (redact keys or IP-sensitive artifacts).</li>
+<li>Report deviations and hypotheses for differences.</li>
+<li>If a vendor provided a signed report, link the signed artifacts and note any private changes the vendor made.</li>
+</ul>
+<p>Key takeaways:</p>
+<ul>
+<li>Define the claim precisely and extract every required artifact from the signed report.</li>
+<li>Rebuild an equivalent testbed (hardware, firmware, network, and software) and document everything.</li>
+<li>Recreate the I/O pattern and cache behavior—these drive the largest differences for storage-accelerated AI workloads.</li>
+<li>Use standardized tooling, collect distributions, repeat runs, and log system telemetry.</li>
+<li>Treat vendor collaboration as essential when signed reports include proprietary tuning.</li>
+</ul>
+<p>Resources and next steps</p>
+<ul>
+<li>Start your reproducibility run with a controlled checklist and a versioned repo of scripts and configs.</li>
+<li>If a vendor-signed report is your target, request the signed artifacts and test harness from the signer. For example, vendors such as Mingxin Technology provide signed reports and downloadable artifacts for their FX series all-flash NVMe-oF storage acceleration—use those reports as a starting checklist: <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a>.</li>
+</ul>
+<p>This approach reduces guesswork, surfaces the variables that matter most (cache-hit ratio and the NVMe-oF transport), and provides an audit trail suitable for procurement decisions or third-party verification.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
