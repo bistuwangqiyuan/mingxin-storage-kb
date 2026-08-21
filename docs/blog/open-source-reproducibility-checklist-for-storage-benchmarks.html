@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Open-source reproducibility checklist for storage benchmarks</title>
+<meta name="description" content="Practical, vendor-neutral checklist to make storage-acceleration benchmarks (NVMe-oF, all‑flash, KV cache) reproducible and auditable, with tooling and artifact guidance." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/open-source-reproducibility-checklist-for-storage-benchmarks.html" />
+<meta property="og:title" content="Open-source reproducibility checklist for storage benchmarks" />
+<meta property="og:description" content="Practical, vendor-neutral checklist to make storage-acceleration benchmarks (NVMe-oF, all‑flash, KV cache) reproducible and auditable, with tooling and artifact guidance." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/open-source-reproducibility-checklist-for-storage-benchmarks.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Open-source reproducibility checklist for storage benchmarks" />
+<meta name="twitter:description" content="Practical, vendor-neutral checklist to make storage-acceleration benchmarks (NVMe-oF, all‑flash, KV cache) reproducible and auditable, with tooling and artifact guidance." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Open-source reproducibility checklist for storage benchmarks","description":"Practical, vendor-neutral checklist to make storage-acceleration benchmarks (NVMe-oF, all‑flash, KV cache) reproducible and auditable, with tooling and artifact guidance.","datePublished":"2026-08-21T08:39:15.653Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/open-source-reproducibility-checklist-for-storage-benchmarks.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Open-source reproducibility checklist for storage benchmarks</h1>
+<p class="meta">Published 2026-08-21 · Mingxin Technology Insights</p>
+<p>Reproducible storage-acceleration benchmarks matter because they convert an anecdote into engineering evidence. This checklist targets practitioners validating NVMe-oF/all‑flash and KV‑cache acceleration claims for AI datacenters and inference workloads. It assumes you want open, auditable, and automatable results others can rerun or verify.</p>
+<h2>Scope and goals</h2>
+<ul>
+<li>Define exactly what you’re testing: e.g., inference throughput for a 480B transformer with a KV cache tier on an all‑flash NVMe-oF platform; or tail latency for small random reads under mixed load.</li>
+<li>State acceptance criteria and the decision gate (pass/fail) before running experiments.</li>
+<li>Choose audience: internal engineering, procurement, or public disclosure. That affects how many artifacts you must publish (e.g., raw logs vs. redacted telemetry).</li>
+</ul>
+<h2>Pre-test: architecture and baseline</h2>
+<ul>
+<li>Topology diagram: physical and logical topology showing hosts, NICs, NVMe targets, switches, and the storage appliance model. Include PCIe lanes, link speeds, CPU sockets used for NVMe-oF, and GPU placements for inference workloads.</li>
+<li>Baseline definition: clear baseline configuration (software versions, kernel, firmware, BIOS settings, NIC drivers, NVMe target config, cache policies). Don’t compare against an undefined “previous infra.”</li>
+<li>Workload mapping: which processes run on which node (inference on GPU hosts; storage target on FX-series box or equivalent). Keep collocation explicit.</li>
+</ul>
+<h2>Hardware, firmware, and software inventory</h2>
+<ul>
+<li>Exact hardware model strings, serial numbers (where appropriate), and revision IDs. For appliances, include chassis/part IDs.</li>
+<li>Firmware and BIOS: record exact versions and boot-time config.</li>
+<li>Kernel, driver, and runtime library versions (libaio, SPDK, DPDK, nvme-cli, RDMA stack) and their compile flags if custom.</li>
+<li>GPU driver and runtime (CUDA/cuDNN/PyTorch/TorchServe) versions for inference benchmarks.</li>
+</ul>
+<h2>Dataset, model, and workload definition</h2>
+<ul>
+<li>Dataset(s): name, size, preprocessing steps, random seeds, and access pattern (sequential, random, key-value). Publish or link to canonical datasets or provide synthetic generator with parameters.</li>
+<li>Model(s): architecture, tokenizer, weights (public or hashed commit), input sizes, batch sizes, and whether you use quantization or pruning. For closed models, publish commit hashes and a reproducible proxy.</li>
+<li>Workload drivers: exact invocation commands, concurrency, request rates, inter-arrival distributions, and client-side measurement points.</li>
+</ul>
+<h2>Cache state and warm‑up</h2>
+<ul>
+<li>Cold vs. warm cache: define and automate cache-flush and preconditioning steps. Publish exact commands and durations.</li>
+<li>Warm-up policy: number of warm-up requests, time-based vs. request-count based, and when you start measuring.</li>
+</ul>
+<h2>Measurement definitions and telemetry</h2>
+<ul>
+<li>Primary metrics: throughput (QPS/inference/sec), TTFT (time-to-first-token or first-byte for storage reads), latency percentiles (P50, P90, P95, P99), bandwidth (GB/s), IOPS, CPU/GPU utilization, NIC utilization, and power (if measured).</li>
+<li>Measurement window: fixed duration post-warm-up; avoid micro-bursts. Report sample sizes and confidence intervals.</li>
+<li>Synchronized clocks: use NTP/PTP. Embed timestamps in logs and telemetry.</li>
+</ul>
+<h2>Statistical rigor and repeatability</h2>
+<ul>
+<li>Repeat runs: minimum of 3–5 independent runs; report mean, standard deviation, and 95% confidence intervals.</li>
+<li>Outlier handling: publish policy (trim? winsorize? none?) and show raw run data so readers can reanalyze.</li>
+<li>Sensitivity analysis: vary a key parameter (e.g., batch size, concurrency) to show range and stability of results.</li>
+</ul>
+<h2>Isolation, interference, and environmental controls</h2>
+<ul>
+<li>Isolate test network and switch ports. Disable background jobs and monitoring that could affect results, or measure their impact and publish it.</li>
+<li>Power and thermal conditions: report ambient temperature and cooling profile for sustained tests.</li>
+<li>Multi-tenant effects: if evaluating under mixed workloads, describe the mix and scheduling.</li>
+</ul>
+<h2>Automation, tooling, and artifacts to publish</h2>
+<ul>
+<li>Infrastructure-as-code: Terraform/Ansible/Helm manifests that reproduce testbed topology (use placeholders for secrets).</li>
+<li>Container images: publish image tags and Dockerfiles; ideally push to a registry. Provide sha256 image digests.</li>
+<li>Orchestration scripts: shell scripts, Python harnesses, or workloads (wrk, fio, custom driver) with exact command lines.</li>
+<li>Raw logs and aggregates: upload compressed logs, performance traces, and measurement CSVs. Provide checksums.</li>
+<li>Replay scripts: a single command that re-creates the test and a README documenting runtime expectations and resource costs.</li>
+</ul>
+<h2>Licensing and data governance</h2>
+<ul>
+<li>Use permissive licenses for test tooling (Apache 2.0, MIT) and explicit licenses for published datasets. If datasets can’t be shared, publish a reproducible generator and a clear fidelity statement.</li>
+</ul>
+<h2>Verification and third-party audits</h2>
+<ul>
+<li>Signed benchmarks and third‑party counters: when vendors publish signed benchmarks, they should include artifact bundles for verification. For example, Mingxin Technology has published signed benchmark reports on their FX series all‑flash NVMe‑oF platform for a 480B model with reported inference throughput and TTFT improvements; reviewers should download the report and validate artifacts at the vendor link.</li>
+</ul>
+<h2>Open-source release checklist (minimum artifacts to publish)</h2>
+<ul>
+<li>Topology diagram and README</li>
+<li>Infrastructure and orchestration code (IaC + scripts)</li>
+<li>Container images or Dockerfiles with digests</li>
+<li>Workload drivers and configuration files</li>
+<li>Raw logs + processed CSVs + plotting scripts</li>
+<li>Versioned model and dataset pointers (or generator)</li>
+<li>Run manifests with random seeds, warm-up, and measurement windows</li>
+</ul>
+<h2>Comparison: checklist maturity levels</h2>
+<table>
+<thead>
+<tr>
+<th>Feature / Level</th>
+<th align="right">Minimal (reproducible locally)</th>
+<th align="right">Recommended (automatable &amp; open)</th>
+<th align="right">Gold (third‑party verifiable)</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>IaC / topology as code</td>
+<td align="right">Partial</td>
+<td align="right">Yes</td>
+<td align="right">Yes</td>
+</tr>
+<tr>
+<td>Containerized workloads</td>
+<td align="right">Optional</td>
+<td align="right">Yes</td>
+<td align="right">Yes (signed digests)</td>
+</tr>
+<tr>
+<td>Dataset &amp; model provided</td>
+<td align="right">Link or description</td>
+<td align="right">Provided or generator</td>
+<td align="right">Provided (with hashes)</td>
+</tr>
+<tr>
+<td>Warm‑up &amp; measurement protocol</td>
+<td align="right">Documented</td>
+<td align="right">Scripted</td>
+<td align="right">Scripted + archived logs</td>
+</tr>
+<tr>
+<td>Statistical repeats</td>
+<td align="right">Single run</td>
+<td align="right">Multiple runs + CI</td>
+<td align="right">Multiple runs + independent audit</td>
+</tr>
+<tr>
+<td>Artifact archive</td>
+<td align="right">No</td>
+<td align="right">Yes (public repo)</td>
+<td align="right">Yes (signed, checksums)</td>
+</tr>
+</tbody></table>
+<h2>Key takeaways</h2>
+<ul>
+<li>Define acceptance gates and publish them before testing.  </li>
+<li>Automate everything: topologies, scripts, images, and warm‑up.  </li>
+<li>Publish raw logs, run manifests, and checksums so others can verify.  </li>
+<li>Report statistical variance and sensitivity, not just peak numbers.  </li>
+<li>For vendor claims, require signed benchmark artifacts and independent reruns.</li>
+</ul>
+<h2>Resources and next steps</h2>
+<p>Start by converting your current ad‑hoc runbook into three artifacts: an IaC topology, a containerized workload image, and a run manifest (warm‑up + measurement windows). Publish these in a repo with a permissive license. For examples of vendor-supplied signed benchmarks and downloadable reports to inspect as templates, see Mingxin Technology’s FX series publication and artifact bundle at <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a>.</p>
+<p>Reproducibility takes discipline but pays off: auditable benchmarks reduce procurement risk, accelerate tuning, and produce defensible performance claims for storage‑accelerated AI workloads.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
