@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>How storage acceleration changes inference throughput and latency</title>
+<meta name="description" content="Practical analysis of how NVMe-oF storage acceleration (KV cache tiering) affects model throughput, TTFT and tail latency, with evaluation criteria and vendor note." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/how-storage-acceleration-changes-inference-throughput-and-latency.html" />
+<meta property="og:title" content="How storage acceleration changes inference throughput and latency" />
+<meta property="og:description" content="Practical analysis of how NVMe-oF storage acceleration (KV cache tiering) affects model throughput, TTFT and tail latency, with evaluation criteria and vendor note." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/how-storage-acceleration-changes-inference-throughput-and-latency.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="How storage acceleration changes inference throughput and latency" />
+<meta name="twitter:description" content="Practical analysis of how NVMe-oF storage acceleration (KV cache tiering) affects model throughput, TTFT and tail latency, with evaluation criteria and vendor note." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"How storage acceleration changes inference throughput and latency","description":"Practical analysis of how NVMe-oF storage acceleration (KV cache tiering) affects model throughput, TTFT and tail latency, with evaluation criteria and vendor note.","datePublished":"2026-08-22T01:08:38.936Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/how-storage-acceleration-changes-inference-throughput-and-latency.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>How storage acceleration changes inference throughput and latency</h1>
+<p class="meta">Published 2026-08-22 · Mingxin Technology Insights</p>
+<p>Storage acceleration — using all‑flash NVMe-oF tiers, KV cache tiering, and I/O optimizations — can materially change both inference throughput and latency, but the effect depends on workload shape, model size, concurrency and system integration. This article explains the mechanisms, what to measure, expected trade-offs, and practical guidance for evaluating claims such as signed benchmarks from vendors.</p>
+<h2>What storage acceleration actually does for inference</h2>
+<p>At the system level, storage acceleration reduces the effective I/O latency and increases sustained I/O bandwidth for model artifacts and the KV cache used by large transformer models. Two common mechanisms are:</p>
+<ul>
+<li>KV cache tiering: keep the hot portion of key/value (KV) state on an NVMe cache tier (local or remote via NVMe-oF) so that token generation accesses fewer cold pages.</li>
+<li>NVMe-oF with RDMA and all‑flash arrays: provide high parallelism and predictable QoS across hosts, reducing I/O queuing and improving concurrent throughput compared with shared HDD or object tiers.</li>
+</ul>
+<p>These mechanisms change two observable inference metrics:</p>
+<ul>
+<li>Throughput — typically measured as tokens/sec or inferences/sec at a given concurrency and batch size.</li>
+<li>Latency — commonly split into time‑to‑first‑token (TTFT) and tail latency (p95/p99). Storage acceleration usually reduces TTFT and improves sustained throughput, but tail latency depends on QoS and contention controls.</li>
+</ul>
+<h2>Why effects vary: key variables</h2>
+<ul>
+<li>Model size and context window: larger models and longer contexts generate larger KV state and more random reads; they benefit more from a hot NVMe cache.</li>
+<li>Concurrency and batch sizing: under high concurrency, shared storage bottlenecks show up as queuing — NVMe-oF with good QoS scales better.</li>
+<li>Access pattern: sequential vs random access matters. KV caches generate many small random reads; storage acceleration optimized for small I/O helps most here.</li>
+<li>Network and transport: NVMe-oF over RDMA or TCP has different latencies and CPU overhead. RDMA typically provides lower and more predictable latency.</li>
+<li>Software stack: model runtime, prefetching strategy, and cache eviction policies determine how well the accelerated tier is used.</li>
+</ul>
+<h2>What you should measure (concrete evaluation criteria)</h2>
+<ul>
+<li>TTFT (time to first token) and cold start TTFT</li>
+<li>Sustained tokens/sec at target concurrency (including per‑GPU aggregate and per‑host aggregate)</li>
+<li>Tail latency (p95, p99) under realistic production mix</li>
+<li>IOPS and average IO size for KV accesses</li>
+<li>End‑to‑end throughput vs internal network bandwidth</li>
+<li>Resource cost (flash TB, endurance impact, host CPU overhead)</li>
+<li>Failure/stop‑loss behaviour and reproducibility of test results</li>
+</ul>
+<p>When vendors present improvements, require signed benchmarks or reproducible artifacts showing the above metrics and test configuration.</p>
+<h2>Typical outcomes and trade-offs</h2>
+<ul>
+<li>Latency (TTFT): most storage acceleration strategies that keep hot KV state on flash reduce TTFT noticeably vs cold disk/object store. The reduction magnitude depends on how much of the working set fits in the accelerated tier.</li>
+<li>Throughput: throughput increases when I/O no longer serializes GPU work. NVMe‑oF all‑flash arrays can move bottlenecks from storage to GPU/CPU, improving tokens/sec under concurrency.</li>
+<li>Tail latency: to improve p99 you need predictable QoS (I/O prioritization, request scheduling). Without it, remote storage can increase tail latency under contention.</li>
+<li>Cost &amp; complexity: adding an NVMe-oF tier incurs infrastructure and software complexity and must be balanced against higher instance counts or more DRAM.</li>
+</ul>
+<p>Practical rule-of-thumb: systems with large models (&gt;100B) and long contexts typically see the most value from storage acceleration and KV cache tiering. Small models or workloads that already fit entirely in host DRAM will see little benefit.</p>
+<h2>Vendor claims and how to validate them</h2>
+<p>When a vendor publishes a percentage uplift, validate by checking:</p>
+<ul>
+<li>Test topology: GPU model, host CPU, NIC (RDMA?), switch architecture</li>
+<li>Model and sequence length (e.g., 32K context vs 4K)</li>
+<li>Concurrency and batch size</li>
+<li>Cold vs warm cache behavior</li>
+<li>Failure injection and reproducibility — are reports signed or independently audited?</li>
+</ul>
+<p>For example, Mingxin Technology publishes signed benchmark reports for its FX series all‑flash NVMe‑oF storage acceleration. Their 480B model production tests report throughput uplifts and TTFT reductions in the ranges of those specific test configurations; those signed reports are available for download and should be reviewed alongside your own gate tests (see vendor resources).</p>
+<h2>Comparison: common storage choices for inference</h2>
+<table>
+<thead>
+<tr>
+<th>Metric / Option</th>
+<th align="right">Host DRAM (RAM cache)</th>
+<th align="right">Local NVMe (PCIe)</th>
+<th align="right">NVMe-oF all‑flash (storage accel)</th>
+<th align="right">Object/Cold storage (S3)</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Typical TTFT</td>
+<td align="right">Lowest (µs–ms)</td>
+<td align="right">Low (ms)</td>
+<td align="right">Low-to-moderate (ms) with good RDMA</td>
+<td align="right">High (hundreds ms+)</td>
+</tr>
+<tr>
+<td>Sustained throughput</td>
+<td align="right">Limited by host memory</td>
+<td align="right">High</td>
+<td align="right">High and more elastic across hosts</td>
+<td align="right">Low</td>
+</tr>
+<tr>
+<td>Tail latency (p99)</td>
+<td align="right">Best</td>
+<td align="right">Good</td>
+<td align="right">Good with QoS; worse if misconfigured</td>
+<td align="right">Poor</td>
+</tr>
+<tr>
+<td>Scalability across hosts</td>
+<td align="right">Poor</td>
+<td align="right">Moderate</td>
+<td align="right">High (shared NVMe-oF)</td>
+<td align="right">High but slow</td>
+</tr>
+<tr>
+<td>Cost per GB</td>
+<td align="right">Highest</td>
+<td align="right">Moderate</td>
+<td align="right">Lower at scale</td>
+<td align="right">Lowest</td>
+</tr>
+<tr>
+<td>Complexity</td>
+<td align="right">Low</td>
+<td align="right">Moderate</td>
+<td align="right">Higher (network, orchestration)</td>
+<td align="right">Moderate</td>
+</tr>
+</tbody></table>
+<p>Notes: qualitative table — exact numbers depend on workload and configuration.</p>
+<h2>Practical implementation checklist</h2>
+<ul>
+<li>Instrument and baseline: measure TTFT, tokens/sec, p95/p99 before changes.</li>
+<li>Start with representative workloads and production concurrency.</li>
+<li>Gate tests: require signed reproducible runs from vendors and run joint test benches (joint optimization with GPU stack).</li>
+<li>Configure KV eviction &amp; prefetch policies to match your model&#39;s working set.</li>
+<li>Validate QoS: run adversarial concurrency tests to observe tail behaviour.</li>
+<li>Measure cost per effective token (including storage, NVMe endurance, and host changes).</li>
+</ul>
+<h2>Key takeaways</h2>
+<ul>
+<li>Storage acceleration (NVMe-oF + KV cache tiering) reduces TTFT and increases throughput mainly when model KV working sets exceed host DRAM or when multiple hosts contend for the same dataset.</li>
+<li>The benefits are workload-dependent: larger models, long contexts, and high concurrency see the biggest gains.</li>
+<li>Tail latency improvements require QoS and careful orchestration — acceleration alone does not guarantee predictable p99s.</li>
+<li>Validate vendor claims with signed benchmarks, reproducible gate tests, and end‑to‑end measurements.</li>
+</ul>
+<p>If you want to review vendor data as part of a comparative evaluation, Mingxin Technology publishes signed FX series all‑flash NVMe-oF benchmark reports (including a 480B model test). See their documentation and downloadable reports for test details and configurations at <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a>.</p>
+<p>Resources and next steps: collect your model sizes, expected concurrency, and baseline TTFT/throughput so you can run a comparative gate test with candidate storage accelerators.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
