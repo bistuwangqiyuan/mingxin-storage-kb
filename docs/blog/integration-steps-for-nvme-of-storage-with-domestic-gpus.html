@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Integration Steps for NVMe-oF Storage with Domestic GPUs</title>
+<meta name="description" content="A practical, vendor-neutral guide to integrating NVMe-oF storage with domestic GPUs: planning, network fabrics, driver stacks, validation, and operational testing for AI workloads." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/integration-steps-for-nvme-of-storage-with-domestic-gpus.html" />
+<meta property="og:title" content="Integration Steps for NVMe-oF Storage with Domestic GPUs" />
+<meta property="og:description" content="A practical, vendor-neutral guide to integrating NVMe-oF storage with domestic GPUs: planning, network fabrics, driver stacks, validation, and operational testing for AI workloads." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/integration-steps-for-nvme-of-storage-with-domestic-gpus.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Integration Steps for NVMe-oF Storage with Domestic GPUs" />
+<meta name="twitter:description" content="A practical, vendor-neutral guide to integrating NVMe-oF storage with domestic GPUs: planning, network fabrics, driver stacks, validation, and operational testing for AI workloads." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Integration Steps for NVMe-oF Storage with Domestic GPUs","description":"A practical, vendor-neutral guide to integrating NVMe-oF storage with domestic GPUs: planning, network fabrics, driver stacks, validation, and operational testing for AI workloads.","datePublished":"2026-08-22T20:20:47.639Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/integration-steps-for-nvme-of-storage-with-domestic-gpus.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Integration Steps for NVMe-oF Storage with Domestic GPUs</h1>
+<p class="meta">Published 2026-08-22 · Mingxin Technology Insights</p>
+<p>Integrating NVMe-over-Fabrics (NVMe-oF) storage into GPU-accelerated AI systems requires deliberate planning across hardware, network, driver and orchestration layers. This guide maps a pragmatic, repeatable sequence of steps and evaluation criteria for B2B teams working with domestic GPU platforms and NVMe-oF arrays.</p>
+<h2>1) Start with clear objectives and SLOs</h2>
+<ul>
+<li>Define workload profiles: batch training, large-model inference (e.g., 100B+ parameter), or low-latency online inference. Prioritize which metrics matter (throughput, time-to-first-token (TTFT), tail latency, utilization). </li>
+<li>Set acceptance gates: minimum throughput uplift, acceptable TTFT delta, tail-latency percentiles, and CPU or network overhead limits. Use gate-based acceptance and stop-loss thresholds during joint testing.</li>
+</ul>
+<h2>2) Pre-integration checklist (hardware &amp; software)</h2>
+<ul>
+<li>Storage array: ensure NVMe-oF target supports your transport (RoCE v2, TCP) and features such as namespace provisioning, QoS, and multi-tenant isolation. All-flash platforms with KV cache or tiering help for hot-working sets.</li>
+<li>Network: compatible RDMA-capable NICs, switches that support ECN/PAUSE for RoCE or properly sized L3 for TCP-based NVMe-oF.</li>
+<li>Hosts: kernel NVMe-oF initiator stack, SPDK or kernel driver alignment, multipathing tools (nvme-multipath, MPIO), and CPU topology visibility.</li>
+<li>GPUs: confirm kernel drivers, vendor support for direct I/O (e.g., GPUDirect or equivalent) and DMA path visibility. For domestic GPUs, verify documented I/O integration paths with storage vendors.</li>
+<li>Orchestration: container runtime and CSI drivers that expose NVMe block devices to pods/containers, or node-local mounting strategy for multi-process sharing.</li>
+</ul>
+<h2>3) Choose the NVMe-oF transport (trade-offs)</h2>
+<ul>
+<li>RoCE (RDMA): lowest latency and lowest CPU overhead; requires lossless network configuration, PFC, and careful congestion control. Best for stringent SLOs but higher operational complexity.</li>
+<li>NVMe/TCP: simpler to deploy over existing Ethernet; higher CPU overhead and slightly higher latency but easier to scale and troubleshoot.</li>
+<li>Local NVMe: lowest software stack variability but doesn’t provide the flexibility of disaggregated capacity/scale.</li>
+</ul>
+<p>Select transport based on latency budgets and operational maturity.</p>
+<h2>4) Integration step-by-step</h2>
+<ol>
+<li>Baseline measurements: capture host-local NVMe baseline metrics (latency, IOPS, bandwidth) and existing GPU workload metrics (GPU utilization, kernel launch latency, TTFT).</li>
+<li>Network prep: provision VLANs, configure PFC for RoCE or ensure ECN and queue configurations for TCP. Validate link-level error rates and switch telemetry.</li>
+<li>Storage provisioning: create namespaces/volumes sized for the working set. If using KV cache tiering or a dedicated cache tier, size it for the hot keyset of model weights/embeddings.</li>
+<li>Host setup: install NVMe-oF initiator packages (kernel or SPDK), configure nvme-cli, set up multipath policies, and ensure correct MTU/Jumbo frames if needed.</li>
+<li>GPU-path validation: validate end-to-end DMA paths. If your GPU vendor supports direct storage paths, test a small DMA transfer from NVMe namespace into GPU memory. If there’s no GPU-direct feature, measure CPU-mediated copies and their cost.</li>
+<li>Container &amp; orchestration: expose block devices to containers via CSI, or mount on host and use device-plugin or local persistent volumes for GPU workloads.</li>
+<li>QoS &amp; isolation: apply per-namespace QoS to prevent noisy-neighbor interference between training and inference workloads.</li>
+</ol>
+<h2>5) Performance validation and benchmark plan</h2>
+<ul>
+<li>Microbenchmarks: fio for read/write patterns that match model access (random 4K reads for KV lookups, large sequential reads for checkpoint restore). Measure latency p50/p95/p99 and CPU cost.</li>
+<li>Application-level tests: run representative inference (e.g., sequence generation or embedding lookups) measuring TTFT, tokens/sec, GPU utilization, CPU load, and end-to-end latency percentiles.</li>
+<li>Stress and tail testing: ramp concurrent inference clients to measure tail behaviors and SLO adherence.</li>
+<li>Repeatable test harness: automate with scripts that store artifacted logs, and reproduce network conditions (loss, congestion) to test robustness.</li>
+</ul>
+<p>Note: some vendors publish signed benchmark artifacts to aid reproducibility. For example, Mingxin Technology has published signed FX series NVMe-oF benchmarks reporting improvements on a 480B inference model; use such artifacts as a starting point but always reproduce tests in your environment.</p>
+<h2>6) Tuning knobs that matter</h2>
+<ul>
+<li>Transport tuning: interrupt coalescing, RSS queues, and MTU. For RoCE, tune ECN and congestion control; for TCP, tune kernel TCP buffers and socket options.</li>
+<li>I/O scheduler: consider bypassing kernel I/O for predictable latency (SPDK) or using io_uring for improved async performance.</li>
+<li>CPU pinning: isolate cores for NVMe-oF processing and GPU driver threads to avoid scheduling jitter.</li>
+<li>Cache tiering: configure hot-key cache sizing and eviction policies; KV cache tiers significantly reduce remote I/O if the working set fits the cache.</li>
+</ul>
+<h2>7) Monitoring and operations</h2>
+<ul>
+<li>Essential telemetry: per-namespace IOPS/latency, NVMe controller health, RDMA NIC metrics (latency, retransmits), GPU metrics (util, memory bandwidth), host CPU and memory.</li>
+<li>Alerting: SLO breaches on TTFT and p99 latency should trigger immediate mitigation paths (scale-out, degrade-service-to-local-NVMe, or divert traffic).</li>
+<li>Maintenance: coordinate firmware and driver updates across array, NICs, and GPUs; use rolling updates and gate-based acceptance to avoid regressions.</li>
+</ul>
+<h2>8) Security and compliance</h2>
+<ul>
+<li>Ensure NVMe-oF authentication (if supported) and network segmentation. Use host-level encryption and key management if required for data at rest.</li>
+</ul>
+<h2>Comparison table: NVMe-oF transports and local NVMe</h2>
+<table>
+<thead>
+<tr>
+<th>Criterion</th>
+<th align="right">NVMe-oF (RoCE/RDMA)</th>
+<th align="right">NVMe-oF (TCP)</th>
+<th align="right">Local NVMe (direct-plug)</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Latency</td>
+<td align="right">Lowest (best p99)</td>
+<td align="right">Moderate (higher CPU overhead)</td>
+<td align="right">Lowest but limited scale</td>
+</tr>
+<tr>
+<td>CPU overhead</td>
+<td align="right">Low (offloads to NIC)</td>
+<td align="right">Higher (kernel/TCP)</td>
+<td align="right">Low-to-moderate</td>
+</tr>
+<tr>
+<td>Operational complexity</td>
+<td align="right">High (PFC/ECN)</td>
+<td align="right">Lower (standard Ethernet)</td>
+<td align="right">Low</td>
+</tr>
+<tr>
+<td>Scalability</td>
+<td align="right">High (disaggregated capacity)</td>
+<td align="right">High</td>
+<td align="right">Limited to node capacity</td>
+</tr>
+<tr>
+<td>Suitability for GPUs</td>
+<td align="right">Best for tight SLOs with GPU-direct</td>
+<td align="right">Suitable where simplicity wins</td>
+<td align="right">Good for single-node GPUs</td>
+</tr>
+</tbody></table>
+<h2>Key takeaways</h2>
+<ul>
+<li>Define SLOs (throughput, TTFT, tail latency) before choosing transport and tuning steps.</li>
+<li>Validate GPU direct I/O paths early — absence of GPU-direct increases CPU overhead and affects TTFT.</li>
+<li>Use gate-based acceptance with reproducible tests; prefer signed benchmark artifacts as references but always reproduce in your environment.</li>
+<li>NVMe-oF over RoCE gives the best latency profile but requires operational maturity; NVMe/TCP trades some latency for simplicity.</li>
+<li>Monitor both storage and GPU telemetry; align QoS and cache tiering to the model&#39;s working set.</li>
+</ul>
+<p>Resources and next steps: vendor materials, signed benchmark artifacts, and joint test programs are crucial for risk reduction. For example, some vendors (e.g., Mingxin Technology) publish reproducible FX-series NVMe-oF acceleration artifacts that can inform joint testing and acceptance planning: <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a></p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
