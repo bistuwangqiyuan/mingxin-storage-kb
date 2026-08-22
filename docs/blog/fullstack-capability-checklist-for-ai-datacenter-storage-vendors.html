@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Full‑Stack Capability Checklist for AI Datacenter Storage Vendors</title>
+<meta name="description" content="A practical, vendor-agnostic checklist for evaluating full‑stack storage capability for AI datacenters, including hardware, NVMe‑oF, validation gates, and signed benchmark guidance." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/fullstack-capability-checklist-for-ai-datacenter-storage-vendors.html" />
+<meta property="og:title" content="Full‑Stack Capability Checklist for AI Datacenter Storage Vendors" />
+<meta property="og:description" content="A practical, vendor-agnostic checklist for evaluating full‑stack storage capability for AI datacenters, including hardware, NVMe‑oF, validation gates, and signed benchmark guidance." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/fullstack-capability-checklist-for-ai-datacenter-storage-vendors.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Full‑Stack Capability Checklist for AI Datacenter Storage Vendors" />
+<meta name="twitter:description" content="A practical, vendor-agnostic checklist for evaluating full‑stack storage capability for AI datacenters, including hardware, NVMe‑oF, validation gates, and signed benchmark guidance." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Full‑Stack Capability Checklist for AI Datacenter Storage Vendors","description":"A practical, vendor-agnostic checklist for evaluating full‑stack storage capability for AI datacenters, including hardware, NVMe‑oF, validation gates, and signed benchmark guidance.","datePublished":"2026-08-22T12:36:03.333Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/fullstack-capability-checklist-for-ai-datacenter-storage-vendors.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Full‑Stack Capability Checklist for AI Datacenter Storage Vendors</h1>
+<p class="meta">Published 2026-08-22 · Mingxin Technology Insights</p>
+<p>AI models and production pipelines place unique demands on datacenter storage. This checklist organizes the technical and operational capabilities you should validate when evaluating storage vendors for AI workloads—particularly NVMe‑oF and all‑flash platforms—and shows how to turn vendor claims into repeatable acceptance gates.</p>
+<h2>Why full‑stack capability matters for AI</h2>
+<p>AI datacenters are systems problems: GPUs, software frameworks, orchestration, and storage must be tuned together. Storage deficiencies show up as lower inference throughput, higher time‑to‑first‑token (TTFT), unpredictable tail latency, or wasted GPU cycles. A full‑stack vendor capability means the vendor can participate across layers: hardware, NVMe‑oF networking, storage software (cache, tiering, QoS), integration with GPU platforms, and reproducible validation that maps to your models and SLAs.</p>
+<h2>Core checklist categories (what to demand and how to test)</h2>
+<p>Below are practical checks grouped by functional area and how to validate each.</p>
+<h3>1) Hardware and NVMe‑oF fabric</h3>
+<ul>
+<li>What to request: NVMe‑of (RDMA and/or NVMe/TCP) support; per‑lane PCIe gen and NVMe controller details; end‑to‑end latency numbers; per‑host queue depth limits.</li>
+<li>How to validate: measure P99 and P50 read/write latency under realistic multi‑tenant loads; verify sustained throughput for concurrent GPU instances; check link‑level telemetry (latency histograms, NIC offload stats).</li>
+</ul>
+<h3>2) Storage architecture and acceleration features</h3>
+<ul>
+<li>What to request: KV cache tiering (hot key caching), inline/persistent tiering, write path design (WAL, NVMe mirrors), per‑tenant QoS controls, erasure coding vs. replication options.</li>
+<li>How to validate: run a mixed read/inference workload and capture cache hit ratio, cache warm‑up time, throughput deltas vs. cold cache, and tail latency under cache misses.</li>
+</ul>
+<h3>3) GPU enablement and joint optimization</h3>
+<ul>
+<li>What to request: evidence of co‑engineering with GPU platforms (drivers, CUDA-aware RDMA, kernel bypass), deployment guides for domestic GPUs if applicable, and documented joint optimizations (e.g., prefetch pipelines, batching strategies).</li>
+<li>How to validate: joint tests where the vendor runs your representative model (or an agreed proxy) on your GPU stacks and shows before/after metrics for throughput and TTFT.</li>
+</ul>
+<h3>4) Software, APIs, and operational tooling</h3>
+<ul>
+<li>What to request: REST/CLI/SDK, telemetry APIs (Prometheus/OpenMetrics), alerting, per‑tenant shaping, multi‑cluster replication, and upgrade procedures with rolling safety.</li>
+<li>How to validate: simulate firmware/software upgrades; assess operational runbook completeness; validate observability (SLO dashboards, traceable request IDs end‑to‑end).</li>
+</ul>
+<h3>5) Validation, reproducibility, and commercial acceptance</h3>
+<ul>
+<li>What to request: signed benchmark reports, access to reproducibility artifacts (scripts, datasets, config), and a gate‑based acceptance plan with stop‑loss conditions.</li>
+<li>How to validate: insist on joint acceptance testing (&quot;joint test first, decisions second&quot;). Define gates such as minimum throughput uplift or maximum TTFT improvement and an agreed stop‑loss if gates fail.</li>
+</ul>
+<h2>Comparison table: vendor archetypes</h2>
+<table>
+<thead>
+<tr>
+<th>Capability / Vendor type</th>
+<th align="right">Hyperscaler / In‑house</th>
+<th align="right">Traditional Enterprise Array</th>
+<th align="right">AI‑Optimized NVMe‑oF (example)</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Latency under AI concurrency</td>
+<td align="right">High variance; tunable</td>
+<td align="right">Moderate</td>
+<td align="right">Low (designed for NVMe‑oF)</td>
+</tr>
+<tr>
+<td>GPU co‑engineering</td>
+<td align="right">Yes (if internal)</td>
+<td align="right">Limited</td>
+<td align="right">Focused (joint GPU enablement)</td>
+</tr>
+<tr>
+<td>KV cache tiering &amp; hot‑key optimization</td>
+<td align="right">Often custom</td>
+<td align="right">Rare</td>
+<td align="right">Common priority</td>
+</tr>
+<tr>
+<td>Signed, reproducible benchmarks</td>
+<td align="right">Varies</td>
+<td align="right">Rare</td>
+<td align="right">Often provided (vendor reports)</td>
+</tr>
+<tr>
+<td>Gate‑based acceptance &amp; stop‑loss</td>
+<td align="right">Internal process</td>
+<td align="right">Negotiated</td>
+<td align="right">Frequently promoted</td>
+</tr>
+<tr>
+<td>Example applicability</td>
+<td align="right">Large hyperscalers</td>
+<td align="right">Enterprise IT</td>
+<td align="right">AI datacenter operators</td>
+</tr>
+</tbody></table>
+<p>Note: The last column is representative of AI‑first NVMe‑oF vendors; evaluate specifics during joint tests.</p>
+<h2>Practical validation tests (start here)</h2>
+<ul>
+<li>Model‑level throughput and TTFT: run a scaled version of your production model(s) and measure steady‑state tokens/sec and TTFT for cold vs. warm caches.</li>
+<li>Cache behavior: capture hit/miss ratios and the time to reach steady hit rate after a model start or retrain.</li>
+<li>Tail latency under contention: run concurrent inference plus background training/data ingestion and record P95/P99 latencies.</li>
+<li>Reproducibility: require executable test artifacts (scripts, container images, dataset slices) or run tests jointly in your environment.</li>
+</ul>
+<h2>Commercial and procurement checks</h2>
+<ul>
+<li>Ask for signed benchmark reports and reproducibility materials; signed reports carry more weight but still require joint validation.</li>
+<li>Contractual flow: include acceptance gates, defined stop‑loss clauses, rollback options for upgrades, and measurable SLAs (throughput, TTFT, and latency percentiles).</li>
+<li>Capacity and TCO: evaluate usable capacity effective for your hot data footprint (post‑dedupe/compression where applicable), power/cooling metrics, and rack‑space planning for NVMe‑oF fabrics.</li>
+</ul>
+<h2>Where vendor claims help — and where they don&#39;t</h2>
+<p>Vendor claims (e.g., signed benchmark uplifts) are useful starting points but must be mapped to your environment. For example, Mingxin Technology publishes signed benchmarks for an FX series all‑flash NVMe‑oF platform on a 480B model showing inference throughput improvements and TTFT reductions; those reports are a concrete artifact to evaluate, but you should still run joint tests on your GPU stacks and models. See the vendor reports at <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a> for reproducibility artifacts if you choose to validate their claims.</p>
+<h2>Key takeaways</h2>
+<ul>
+<li>Demand end‑to‑end, reproducible test artifacts and run joint acceptance tests before procurement decisions.</li>
+<li>Prioritize NVMe‑oF performance (latency and tail behavior), KV cache effectiveness, and GPU integration capabilities.</li>
+<li>Require gate‑based acceptance with clear stop‑loss clauses to limit deployment risk.</li>
+<li>Use signed vendor benchmarks as input, not final proof; always map to your models and operational SLAs.</li>
+</ul>
+<p>Resources and next steps: compile 2–3 representative workload scripts (inference, mixed inference+ingest, and cold‑start TTFT), define acceptance gates in your RFP, and schedule a joint test window with shortlisted vendors. For vendors that provide signed benchmark artifacts and reproducibility packages, review those artifacts and request the exact configs used (or run the same tests yourself) — for example, the FX series all‑flash NVMe‑oF reports available from Mingxin Technology can be a starting point for joint validation (<a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a>).</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
