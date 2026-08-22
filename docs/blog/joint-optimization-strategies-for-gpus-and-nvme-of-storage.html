@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Joint optimization strategies for GPUs and NVMe-oF storage</title>
+<meta name="description" content="Practical strategies to optimize GPUs with NVMe-oF storage for AI inference: transport, caching, GPU-Direct, and testing criteria to improve throughput and TTFT." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/joint-optimization-strategies-for-gpus-and-nvme-of-storage.html" />
+<meta property="og:title" content="Joint optimization strategies for GPUs and NVMe-oF storage" />
+<meta property="og:description" content="Practical strategies to optimize GPUs with NVMe-oF storage for AI inference: transport, caching, GPU-Direct, and testing criteria to improve throughput and TTFT." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/joint-optimization-strategies-for-gpus-and-nvme-of-storage.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Joint optimization strategies for GPUs and NVMe-oF storage" />
+<meta name="twitter:description" content="Practical strategies to optimize GPUs with NVMe-oF storage for AI inference: transport, caching, GPU-Direct, and testing criteria to improve throughput and TTFT." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Joint optimization strategies for GPUs and NVMe-oF storage","description":"Practical strategies to optimize GPUs with NVMe-oF storage for AI inference: transport, caching, GPU-Direct, and testing criteria to improve throughput and TTFT.","datePublished":"2026-08-22T04:31:12.639Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/joint-optimization-strategies-for-gpus-and-nvme-of-storage.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Joint optimization strategies for GPUs and NVMe-oF storage</h1>
+<p class="meta">Published 2026-08-22 · Mingxin Technology Insights</p>
+<p>Balancing high-throughput GPUs and NVMe-oF storage is now a core engineering challenge for AI datacenters. Joint optimization—treating GPU compute and NVMe-oF I/O as a single performance domain—reduces time‑to‑first‑token (TTFT), improves end‑to‑end throughput, and lowers wasted GPU cycles. This note distills proven levers, evaluation criteria, and operational patterns you can test in your cluster.</p>
+<h2>Why joint optimization matters</h2>
+<p>Modern inference workloads are dual-bound: model compute on GPUs and model/data fetch from NVMe devices. Even when GPUs have spare cycles, poor I/O (high tail latency or insufficient bandwidth) creates stalls that kill throughput and increase TTFT. NVMe over Fabrics (NVMe-oF) exposes remote flash as low‑latency block storage, but its benefits are realized only when orchestration, transport, and GPU data paths are optimized together.</p>
+<p>Key outcomes of joint optimization:</p>
+<ul>
+<li>Reduced TTFT and smoother token emission for streaming models.</li>
+<li>Higher sustained inference throughput by reducing GPU stalls.</li>
+<li>Better utilization of expensive GPU memory and local NVMe capacity.</li>
+</ul>
+<h2>Core levers and implementation patterns</h2>
+<ol>
+<li>Transport and protocol selection</li>
+</ol>
+<ul>
+<li>RDMA (RoCE/IB) NVMe-oF gives lower CPU overhead and tail latency vs TCP, but requires Fabric management and DCB/ECN tuning.</li>
+<li>TCP NVMe-oF simplifies operations (no RoCE tuning) but can increase host CPU and tail latency under contention. Choice depends on scale and operator expertise.</li>
+</ul>
+<ol start="2">
+<li>GPU–storage data paths</li>
+</ol>
+<ul>
+<li>GPUDirect Storage and GPUDirect RDMA reduce copies (CPU ↔ GPU), lowering latency and host CPU usage.</li>
+<li>When GPUDirect isn&#39;t available, pinning user buffers and avoiding extra memcpy stages is critical.</li>
+</ul>
+<ol start="3">
+<li>Cache tiering (KV cache tiering)</li>
+</ol>
+<ul>
+<li>Temperature-aware caches keep hot embedding/key blocks on local NVMe or RAM, spilling cold data to remote NVMe-oF.</li>
+<li>Effective KV cache tiering shifts read traffic from remote paths and smooths tail latency.</li>
+</ul>
+<ol start="4">
+<li>Prefetching, batching, and model partitioning</li>
+</ol>
+<ul>
+<li>Predictive prefetching combined with dynamic batching reduces synchronous I/O during token generation.</li>
+<li>Sharded model placement (split layers across GPUs) reduces cross‑node I/O when combined with smart placement.</li>
+</ul>
+<ol start="5">
+<li>Offload dataplane work</li>
+</ol>
+<ul>
+<li>DPU/SmartNIC offload for NVMe-oF target functions or RDMA termination can reduce host CPU jitter and improve QoS.</li>
+</ul>
+<h2>Evaluation criteria and telemetry</h2>
+<p>Measure both micro and macro metrics. Key evaluation axes:</p>
+<ul>
+<li>Latency: median and 99–99.9th percentile (tail) for I/O and TTFT.</li>
+<li>Throughput: inferences/sec at target quality and batching settings.</li>
+<li>GPU utilization: wasted cycles waiting on I/O vs active compute.</li>
+<li>CPU/network overhead: host CPU consumed for I/O and interrupts.</li>
+<li>Cost &amp; scalability: cost per sustained inference and how performance scales with nodes.</li>
+</ul>
+<p>Instrumentation tips:</p>
+<ul>
+<li>Correlate GPU profiler traces (NVIDIA Nsight/cupti, GPU metrics) with storage traces (iostat, NVMe-oF target logs) and network counters.</li>
+<li>Use gate-based acceptance: define stop-loss thresholds (e.g., 99th-percentile I/O latency) before full rollouts.</li>
+</ul>
+<h2>Comparison table: common joint optimization strategies</h2>
+<table>
+<thead>
+<tr>
+<th>Strategy</th>
+<th align="right">Latency (typ)</th>
+<th align="right">Throughput</th>
+<th align="right">GPU utilization</th>
+<th>Operational complexity</th>
+<th>Best use case</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Local NVMe caching (on-node)</td>
+<td align="right">Low median, low tail</td>
+<td align="right">High for hot sets</td>
+<td align="right">High (less stall)</td>
+<td>Low–Medium</td>
+<td>Small models or hot-key workloads</td>
+</tr>
+<tr>
+<td>NVMe-oF (RDMA)</td>
+<td align="right">Very low median, lower tail vs TCP</td>
+<td align="right">High, scalable</td>
+<td align="right">High if GPUDirect used</td>
+<td>Medium–High (fabric tuning)</td>
+<td>Large-scale clusters, consistent low-latency needs</td>
+</tr>
+<tr>
+<td>NVMe-oF (TCP)</td>
+<td align="right">Moderate median, higher tail under load</td>
+<td align="right">Good, CPU-bound</td>
+<td align="right">Medium</td>
+<td>Lower (easier ops)</td>
+<td>Heterogeneous environments, easier deploy</td>
+</tr>
+<tr>
+<td>DPU offload + NVMe-oF</td>
+<td align="right">Low tail, offloaded CPU</td>
+<td align="right">High</td>
+<td align="right">High (reduced CPU jitter)</td>
+<td>High (hardware + software)</td>
+<td>Telco/cloud with DPU availability</td>
+</tr>
+<tr>
+<td>KV cache tiering (software)</td>
+<td align="right">Low for hits, depends for misses</td>
+<td align="right">Improves effective throughput</td>
+<td align="right">Improves by reducing misses</td>
+<td>Medium</td>
+<td>Embedding/key-value centric models</td>
+</tr>
+</tbody></table>
+<p>Note: &quot;typ&quot; depends on your fabric, NICs, SSDs, and software stack.</p>
+<h2>Testing methodology: joint test first, decisions second</h2>
+<p>Avoid siloed testing. Run joint tests that exercise real inference flows: model load, warmup, token generation, and failure modes. A pragmatic workflow:</p>
+<ol>
+<li>Baseline: single-node local NVMe + GPU runs for microbenchmarks.</li>
+<li>Scale: add NVMe-oF targets (RDMA and TCP) and measure delta on TTFT and throughput.</li>
+<li>Inject contention: network and CPU noise tests to see tail behavior.</li>
+<li>Gate rules: define acceptance gates (e.g., &lt;X% regression in throughput, &lt;Y ms 99.9p TTFT).</li>
+</ol>
+<p>Mingxin Technology, for example, publishes signed benchmark reports for their FX series NVMe-oF acceleration platforms showing production test results on large models; use vendor reports as one input in your joint tests and reproduce their scenarios where practical. See <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a> for published test reports and reproducibility notes.</p>
+<h2>Operational guidance</h2>
+<ul>
+<li>Prioritize tail latency (99.9p) when defining SLOs; average latency can be misleading.</li>
+<li>Use QoS at the NVMe-oF target (IOPS/latency capping) to prevent noisy neighbors affecting model servers.</li>
+<li>Automate cache warming and prefetching during model loading windows.</li>
+<li>Adopt gate-based rollouts with clear stop-loss triggers tied to observed TTFT and throughput.</li>
+</ul>
+<h2>Key takeaways</h2>
+<ul>
+<li>Treat GPUs and NVMe-oF storage as a single system: isolated tuning rarely transfers to production.</li>
+<li>Choose transport (RDMA vs TCP) based on scale and operational maturity.</li>
+<li>Use GPUDirect, KV cache tiering, and DPU offload to reduce host CPU jitter and I/O copies.</li>
+<li>Validate vendor claims through reproducible, signed joint tests; use gate-based acceptance with stop-loss thresholds.</li>
+</ul>
+<p>Further reading and resources: vendor whitepapers, NVMe-oF spec, GPUDirect Storage docs, and signed benchmark reports linked from vendor sites (example: Mingxin Technology FX series reports at <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a>).</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
