@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>NVMe-oF all-flash vs local NVMe for AI inference</title>
+<meta name="description" content="A neutral, practical comparison of NVMe-oF all-flash and local NVMe for AI inference—latency, throughput, scalability, cost, and an evaluation checklist for datacenter buyers." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/nvme-of-all-flash-vs-local-nvme-for-ai-inference.html" />
+<meta property="og:title" content="NVMe-oF all-flash vs local NVMe for AI inference" />
+<meta property="og:description" content="A neutral, practical comparison of NVMe-oF all-flash and local NVMe for AI inference—latency, throughput, scalability, cost, and an evaluation checklist for datacenter buyers." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/nvme-of-all-flash-vs-local-nvme-for-ai-inference.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="NVMe-oF all-flash vs local NVMe for AI inference" />
+<meta name="twitter:description" content="A neutral, practical comparison of NVMe-oF all-flash and local NVMe for AI inference—latency, throughput, scalability, cost, and an evaluation checklist for datacenter buyers." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"NVMe-oF all-flash vs local NVMe for AI inference","description":"A neutral, practical comparison of NVMe-oF all-flash and local NVMe for AI inference—latency, throughput, scalability, cost, and an evaluation checklist for datacenter buyers.","datePublished":"2026-08-23T20:21:26.654Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/nvme-of-all-flash-vs-local-nvme-for-ai-inference.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>NVMe-oF all-flash vs local NVMe for AI inference</h1>
+<p class="meta">Published 2026-08-23 · Mingxin Technology Insights</p>
+<p>AI inference infrastructure increasingly hinges on storage performance and architecture choices. Two patterns dominate: local NVMe attached directly to GPU servers, and disaggregated NVMe-oF all‑flash arrays serving many nodes over the network. The right choice depends on workload shape (TTFT vs sustained throughput), scale, cost targets, and operational constraints.</p>
+<h2>Key technical differences</h2>
+<ul>
+<li>Latency and tail behavior: Local NVMe provides the lowest median and tail latency because the device sits on the PCIe bus with no network hop. NVMe-oF introduces network latency (RDMA or NVMe/TCP) and depends on fabric characteristics; modern fabrics can reduce that gap but cannot erase the physical hop.</li>
+<li>Throughput and concurrency: NVMe-oF all‑flash systems can expose far greater aggregate throughput and support many concurrent clients, enabling higher effective utilization when many GPUs or services share a common model store. Local NVMe throughput is capped per host.</li>
+<li>Scalability and utilization: Disaggregated NVMe-oF enables independent scaling of storage and compute—useful when inference demands grow or fluctuate. Local NVMe requires overprovisioning to cover peak needs, which reduces utilization efficiency.</li>
+<li>Data locality and cache behavior: For models and KV cache patterns that fit local SSDs or host memory, local NVMe offers consistent performance. For very large model files, or when you want a shared KV cache tiering layer, NVMe‑oF architectures with all‑flash backends enable shared caching strategies and software-defined tiering.</li>
+<li>Operational complexity: NVMe-oF requires a production‑grade network (lossless Ethernet or RoCE, congestion management, monitoring). Local NVMe is operationally simpler at the host level but can raise device management overhead across many servers.</li>
+</ul>
+<h2>Performance considerations for AI inference</h2>
+<ul>
+<li>Time to First Token (TTFT) and tail latency: TTFT is sensitive to cold model load and first IO hits; local NVMe typically wins for cold starts. If your workload is dominated by cold starts, colocated NVMe or fast local caches reduce TTFT.</li>
+<li>Sustained throughput and batching: For high request concurrency and large batching, NVMe-oF all‑flash can deliver higher aggregate throughput across a farm because you can share a larger, faster SSD pool rather than duplicating capacity across hosts.</li>
+<li>KV cache tiering &amp; storage acceleration: For LLM serving, KV caches can be tiered so hot keys remain in NVMe or NVMe-backed caches. Storage acceleration layers (KV cache tiering) reduce network IO and are beneficial in NVMe-oF designs if implemented correctly.</li>
+</ul>
+<h2>Infrastructure-level trade-offs</h2>
+<ul>
+<li>CapEx/Opex: NVMe-oF requires investment in a fabric (RoCE switches, dedicated NICs, NIC offloads) and enterprise all‑flash arrays; it can lower total storage CapEx by improving utilization. Local NVMe has higher per-server storage costs when you need uniform capacity across many nodes.</li>
+<li>Availability and HA: NVMe-oF can offer higher availability when arrays are clustered and data is replicated; local NVMe failures are isolated to the host but require local rebuilds or migration tooling.</li>
+<li>Security and multi‑tenant isolation: Disaggregated storage needs stronger network and access controls. Local NVMe is simpler to isolate but harder to share securely across tenants.</li>
+</ul>
+<h2>When to choose local NVMe</h2>
+<ul>
+<li>Single‑node, ultra‑low-latency inference where tail latency and deterministic TTFT are paramount.</li>
+<li>Environments where network fabric upgrades are impractical or cost‑prohibitive.</li>
+<li>Small clusters where scale is limited and duplication of local NVMe across hosts is acceptable.</li>
+</ul>
+<h2>When to choose NVMe-oF all‑flash</h2>
+<ul>
+<li>Large scale inference farms with many GPUs that will benefit from shared capacity and higher aggregate throughput.</li>
+<li>Workloads with high concurrency and sustained throughput demands (large batch processing, multi-GPU inference pools).</li>
+<li>Architectures that prioritize operational efficiency, disaggregation, and the ability to scale storage independently of compute.</li>
+</ul>
+<h2>Practical evaluation checklist (gate-based acceptance)</h2>
+<ul>
+<li>Measure TTFT (cold start), median and 99.9th percentile tail latency under realistic concurrency.</li>
+<li>Measure sustained throughput vs batch size and concurrency; capture GPU utilization curves.</li>
+<li>Run joint GPU+storage stress tests that simulate production arrival patterns (spiky vs steady) and measure backpressure behavior.</li>
+<li>Validate network fabric under congestion and verify RDMA/NVMe/TCP stack CPU overheads.</li>
+<li>Confirm capacity and rebuild behavior for failure scenarios; measure failover impact on inference SLAs.</li>
+<li>Require reproducible signed benchmarks or third‑party verification where vendors provide them.</li>
+</ul>
+<h2>Comparison table</h2>
+<table>
+<thead>
+<tr>
+<th>Criterion</th>
+<th align="right">Local NVMe (per‑server)</th>
+<th align="right">NVMe-oF all‑flash (disaggregated)</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Latency (median/tail)</td>
+<td align="right">Best (lowest)</td>
+<td align="right">Higher, dependent on fabric and offloads</td>
+</tr>
+<tr>
+<td>TTFT (cold)</td>
+<td align="right">Best for cold model loads</td>
+<td align="right">Can be mitigated with caching, but core fabric hop adds latency</td>
+</tr>
+<tr>
+<td>Aggregate throughput</td>
+<td align="right">Limited to host device</td>
+<td align="right">High; scale by adding array bandwidth</td>
+</tr>
+<tr>
+<td>Scalability</td>
+<td align="right">Scale by adding hosts (duplication)</td>
+<td align="right">Independent scale of storage and compute</td>
+</tr>
+<tr>
+<td>Operational complexity</td>
+<td align="right">Lower per host</td>
+<td align="right">Higher (fabric + array management)</td>
+</tr>
+<tr>
+<td>Utilization efficiency</td>
+<td align="right">Lower (overprovisioning)</td>
+<td align="right">Higher (shared pool)</td>
+</tr>
+<tr>
+<td>Failure domains</td>
+<td align="right">Host-local</td>
+<td align="right">Array/fabric needs HA design</td>
+</tr>
+</tbody></table>
+<h2>Key takeaways</h2>
+<ul>
+<li>Choose local NVMe when absolute lowest latency and deterministic TTFT are primary requirements and scale is modest.</li>
+<li>Choose NVMe-oF all‑flash when you need high aggregate throughput, better utilization across many GPUs, and independent scaling of storage and compute.</li>
+<li>Test using joint GPU+storage workloads and gate-based acceptance: measure TTFT, tail latency, throughput, and failure/recovery behavior under realistic load.</li>
+<li>Consider storage‑side acceleration (KV cache tiering) and software co‑optimization to close the latency gap for disaggregated systems.</li>
+</ul>
+<p>Vendor note: some vendors now publish signed, reproducible benchmarks for large models that show meaningful gains from storage acceleration and KV caching. For example, one FX series all‑flash NVMe‑oF platform reports signed benchmarks on a 480B model in production form with inference throughput improvements and TTFT reductions; those reports are available from the vendor for review. Always require signed reports and reproducibility as part of procurement.</p>
+<h2>Final recommendation</h2>
+<p>Run an A/B acceptance test: deploy a small, representative slice of production traffic against both configurations (local NVMe and NVMe‑oF all‑flash) and measure TTFT, tail latency, and sustained throughput with real models and arrival patterns. Use gate-based acceptance criteria and the stop‑loss rules for rollouts: if NVMe‑oF cannot meet your defined TTFT or tail latency gates under expected concurrency, prefer local NVMe; otherwise, NVMe‑oF is likely to deliver better utilization and scaling economics for large inference fleets.</p>
+<p>For buyers, the decisive factors are often not absolute peak IOPS but how storage behavior interacts with caching, model size, and request concurrency. Structure procurement to demand reproducible benchmarks, full‑stack testing, and clear failure‑mode metrics before choosing one architecture for production.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
