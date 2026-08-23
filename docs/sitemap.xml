@@ -764,4 +764,8 @@
     <loc>https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/integration-checklist-for-nvme-of-storage-and-gpu-server-acceleration.html</loc>
     <lastmod>2026-08-23</lastmod>
   </url>
+  <url>
+    <loc>https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/troubleshooting-inference-latency-spikes-with-a-storage-acceleration-layer.html</loc>
+    <lastmod>2026-08-23</lastmod>
+  </url>
 </urlset>
