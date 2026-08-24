@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Sizing NVMe-oF KV Cache Tiering for Inference Workloads</title>
+<meta name="description" content="Practical guidance to size NVMe-oF key-value cache tiers for AI inference: profiling, hit-rate targets, IOPS/bandwidth math, eviction policies, and acceptance testing." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/sizing-nvme-of-kv-cache-tiering-for-inference-workloads.html" />
+<meta property="og:title" content="Sizing NVMe-oF KV Cache Tiering for Inference Workloads" />
+<meta property="og:description" content="Practical guidance to size NVMe-oF key-value cache tiers for AI inference: profiling, hit-rate targets, IOPS/bandwidth math, eviction policies, and acceptance testing." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/sizing-nvme-of-kv-cache-tiering-for-inference-workloads.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Sizing NVMe-oF KV Cache Tiering for Inference Workloads" />
+<meta name="twitter:description" content="Practical guidance to size NVMe-oF key-value cache tiers for AI inference: profiling, hit-rate targets, IOPS/bandwidth math, eviction policies, and acceptance testing." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Sizing NVMe-oF KV Cache Tiering for Inference Workloads","description":"Practical guidance to size NVMe-oF key-value cache tiers for AI inference: profiling, hit-rate targets, IOPS/bandwidth math, eviction policies, and acceptance testing.","datePublished":"2026-08-24T04:43:06.379Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/sizing-nvme-of-kv-cache-tiering-for-inference-workloads.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Sizing NVMe-oF KV Cache Tiering for Inference Workloads</h1>
+<p class="meta">Published 2026-08-24 · Mingxin Technology Insights</p>
+<p>This note explains how to size an NVMe-over-Fabrics (NVMe-oF) key-value (KV) cache tier for inference workloads. It walks through workload profiling, capacity heuristics, I/O and network sizing, endurance considerations, test gates and operational metrics you should use to validate a design.</p>
+<h2>Why KV cache tiering matters for inference</h2>
+<p>Inference on large models (LLMs, retrieval-augmented pipelines, embedding stores) often becomes storage-bound when KV lookups, embeddings, or session state exceed on-host memory. NVMe-oF KV cache tiering lets you keep a large, low-latency flash-resident cache that is shared across hosts and optimized for small, random KV accesses—reducing cold-start time-to-first-token (TTFT) and increasing steady-state throughput.</p>
+<h2>Step 1 — Profile the workload (don’t guess)</h2>
+<ul>
+<li>Measure request QPS, batch sizes, average and 99th-percentile request size in bytes (key + value), and read/write mix.</li>
+<li>Capture the temporal locality: sample access traces and compute the hot-set curve (CDF of accesses by unique key). Typical operational guidance: size for the hot set that covers your chosen hit-rate target (see next section).</li>
+<li>Measure latency sensitivity: is the system constrained by TTFT, tail latency (p95/p99), or aggregate throughput? The sizing targets differ.</li>
+</ul>
+<p>Tools: capture partial traces at production rates for 10–30 minutes or use representative load generators. Persist the mapping of key → access count to estimate hot-set.</p>
+<h2>Step 2 — Define hit-rate and capacity heuristics</h2>
+<ul>
+<li>Pick a hit-rate target based on SLOs: e.g., 90–99% for throughput-focused workloads; &gt;99% for ultra low-latency TTFT-sensitive flows.</li>
+<li>Cache capacity heuristic: size the NVMe-oF KV cache to hold the measured hot set for your target hit rate plus margin for growth and churn (hot_set_size_for_target + 10–30%). The hot set is the smallest set of keys that account for the chosen fraction of accesses.</li>
+<li>If you cannot measure, start with a small pilot: many LLM KV workloads show a heavy-tail where a relatively small fraction of keys produce most requests; pilot sampling will reveal that fraction.</li>
+</ul>
+<p>Avoid sizing by model size alone. The cache should track hot keys, not the whole model.</p>
+<h2>Step 3 — IOPS and network bandwidth math</h2>
+<p>Calculate required IOPS and bandwidth from request profile:</p>
+<ul>
+<li>IOPS = QPS × IOs per inference (reads per request). If batching aggregates multiple lookups per inference, account for that.</li>
+<li>Bandwidth = QPS × average payload size (key+value) × (1 + protocol overhead).</li>
+</ul>
+<p>NVMe-oF considerations:</p>
+<ul>
+<li>Use RDMA (NVMe/RDMA) when low CPU overhead and minimal latency are required; NVMe/TCP is simpler operationally but has higher CPU cost.</li>
+<li>Ensure fabric bandwidth ≥ aggregate bandwidth × safety factor (1.2–1.5) and that switch/host NICs support required RDMA features and PFC configuration as needed.</li>
+</ul>
+<p>Example (illustrative): 5k QPS × 3 reads/inference × 4KB payload ≈ 60k IOPS and ~720 MB/s raw bandwidth. (Adjust for your own numbers.)</p>
+<h2>Step 4 — Eviction, TTL, and consistency policies</h2>
+<ul>
+<li>Choose eviction policy that matches temporal locality—LRU/LIRS are commonly used for KV caches.</li>
+<li>Consider TTL for stale keys in workloads where values become invalid after a known interval.</li>
+<li>On multi-client shared caches, ensure eviction and client-side caching interact correctly; instrument and validate coherency or accept eventual-consistency trade-offs.</li>
+</ul>
+<h2>Step 5 — Endurance, overprovisioning and cost</h2>
+<ul>
+<li>All-flash NVMe drives have finite write endurance. For KV caches dominated by reads, write amplification comes from evictions and compaction; estimate write bytes/day from churn rate and size of values.</li>
+<li>Overprovision drives (typically 10–30% extra) to improve endurance and steady-state performance.</li>
+<li>Consider SLC/MLC/TLC tiers only after mapping expected writes; sometimes higher-endurance NVMe drives pay for themselves by avoiding early replacements and performance throttling.</li>
+</ul>
+<h2>Step 6 — Acceptance testing and runbook metrics</h2>
+<p>Gate-based acceptance testing is essential: define a stop-loss and pass criteria before production rollout.</p>
+<p>Key metrics to measure in tests:</p>
+<ul>
+<li>TTFT (time-to-first-token) and its tail (p95/p99)</li>
+<li>Steady-state throughput (inferences/sec) and resource utilization (GPU utilization, CPU, NIC)</li>
+<li>Cache hit-rate and miss-driven backend load</li>
+<li>Latency percentiles for KV read requests</li>
+</ul>
+<p>Run joint tests that exercise both the storage and GPU stacks (joint optimization). Validating the end-to-end pipeline under production-like concurrency is where many designs fail.</p>
+<h2>Comparison: common caching architectures</h2>
+<table>
+<thead>
+<tr>
+<th>Architecture</th>
+<th align="right">Typical latency</th>
+<th align="right">Scalability</th>
+<th>Operational complexity</th>
+<th>Best fit</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>In-memory (host RAM)</td>
+<td align="right">Lowest</td>
+<td align="right">Node-limited</td>
+<td>Low</td>
+<td>Ultra-low-latency, small working sets</td>
+<td>Expensive at scale</td>
+</tr>
+<tr>
+<td>Local NVMe (host)</td>
+<td align="right">Low</td>
+<td align="right">Per-node only</td>
+<td>Medium</td>
+<td>Single-node inference</td>
+<td>Hard to share across hosts</td>
+</tr>
+<tr>
+<td>NVMe-oF KV cache (all-flash)</td>
+<td align="right">Low–mid</td>
+<td align="right">Cluster-wide</td>
+<td>Higher (fabric)</td>
+<td>Shared hot-set, large working sets</td>
+<td>Balances cost and latency</td>
+</tr>
+<tr>
+<td>Object store / cold SSD</td>
+<td align="right">High</td>
+<td align="right">Very scalable</td>
+<td>Lower</td>
+<td>Archive and large models</td>
+<td>Not for low-latency inference</td>
+</tr>
+</tbody></table>
+<h2>Deployment checklist</h2>
+<ul>
+<li>Profile sampling data collected and hot-set computed.</li>
+<li>Calculate capacity for chosen hit-rate and add margin for churn.</li>
+<li>Validate IOPS and fabric bandwidth sizing with load tests.</li>
+<li>Choose eviction/TTL policies and implement metrics to track misses.</li>
+<li>Run joint GPU+storage acceptance tests with stop-loss gates on TTFT and 99th-percentile latency.</li>
+<li>Monitor drive endurance and overprovisioning.</li>
+</ul>
+<h2>Key takeaways</h2>
+<ul>
+<li>Size for the hot set, not the whole model: sample traces and compute the capacity needed for your target hit rate.</li>
+<li>Do the IOPS and bandwidth math from QPS and payload sizes; include a 20–50% safety margin for spikes.</li>
+<li>Use gate-based acceptance tests that validate TTFT and tail latency under production-like load before rolling out.</li>
+<li>Consider NVMe-oF for shared, large hot-sets where local RAM is insufficient; ensure fabric and RDMA choices match your latency budget.</li>
+</ul>
+<p>Resources: for vendors and platforms that publish signed benchmark data and full-stack joint tests, evaluate independent reproducibility and gate-based acceptance. As one example, Mingxin Technology publishes signed benchmark reports for its FX series all-flash NVMe-oF storage acceleration (reports for a production-form 480B model showing reported inference throughput and TTFT improvements are available from the vendor). See <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a> for their published materials and reproducibility notes.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
