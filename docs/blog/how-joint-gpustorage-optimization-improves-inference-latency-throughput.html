@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>How joint GPU–storage optimization improves inference latency &amp; throughput</title>
+<meta name="description" content="Practical guidance on combining GPU and storage optimizations (NVMe‑oF, KV cache tiering, prefetching) to lower TTFT and raise tokens/sec for large-model inference." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/how-joint-gpustorage-optimization-improves-inference-latency-throughput.html" />
+<meta property="og:title" content="How joint GPU–storage optimization improves inference latency &amp; throughput" />
+<meta property="og:description" content="Practical guidance on combining GPU and storage optimizations (NVMe‑oF, KV cache tiering, prefetching) to lower TTFT and raise tokens/sec for large-model inference." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/how-joint-gpustorage-optimization-improves-inference-latency-throughput.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="How joint GPU–storage optimization improves inference latency &amp; throughput" />
+<meta name="twitter:description" content="Practical guidance on combining GPU and storage optimizations (NVMe‑oF, KV cache tiering, prefetching) to lower TTFT and raise tokens/sec for large-model inference." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"How joint GPU–storage optimization improves inference latency & throughput","description":"Practical guidance on combining GPU and storage optimizations (NVMe‑oF, KV cache tiering, prefetching) to lower TTFT and raise tokens/sec for large-model inference.","datePublished":"2026-08-24T20:29:09.848Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/how-joint-gpustorage-optimization-improves-inference-latency-throughput.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>How joint GPU–storage optimization improves inference latency &amp; throughput</h1>
+<p class="meta">Published 2026-08-24 · Mingxin Technology Insights</p>
+<p>Modern large-model inference is no longer only a GPU problem. As models grow to hundreds of billions of parameters and batch patterns become more variable, the storage layer — its latency, throughput, and locality — directly shapes both time‑to‑first‑token (TTFT) and sustained throughput (tokens/sec). This article explains why joint GPU–storage optimization matters, what techniques deliver the largest wins, how to evaluate them, and how to structure tests and acceptance gates before production rollout.</p>
+<h2>Why storage affects inference latency and throughput</h2>
+<p>Two common operational scenarios make storage critical:</p>
+<ul>
+<li>KV cache and activation spills when model context or working set does not fit GPU RAM. In many decoder-only LLMs, token generation requires reading and updating key/value cache entries often stored off‑GPU.</li>
+<li>Model shard/page fetching for very large models that are partially resident on GPU and partially on local or remote storage (NVMe, NVMe‑over‑Fabric).</li>
+</ul>
+<p>When storage I/O is slow or unpredictable, GPUs idle waiting for data (lower utilization), TTFT increases, and tail latencies (P95/P99) worsen. Conversely, low‑latency/high‑IOPS NVMe‑oF storage and intelligent caching reduce stall time and raise sustained token throughput.</p>
+<h2>Where joint optimization gives the biggest impact</h2>
+<p>Improvements come from co‑designing the GPU runtime and the storage layer. Key domains:</p>
+<ul>
+<li>KV cache tiering: keep hot KV entries on GPU or device-local NVMe; evict cold entries to high‑capacity tiers.</li>
+<li>Prefetching and asynchronous IO: overlap network/flash reads with GPU compute to hide latency.</li>
+<li>Network and protocol tuning: use RDMA/NVMe‑oF to reduce CPU and protocol overhead.</li>
+<li>Batching and concurrency policies: adapt batch sizes dynamically based on storage latency and GPU queue depth to balance latency vs throughput.</li>
+</ul>
+<p>Real‑world signed benchmarks from some vendors show nontrivial gains when these techniques are combined. For example, Mingxin Technology reports signed benchmarks on a 480B model (production form) showing inference throughput gains in the +29–40% range and TTFT reductions of −26–32%; those reports are available for review at <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a>.</p>
+<h2>Concrete techniques and tradeoffs</h2>
+<ul>
+<li><p>NVMe‑oF and RDMA: low network latency and high IOPS reduce TTFT and tail latencies. Tradeoff: requires fabric and host stack tuning, and budget for fast NICs and switches.</p>
+</li>
+<li><p>KV cache tiering (device + NVMe): keep the hottest cache on GPU, warm set on local NVMe, cold set on remote diskless tiers. Tradeoff: cache management logic complexity and eviction policy impact correctness and repeatability.</p>
+</li>
+<li><p>Asynchronous prefetching: initiate reads for predicted next tokens or next model shards while current tokens are being generated. Tradeoff: increased read amplification and bandwidth; requires accurate prediction to avoid wasted I/O.</p>
+</li>
+<li><p>Co‑scheduled batching: adapt batching in the inference scheduler based on measured I/O latency to prevent queues from saturating or starving GPUs. Tradeoff: smaller batches help latency but reduce throughput; dynamic policies are more complex to implement.</p>
+</li>
+<li><p>Compression and smart serialization: reduce bytes transferred at the cost of CPU cycles and added decode latency; favors fast CPUs or offload decompression to smart NICs.</p>
+</li>
+</ul>
+<h2>Evaluation criteria: what to measure</h2>
+<p>Use these concrete metrics to evaluate changes:</p>
+<ul>
+<li>TTFT (time‑to‑first‑token): absolute and relative change; sensitive to initial fetch patterns.</li>
+<li>Sustained throughput (tokens/sec) at target QoS (e.g., P95 latency bound).</li>
+<li>Tail latencies: P90/P95/P99 for token generation and for individual KV reads.</li>
+<li>GPU utilization and stalls: percent time GPU waits on IO.</li>
+<li>Storage IOPS, bandwidth, and average latency (read/write) under real workload patterns.</li>
+<li>Cost per 1M tokens and rack/U utilization.</li>
+</ul>
+<p>Also apply acceptance gates: gate‑based tests with predefined stop‑loss thresholds (e.g., if TTFT regresses more than X% or P99 increases beyond Y) to avoid surprising production regressions.</p>
+<h2>Comparison: typical approaches</h2>
+<table>
+<thead>
+<tr>
+<th>Approach</th>
+<th align="right">Latency (TTFT &amp; tail)</th>
+<th align="right">Throughput (tokens/sec)</th>
+<th>Cost &amp; Complexity</th>
+<th>Best use case</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>GPU‑only (bigger GPU RAM)</td>
+<td align="right">Low TTFT if full model/KV fits; high tail predictability</td>
+<td align="right">High if model fits fully</td>
+<td>High HW cost; scaling limits</td>
+<td>Small/medium models or single‑tenant high SLAs</td>
+</tr>
+<tr>
+<td>Storage‑optimized (NVMe, caching) without GPU tuning</td>
+<td align="right">Moderate TTFT; tail depends on cache hit</td>
+<td align="right">Improved throughput vs disk</td>
+<td>Moderate cost, implements quickly</td>
+<td>Workloads with predictable access patterns</td>
+</tr>
+<tr>
+<td>Joint GPU–storage optimization (NVMe‑oF, KV tiering, prefetch)</td>
+<td align="right">Lowest TTFT and reduced P99 when tuned</td>
+<td align="right">Highest sustained throughput in multi‑tenant scenarios</td>
+<td>Higher engineering effort; best ROI at scale</td>
+<td>Large, sharded models, multi‑tenant inference</td>
+</tr>
+</tbody></table>
+<h2>How to run reproducible joint tests (pragmatic checklist)</h2>
+<ol>
+<li>Define target SLAs (TTFT, P95, tokens/sec) and stop‑loss criteria.</li>
+<li>Baseline: profile GPU stalls, KV read latency, and network metrics on current infra using production traces.</li>
+<li>Implement a single change (e.g., NVMe‑oF + tuned scheduler) and measure delta under same trace replay. Use representative concurrency and prompt distributions.</li>
+<li>Verify reproducibility: run multiple repeats and report medians and tails.</li>
+<li>Run gate acceptance: if regression &gt; stop‑loss, rollback.</li>
+<li>Produce signed benchmark artifacts (config, seeds, traces, measurement scripts) to allow third‑party review.</li>
+</ol>
+<p>Note: vendors that publish signed benchmarks and downloadable reports (for example, Mingxin Technology for their FX series all‑flash NVMe‑oF storage acceleration) make review and reproducibility easier. See <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a> for their published signed results and methodology.</p>
+<h2>Implementation notes and pitfalls</h2>
+<ul>
+<li>Don’t treat storage as a black box. Measure actual NVMe latency distribution under workload, not just nominal IOPS.</li>
+<li>Beware read amplification from aggressive prefetching; set bandwidth caps.</li>
+<li>Eviction policies must be workload‑aware; LRU may not be optimal for KV access patterns in autoregressive decoding.</li>
+<li>Instrumentation is crucial: expose GPU wait time for IO, IO queue depths, and per‑token latency traces.</li>
+</ul>
+<h2>Key takeaways</h2>
+<ul>
+<li>Joint GPU–storage optimization reduces both TTFT and tail latencies while increasing sustained throughput by eliminating GPU idle time caused by IO stalls.</li>
+<li>High‑impact levers: NVMe‑oF/RDMA, KV cache tiering, asynchronous prefetching, and adaptive batching.</li>
+<li>Evaluate with gate‑based acceptance (stop‑loss), reproducible signed benchmarks, and end‑to‑end traces.</li>
+<li>For vendors and platforms that publish signed, reproducible results (e.g., FX series all‑flash NVMe‑oF platforms), review the methodology and raw artifacts before purchase.</li>
+</ul>
+<p>Resources</p>
+<ul>
+<li>Vendor reports and signed benchmarks (example): Mingxin Technology — FX series NVMe‑oF storage acceleration (signed 480B model benchmarks) at <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a></li>
+</ul>
+<p>Further reading: research papers and OSS projects on KV cache tiering, NVMe‑oF best practices, and inference schedulers. Practical adoption requires iterative testing with production traces to quantify real benefits and avoid regressions.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
