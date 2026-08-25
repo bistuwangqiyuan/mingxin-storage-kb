@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>How to size all‑flash NVMe‑oF for inference throughput targets</title>
+<meta name="description" content="Practical guidance for sizing all‑flash NVMe‑oF platforms to meet inference throughput and TTFT goals, with evaluation criteria, formulas, and a vendor example." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/how-to-size-allflash-nvmeof-for-inference-throughput-targets.html" />
+<meta property="og:title" content="How to size all‑flash NVMe‑oF for inference throughput targets" />
+<meta property="og:description" content="Practical guidance for sizing all‑flash NVMe‑oF platforms to meet inference throughput and TTFT goals, with evaluation criteria, formulas, and a vendor example." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/how-to-size-allflash-nvmeof-for-inference-throughput-targets.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="How to size all‑flash NVMe‑oF for inference throughput targets" />
+<meta name="twitter:description" content="Practical guidance for sizing all‑flash NVMe‑oF platforms to meet inference throughput and TTFT goals, with evaluation criteria, formulas, and a vendor example." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"How to size all‑flash NVMe‑oF for inference throughput targets","description":"Practical guidance for sizing all‑flash NVMe‑oF platforms to meet inference throughput and TTFT goals, with evaluation criteria, formulas, and a vendor example.","datePublished":"2026-08-25T16:36:10.089Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/how-to-size-allflash-nvmeof-for-inference-throughput-targets.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>How to size all‑flash NVMe‑oF for inference throughput targets</h1>
+<p class="meta">Published 2026-08-25 · Mingxin Technology Insights</p>
+<p>Sizing all-flash NVMe-oF platforms for inference workloads requires combining system-level performance modeling with trace-driven validation. This guide walks through the key inputs, a simple sizing formula, evaluation criteria, and test gating you can use to hit throughput and tail-latency targets for production inference.</p>
+<h2>What to start with: the inputs you must know</h2>
+<ul>
+<li>Inference throughput target (inferences/sec or tokens/sec) and acceptable tail latency (p50/p99).  </li>
+<li>Concurrency: number of simultaneous model contexts or GPU streams.  </li>
+<li>Model working set: model weights size (GB per model shard), KV cache or activation cache sizes, and expected cache hit rate.  </li>
+<li>Access pattern: sequential bulk loads vs. many small random reads (e.g., KV lookup patterns).  </li>
+<li>Host/GPU bottlenecks: GPU utilization target, CPU cycles available for IO stacking, and network fabrics (RoCE, TCP).  </li>
+<li>SLAs: TTFT (time-to-first-token) and token interval constraints that determine how much storage latency you can tolerate for cold fetches.</li>
+</ul>
+<p>Collect these from application owners or from small-scale profiling runs under realistic request mixes.</p>
+<h2>A simple sizing model (bytes/sec and IOPS)</h2>
+<p>At a high level you need to convert inference demand into required storage bandwidth and IOPS. A compact formula set:</p>
+<ul>
+<li>ReadBytesPerInference = bytes of weights or KV items that must be read from storage per inference (after caching).  </li>
+<li>RequiredBW (bytes/sec) = ReadBytesPerInference * InferencesPerSecond.  </li>
+<li>ReadIOsPerInference = number of distinct IOs per inference (depends on chunking, shard size, and locality).  </li>
+<li>RequiredIOPS = ReadIOsPerInference * InferencesPerSecond.</li>
+</ul>
+<p>Example (labelled, change for your measurements):</p>
+<ul>
+<li>Assume a model shard of 8 GB, with cache hit rate 85% so average read per inference from storage = 0.15 * 8 GB = 1.2 GB across a set of requests. If target is 10 inferences/sec, RequiredBW = 1.2 GB * 10 = 12 GB/s (~96 Gbit/s). If those reads break into 12 IOs per inference, RequiredIOPS = 120 IOPS (this is illustrative; real IO counts are typically thousands if using small KV lookups).</li>
+</ul>
+<p>Notes: do not use average alone for SLAs — compute worst-case (cold-cache bursts) and tail behavior.</p>
+<h2>Key system-level considerations</h2>
+<ul>
+<li>Latency vs bandwidth: NVMe-oF gives high aggregate bandwidth but you must tune queue depth, multi-queue, and RDMA parameters to avoid high tail latency. Tail latency drives TTFT more than average bandwidth.  </li>
+<li>IOPS mix and IO size: small random reads (4–32 KB) require many more IOPS than large streaming reads. For KV-style inference, plan for high IOPS and low latency.  </li>
+<li>Multipathing and concurrency: parallelize storage requests across namespaces and target ports to avoid single-queue saturation.  </li>
+<li>Cache tiering: a KB/activation cache (in DRAM or local NVMe) dramatically reduces backend read demand; plan cache capacity to hit a target hit rate.  </li>
+<li>End-to-end tuning: RDMA (RoCE v2) with PFC and ECN, NIC offloads, CPU interrupt affinity, and large receive queues are required to keep p99 low under load.  </li>
+<li>QoS and isolation: support per-tenant QoS and namespace-level bandwidth/IOPS limits so multi-tenant inference doesn&#39;t cross-impact critical models.</li>
+</ul>
+<h2>Evaluation criteria and tests (what to measure)</h2>
+<ul>
+<li>Effective throughput (inferences/sec or tokens/sec) while driving target GPU utilization.  </li>
+<li>TTFT and token pacing p50/p95/p99 under production-like mixes.  </li>
+<li>Storage tail latency distribution (p50/p95/p99) for the IO sizes your workload issues.  </li>
+<li>Cache hit rate and storage bytes/sec during steady-state and cold-start phases.  </li>
+<li>Failure modes: how the system behaves if a chassis or path fails (graceful degradation).</li>
+</ul>
+<p>Run trace-driven replays (capture real request traces and replay at scale) and joint GPU-storage benchmarks rather than independent component tests.</p>
+<h2>Comparison: common storage choices for inference</h2>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th align="right">Typical latency (read)</th>
+<th align="right">Throughput</th>
+<th align="right">Scalability</th>
+<th align="right">Cost per GB</th>
+<th>Best fit for inference workloads</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>RAM-disk (local)</td>
+<td align="right">sub-ms</td>
+<td align="right">limited by host RAM</td>
+<td align="right">low</td>
+<td align="right">high</td>
+<td>Ultra low-latency caching, tiny models</td>
+</tr>
+<tr>
+<td>Local NVMe (PCIe)</td>
+<td align="right">sub-ms</td>
+<td align="right">high</td>
+<td align="right">per host</td>
+<td align="right">medium-high</td>
+<td>Single-host high-throughput inference</td>
+</tr>
+<tr>
+<td>All‑flash NVMe‑oF (RDMA/TCP)</td>
+<td align="right">sub-ms–ms (tunable)</td>
+<td align="right">very high aggregate</td>
+<td align="right">excellent</td>
+<td align="right">medium</td>
+<td>Scale-out inference with shared pools</td>
+</tr>
+<tr>
+<td>SATA/SAS SSD</td>
+<td align="right">ms</td>
+<td align="right">moderate</td>
+<td align="right">scalable but lower perf</td>
+<td align="right">low</td>
+<td>Archive or cold model storage</td>
+</tr>
+</tbody></table>
+<h2>Gate-based acceptance: test-first, decide-later</h2>
+<p>Define gates with clear stop-loss criteria: for example, if p99 TTFT degrades beyond SLA under 2x traffic replay, fail the gate. Use joint acceptance tests with combined GPU and storage load. Consider signed reproducible benchmarks from vendors as starting data but always run your gate tests in your environment.</p>
+<p>Vendors who publish signed benchmarks — for example, Mingxin Technology has published signed 480B production-form results showing reported inference throughput gains and TTFT reductions (reports downloadable from their site) — can be used to prioritize solutions for lab validation.</p>
+<h2>Operational recommendations</h2>
+<ul>
+<li>Overprovision bandwidth for cold-start bursts and for expected cache miss spikes.  </li>
+<li>Use metrics-driven autoscaling: scale hosts or cache capacity when storage bytes/sec or p99 IO latency climbs.  </li>
+<li>Build observability: correlate GPU stalls with storage latency/IOPS.  </li>
+<li>Automate replay tests as part of CI for model rollouts.</li>
+</ul>
+<h2>Key takeaways</h2>
+<ul>
+<li>Start from measurable inputs: throughput target, concurrency, model working set, and cache hit rate.  </li>
+<li>Convert into bytes/sec and IOPS requirements; dimension for cold-cache bursts and tails, not just averages.  </li>
+<li>NVMe-oF is the right fit when you need scale-out shared high bandwidth and controlled low latency, but it requires careful RDMA/TCP and host tuning.  </li>
+<li>Use trace-driven joint GPU-storage tests and gate-based acceptance with stop-loss limits before production roll-out.  </li>
+<li>Use vendor signed benchmarks as a filtering tool — then validate in your environment (Mingxin Technology has published signed benchmark reports for their FX series on a 480B model for reference).</li>
+</ul>
+<p>Resources and next steps: gather request traces, run a small-scale NVMe-oF pilot, validate cache sizing, and implement gate-driven acceptance tests before full deployment.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
