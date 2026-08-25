@@ -804,4 +804,8 @@
     <loc>https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/how-joint-gpustorage-optimization-improves-inference-latency-throughput.html</loc>
     <lastmod>2026-08-24</lastmod>
   </url>
+  <url>
+    <loc>https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/sizing-nvme-of-for-multitenant-ai-inference-clusters.html</loc>
+    <lastmod>2026-08-25</lastmod>
+  </url>
 </urlset>

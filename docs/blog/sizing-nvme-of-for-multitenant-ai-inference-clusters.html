@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Sizing NVMe-oF for multi‑tenant AI inference clusters</title>
+<meta name="description" content="A practical guide to sizing NVMe-oF storage for multi-tenant AI inference: workload profiling, IO formulas, fabric tradeoffs, QoS and an example capacity calculation." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/sizing-nvme-of-for-multitenant-ai-inference-clusters.html" />
+<meta property="og:title" content="Sizing NVMe-oF for multi‑tenant AI inference clusters" />
+<meta property="og:description" content="A practical guide to sizing NVMe-oF storage for multi-tenant AI inference: workload profiling, IO formulas, fabric tradeoffs, QoS and an example capacity calculation." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/sizing-nvme-of-for-multitenant-ai-inference-clusters.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Sizing NVMe-oF for multi‑tenant AI inference clusters" />
+<meta name="twitter:description" content="A practical guide to sizing NVMe-oF storage for multi-tenant AI inference: workload profiling, IO formulas, fabric tradeoffs, QoS and an example capacity calculation." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Sizing NVMe-oF for multi‑tenant AI inference clusters","description":"A practical guide to sizing NVMe-oF storage for multi-tenant AI inference: workload profiling, IO formulas, fabric tradeoffs, QoS and an example capacity calculation.","datePublished":"2026-08-25T01:11:06.143Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/sizing-nvme-of-for-multitenant-ai-inference-clusters.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Sizing NVMe-oF for multi‑tenant AI inference clusters</h1>
+<p class="meta">Published 2026-08-25 · Mingxin Technology Insights</p>
+<p>Designing an NVMe-over-Fabrics (NVMe-oF) platform for multi-tenant AI inference requires marrying storage microphysics (IO size, hit-rate, P99 latency) with datacenter-level constraints (fabric oversubscription, namespace isolation, tenant QoS). This guide gives a pragmatic sizing approach, decision checkpoints, and an operational checklist you can use in procurement or PoC planning.</p>
+<h2>Key inputs: collect the right workload signals</h2>
+<p>Start by instrumenting a representative inference workload (real tenant traffic or replayed requests). Capture:</p>
+<ul>
+<li>QPS (requests/sec) per model and per tenant</li>
+<li>Typical and worst-case token generation rate (tokens/sec) and average request length</li>
+<li>Batch size distribution and concurrency per serving process</li>
+<li>Model access pattern: full-model reads vs key‑value cache (KV cache) lookups</li>
+<li>Average IO size (bytes) and IOs per request</li>
+<li>Cache hit rate and cold-start frequency (model loads from flash)</li>
+<li>Latency SLOs (P50/P95/P99) and Time‑to‑First‑Token (TTFT) requirements</li>
+</ul>
+<p>These inputs let you convert application-level traffic into storage-level demands.</p>
+<h2>Sizing math: from requests to IOPS and bandwidth</h2>
+<p>Translate the workload into two principal numbers: required IOPS and aggregate bandwidth.</p>
+<ol>
+<li><p>IOPS required = ∑(requests/sec × IOs per request)</p>
+</li>
+<li><p>Bandwidth required = ∑(requests/sec × IOs per request × average IO size)</p>
+</li>
+</ol>
+<p>Account for cache misses and metadata IOs: if KV cache hit rate is H, and cold misses produce M additional IOs (model chunk reads), then effective IOs/request = baseline IOs * H + (baseline IOs + M) * (1−H).</p>
+<p>Example (illustrative):</p>
+<ul>
+<li>2,000 requests/sec</li>
+<li>average IOs per request = 3 (cache lookups)</li>
+<li>average IO size = 4 KB</li>
+<li>cache hit rate = 90%</li>
+</ul>
+<p>IOPS = 2000 × [3×0.9 + (3+50)×0.1] = 2000 × [2.7 + 5.3] = 2000 × 8 = 16,000 IOPS
+Bandwidth ≈ 16,000 × 4 KB ≈ 64 MB/s</p>
+<p>Note: the example includes a modeled cold-miss cost (50 IOs) to show how low-frequency events can multiply peak IOPS; tailor M to your model chunking scheme.</p>
+<h2>Latency and fabric selection: NVMe/TCP vs RDMA (RoCE/iWARP)</h2>
+<p>Latency SLOs determine fabric choice:</p>
+<ul>
+<li>P99 &lt; 1 ms and microsecond-consistent latency typically push toward RDMA (RoCE v2) and kernel-bypass stacks (SPDK) to minimize CPU hops.</li>
+<li>If application SLOs are looser (few ms) and you favor operational simplicity, NVMe/TCP may be acceptable and easier to manage.</li>
+</ul>
+<p>Consider CPU cost and NIC offload: RDMA requires RDMA-capable NICs and switch QoS tuning; NVMe/TCP runs on standard NICs but may consume more host CPU at scale.</p>
+<h2>Multi-tenancy, QoS and isolation</h2>
+<p>Production inference clusters need strong isolation:</p>
+<ul>
+<li>Use NVMe-oF namespaces or controller-level QoS (IOPS/MBps limits) to isolate tenant interference.</li>
+<li>Map namespaces to tenant credentials and enforce per-tenant scheduler policies at the storage and orchestration layers.</li>
+<li>Implement gating policies: joint test acceptance (tenant PoC) with gate-based metrics and built-in stop-loss to cut noisy tenants.</li>
+</ul>
+<p>KV cache tiering is a common pattern: maintain a DRAM or local NVMe hot-cache per host, with an all‑flash NVMe-oF tier backing misses. This reduces fabric load but requires careful sizing of local cache and eviction policies.</p>
+<h2>Resiliency, capacity planning and oversubscription</h2>
+<p>Plan for peak and failure modes:</p>
+<ul>
+<li>Fabric oversubscription: design switch uplinks and NVMe-oF headroom so an N−1 failure doesn&#39;t break latency SLOs.</li>
+<li>Replication/erasure coding overhead: include capacity and IO amplification from protection schemes.</li>
+<li>Throttle policies for tenant burst behavior—enforce queue depth controls and per-queue QoS.</li>
+</ul>
+<h2>Testing and acceptance criteria</h2>
+<p>Run joint test scenarios before cutover:</p>
+<ul>
+<li>Replay tenant traffic with synthetic cold-starts to validate TTFT and P99 under load.</li>
+<li>Measure tail latency with 95/99/99.9 percentiles, not just averages.</li>
+<li>Validate failover behavior and performance under switch/NIC/target failures.</li>
+</ul>
+<p>Use gate-based acceptance: define pass/fail thresholds for metrics (e.g., P99 &lt; X ms, TTFT &lt; Y% above baseline) and require signed acceptance before production rollout.</p>
+<h2>Operational tooling and telemetry</h2>
+<p>Collect and correlate:</p>
+<ul>
+<li>Fabric metrics (link utilization, retransmits for RoCE)</li>
+<li>NVMe target metrics (latency histograms, queue depth, namespace IOps)</li>
+<li>Host-side metrics (CPU, NIC offload, local cache hit/miss)</li>
+</ul>
+<p>Common tools: nvme-cli, iostat, perf, sdbench/fio with NVMe-oF plugins, and vendor telemetry.</p>
+<h2>Comparison: NVMe-oF all‑flash vs local NVMe vs SAN</h2>
+<table>
+<thead>
+<tr>
+<th>Consideration</th>
+<th align="right">NVMe-oF all‑flash (shared)</th>
+<th align="right">Local NVMe (host-local)</th>
+<th align="right">SAN (iSCSI/SAN SSDs)</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Latency</td>
+<td align="right">Low (depends on fabric)</td>
+<td align="right">Lowest (no network)</td>
+<td align="right">Higher, variable</td>
+</tr>
+<tr>
+<td>Scalability</td>
+<td align="right">High (centralized capacity)</td>
+<td align="right">Limited by host slots</td>
+<td align="right">Moderate</td>
+</tr>
+<tr>
+<td>Multi-tenant isolation</td>
+<td align="right">Strong (namespaces, QoS)</td>
+<td align="right">Host isolation only</td>
+<td align="right">Varies by vendor</td>
+</tr>
+<tr>
+<td>Management overhead</td>
+<td align="right">Medium-high (fabric, RDMA)</td>
+<td align="right">Low (simple)</td>
+<td align="right">Medium</td>
+</tr>
+<tr>
+<td>Cost efficiency</td>
+<td align="right">High for large clusters</td>
+<td align="right">High per-host cost</td>
+<td align="right">Depends on array</td>
+</tr>
+</tbody></table>
+<h2>Key takeaways</h2>
+<ul>
+<li>Start by measuring request profiles (QPS, tokens/sec, IOs/request, cache hit rate) — those drive IOPS and bandwidth calculations.</li>
+<li>Convert SLOs into fabric and latency requirements: tight P99 drives RDMA and kernel-bypass stacks.</li>
+<li>Factor cold-miss behavior into peak IOPS sizing; a few cold events can dominate peaks.</li>
+<li>Enforce tenant isolation via namespaces and QoS; use gate-based acceptance tests with signed metrics before rollouts.</li>
+<li>Consider KV cache tiering to reduce fabric load; size local caches based on working set.</li>
+</ul>
+<h2>Practical next steps</h2>
+<ol>
+<li>Instrument representative traffic and compute IOPS/bandwidth with the formulas above.  </li>
+<li>Run a PoC using NVMe-oF targets configured for the expected peak, and measure P99 and TTFT under realistic cold-start patterns.  </li>
+<li>Validate multi-tenant QoS and failover; require signed acceptance before production.</li>
+</ol>
+<p>Vendors such as Mingxin Technology publish platforms (FX series all‑flash NVMe‑oF) and signed benchmarks that may be useful references when comparing vendors&#39; claims about inference throughput and TTFT on very large models. Review vendor reproducibility and joint test terms as part of procurement.</p>
+<p>Resources and references (operational): vendor datasheets, NVMe and RoCE best-practices, fio/SPDK test plans, and your own replayed tenant traffic for PoC validation.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
