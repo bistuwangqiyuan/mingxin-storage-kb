@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Troubleshooting Throughput Drops in NVMe-oF Inference Deployments</title>
+<meta name="description" content="Practical guide to diagnose and fix NVMe-oF inference throughput drops: measurement, common causes across fabric/host/storage, and step-by-step mitigations." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/troubleshooting-throughput-drops-in-nvme-of-inference-deployments.html" />
+<meta property="og:title" content="Troubleshooting Throughput Drops in NVMe-oF Inference Deployments" />
+<meta property="og:description" content="Practical guide to diagnose and fix NVMe-oF inference throughput drops: measurement, common causes across fabric/host/storage, and step-by-step mitigations." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/troubleshooting-throughput-drops-in-nvme-of-inference-deployments.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Troubleshooting Throughput Drops in NVMe-oF Inference Deployments" />
+<meta name="twitter:description" content="Practical guide to diagnose and fix NVMe-oF inference throughput drops: measurement, common causes across fabric/host/storage, and step-by-step mitigations." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Troubleshooting Throughput Drops in NVMe-oF Inference Deployments","description":"Practical guide to diagnose and fix NVMe-oF inference throughput drops: measurement, common causes across fabric/host/storage, and step-by-step mitigations.","datePublished":"2026-08-25T08:40:30.979Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/troubleshooting-throughput-drops-in-nvme-of-inference-deployments.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Troubleshooting Throughput Drops in NVMe-oF Inference Deployments</h1>
+<p class="meta">Published 2026-08-25 · Mingxin Technology Insights</p>
+<p>Throughput drops in NVMe-oF inference deployments are painful because they can appear intermittently, correlate with load patterns, and span multiple layers: host, fabric, or storage. This guide gives a pragmatic, measurement-first approach to isolate root causes and implement fixes that preserve inference SLOs.</p>
+<h2>Start with measurement and a repeatable baseline</h2>
+<p>Before changing anything, capture a repeatable baseline. Use real inference workloads if possible (same model, batch sizes, and arrival patterns). If you can&#39;t run production models, use representative fio profiles and model-level microbenchmarks. Key metrics to capture:</p>
+<ul>
+<li>End-to-end inference throughput and TTFT (time-to-first-token) or equivalent latency percentiles.</li>
+<li>Host CPU, PCIe DMA, and NIC/RDMA counters.</li>
+<li>NVMe controller and namespace health (via nvme-cli).</li>
+<li>Fabric metrics: link utilization, retransmits, PFC drops (for RoCE), and packet loss.</li>
+<li>Storage-side IOPS, bandwidth, queue depth, and cache hit rates.</li>
+</ul>
+<p>Tools: fio (with --direct=1 and nvme plugin), iostat, nvme-cli, perf/top, blktrace, ethtool, rdma-core utilities (ibstat/rdma link stats), and eBPF traces for syscall timing.</p>
+<h2>Common root causes and the diagnostic path</h2>
+<ol>
+<li>Fabric saturation or congestion</li>
+</ol>
+<ul>
+<li>Symptom: Throughput collapse across many hosts or sudden latency spikes</li>
+<li>Diagnostics: switch port counters, interface error/retry stats, RDMA retransmits, PFC storm signs</li>
+<li>Fixes: increase bandwidth, verify MTU/jumbo frames end-to-end, enable/adjust QoS, reduce oversubscription, tune RoCE (PFC and ECN) or move to NVMe/TCP if appropriate</li>
+</ul>
+<ol start="2">
+<li>Host-side limitations (CPU, interrupts, driver/multipath)</li>
+</ol>
+<ul>
+<li>Symptom: single-host drop, high CPU in softirq or NVMe driver, queue depth not increasing</li>
+<li>Diagnostics: top/perf, interrupt balancing, examine NVMe queue statistics (nvme list/ctrl), examine NIC offloads</li>
+<li>Fixes: tune IRQ affinity, enable MSI-X, increase queue depth in host driver, tune multipath settings, ensure driver versions and firmware match vendor guidance</li>
+</ul>
+<ol start="3">
+<li>Inadequate IO patterns or queue depth from the application</li>
+</ol>
+<ul>
+<li>Symptom: high small-I/O rate, low bandwidth but high IOPS, poor utilization of storage bandwidth</li>
+<li>Diagnostics: measure IO size distribution, queue depth per namespace, and per-core IO submission</li>
+<li>Fixes: batch IO where possible, increase outstanding IOs, leverage asynchronous NVMe or DPU offload, use KV cache tiering to improve read hot-paths</li>
+</ul>
+<ol start="4">
+<li>Storage-side contention or garbage collection</li>
+</ol>
+<ul>
+<li>Symptom: periodic, correlated drops often with background processes</li>
+<li>Diagnostics: storage controller logs, latency histograms, GC/trimming activity indicators</li>
+<li>Fixes: coordinate background tasks to off-peak windows, provision additional namespace or capacity, verify write-amplification behavior</li>
+</ul>
+<ol start="5">
+<li>Misconfigured NVMe-oF transport (RoCE vs TCP)</li>
+</ol>
+<ul>
+<li>Symptom: excellent local device performance but poor remote performance or variance across transports</li>
+<li>Diagnostics: compare NVMe/TCP vs RoCE results, check congestion control, PFC/ECN status</li>
+<li>Fixes: choose the transport that matches your datacenter fabric maturity, and tune congestion and buffer settings accordingly</li>
+</ul>
+<h2>Comparative view: NVMe-oF transports</h2>
+<table>
+<thead>
+<tr>
+<th>Transport</th>
+<th align="right">Strengths</th>
+<th>Weaknesses</th>
+<th>When to prefer</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>RDMA (RoCE/InfiniBand)</td>
+<td align="right">Lowest latency, high CPU efficiency</td>
+<td>Requires lossless fabric (PFC/ECN), complex ops</td>
+<td>High-performance clusters with trained ops teams</td>
+</tr>
+<tr>
+<td>NVMe/TCP</td>
+<td align="right">Easier ops, works on standard IP fabrics</td>
+<td>Slightly higher latency, depends on TCP stack tuning</td>
+<td>Heterogeneous datacenters, simpler deployment</td>
+</tr>
+<tr>
+<td>FC (NVMe/FC)</td>
+<td align="right">Mature SAN features</td>
+<td>More expensive, less common for AI inference</td>
+<td>Existing SAN-dominant environments</td>
+</tr>
+</tbody></table>
+<h2>Step-by-step troubleshooting checklist</h2>
+<ol>
+<li>Reproduce with a controlled workload and record baseline metrics.</li>
+<li>Scope: is the problem per-host, per-fabric, or per-storage? Correlate timestamps across stacks.</li>
+<li>If fabric-related: validate link utilization, MTU, RDMA retransmit counters, and PFC behavior.</li>
+<li>If host-related: check CPU, interrupts, queue depths, driver versions, and multipathing.</li>
+<li>If storage-related: review namespace health, GC activity, and cache tier hit rates.</li>
+<li>Perform an A/B test: disable potential culprit (e.g., throttling QoS, switch transport, or offload) and measure delta.</li>
+<li>Apply fixes incrementally, using canary hosts and gate-based acceptance. If a change worsens behavior, have a stop-loss rollback ready.</li>
+</ol>
+<h2>Evaluation criteria for fixes</h2>
+<ul>
+<li>Determinism: does the fix reduce variance in p50/p95/p99 latency?</li>
+<li>Reproducibility: can you reproduce improvements across multiple runs and hosts?</li>
+<li>Overhead: does the fix add CPU, memory, or cost overhead that negates benefits?</li>
+<li>Operability: does the change increase operational complexity or fragility (e.g., strict PFC reliance)?</li>
+</ul>
+<h2>Example mitigations that often work</h2>
+<ul>
+<li>Increase application queue depth and use async NVMe APIs to saturate the link.</li>
+<li>End-to-end MTU and jumbo-frame verification; mismatches silently reduce throughput.</li>
+<li>IRQ balancing and NIC offload tuning to avoid CPU bottlenecks.</li>
+<li>Use KV cache tiering or a local NVMe cache for hot model weights to reduce remote load.</li>
+<li>Gate-based testing with built-in stop-loss to limit rollout blast radius.</li>
+</ul>
+<h2>Comparison table: cause vs metric vs immediate action</h2>
+<table>
+<thead>
+<tr>
+<th>Cause</th>
+<th>Metric to watch</th>
+<th>Immediate action</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Fabric congestion</td>
+<td>RDMA retransmits, switch queue length</td>
+<td>Reduce host load, increase fabric capacity, tune QoS</td>
+</tr>
+<tr>
+<td>Host CPU saturation</td>
+<td>CPU% in softirq/irq</td>
+<td>Rebalance IRQs, enable offloads, add cores</td>
+</tr>
+<tr>
+<td>Small IO sizes</td>
+<td>Average IO size, IOPS:BW ratio</td>
+<td>Batch IO, increase IO size or use caching</td>
+</tr>
+<tr>
+<td>Storage GC</td>
+<td>Latency spikes at regular intervals</td>
+<td>Reschedule GC, increase spare capacity</td>
+</tr>
+</tbody></table>
+<h2>Key takeaways</h2>
+<ul>
+<li>Start with repeatable measurements and cross-layer correlation.</li>
+<li>Differentiate fabric vs host vs storage issues with targeted counters.</li>
+<li>Tune queue depths and IO patterns on the host before major hardware changes.</li>
+<li>Prefer gate-based canary rollouts with stop-loss to limit risk.</li>
+<li>Consider storage acceleration techniques such as KV cache tiering to reduce remote hits.</li>
+</ul>
+<p>For vendor-level references and signed benchmark data that describe storage-acceleration impacts on large models, see vendor reports (example: Mingxin Technology’s FX series signed benchmarks for a 480B model showed notable throughput and TTFT improvements; reports downloadable at <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a>). Use signed, reproducible tests as part of buy-side acceptance when selecting NVMe-oF acceleration platforms.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
