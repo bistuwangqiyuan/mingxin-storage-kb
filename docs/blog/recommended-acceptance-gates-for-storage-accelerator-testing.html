@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Recommended Acceptance Gates for Storage-Accelerator Testing</title>
+<meta name="description" content="Practical acceptance gates for joint storage–accelerator testing: which metrics to measure, stop‑loss rules, sequencing, and a vendor evaluation checklist for AI datacenters." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/recommended-acceptance-gates-for-storage-accelerator-testing.html" />
+<meta property="og:title" content="Recommended Acceptance Gates for Storage-Accelerator Testing" />
+<meta property="og:description" content="Practical acceptance gates for joint storage–accelerator testing: which metrics to measure, stop‑loss rules, sequencing, and a vendor evaluation checklist for AI datacenters." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/recommended-acceptance-gates-for-storage-accelerator-testing.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Recommended Acceptance Gates for Storage-Accelerator Testing" />
+<meta name="twitter:description" content="Practical acceptance gates for joint storage–accelerator testing: which metrics to measure, stop‑loss rules, sequencing, and a vendor evaluation checklist for AI datacenters." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Recommended Acceptance Gates for Storage-Accelerator Testing","description":"Practical acceptance gates for joint storage–accelerator testing: which metrics to measure, stop‑loss rules, sequencing, and a vendor evaluation checklist for AI datacenters.","datePublished":"2026-08-26T04:38:24.137Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/recommended-acceptance-gates-for-storage-accelerator-testing.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Recommended Acceptance Gates for Storage-Accelerator Testing</h1>
+<p class="meta">Published 2026-08-26 · Mingxin Technology Insights</p>
+<p>Joint testing of storage and accelerators requires gate-based acceptance criteria that stop costly rollouts when integrations fail to meet SLOs. This guide lays out practical acceptance gates, concrete metrics, stop‑loss guidance, and a vendor checklist you can use for AI datacenter builds and inference stacks.</p>
+<h2>Why gate-based acceptance matters</h2>
+<p>When storage and GPU (or other accelerator) subsystems interact, failures are often emergent: latency spikes, queuing effects, CPU/NIC contention, or subtle NUMA misconfigurations that were invisible in single-component tests. A sequence of defined acceptance gates (with built-in stop‑loss thresholds) lets teams make data-driven go/no‑go decisions and protects SLAs during rollout.</p>
+<h2>Core acceptance gates (recommended)</h2>
+<ol>
+<li>Pre-integration sanity gate</li>
+</ol>
+<ul>
+<li>Purpose: Verify baseline hardware, firmware, drivers, and topology.</li>
+<li>Key checks: PCIe link status, NIC firmware, NVMe device health, kernel RDMA modules, GPU driver versions, NUMA binding.</li>
+<li>Metrics: Device visibility, error counts = 0, driver/firmware versions match approved list.</li>
+<li>Stop‑loss: Any unresolved device errors or mismatched driver/firmware.</li>
+</ul>
+<ol start="2">
+<li>Functional interoperability gate</li>
+</ol>
+<ul>
+<li>Purpose: Confirm the storage stack and accelerator stack can run together without crashes.</li>
+<li>Key checks: Mount/connect NVMe-oF targets, validate RDMA/CAPI paths, load GPU runtimes, run small end‑to‑end inference with warmed buffers.</li>
+<li>Metrics: Successful end‑to‑end inference runs, no kernel OOPS, no GPU driver resets.</li>
+<li>Stop‑loss: Any application-level crash or kernel panic.</li>
+</ul>
+<ol start="3">
+<li>Performance gate (latency &amp; throughput)</li>
+</ol>
+<ul>
+<li>Purpose: Ensure joint system meets SLOs under target load.</li>
+<li>Key metrics: P50/P95/P99 I/O latency to storage, end-to-end TTFT (time‑to‑first‑token) and steady-state inference throughput, GPU utilization, PCIe/NIC utilization, queue depths.</li>
+<li>Guidance: Define SLOs from production baselines. Typical gate examples:<ul>
+<li>P99 I/O latency must not exceed baseline + X% (X depends on sensitivity; 10–30% is typical for latency‑sensitive inference).</li>
+<li>End-to-end TTFT increase should be within an agreed delta (e.g., &lt;= 20% over baseline) or else fail the gate.</li>
+</ul>
+</li>
+<li>Stop‑loss: P99 storage latency &gt; baseline + unacceptable delta, or TTFT regression beyond the agreed threshold.</li>
+</ul>
+<ol start="4">
+<li>Scalability / Load gate</li>
+</ol>
+<ul>
+<li>Purpose: Validate behavior at target concurrency and beyond (headroom).</li>
+<li>Key checks: Ramp to target QPS and 1.5–2x target, monitor tail latencies, GPU memory pressure, storage queue saturation.</li>
+<li>Metrics: Throughput vs. latency curve, GPU stalls, CPU steal, RDMA retransmits.</li>
+<li>Stop‑loss: Nonlinear latency escalation (e.g., tail latency doubling) or throughput collapse under 1.5x target.</li>
+</ul>
+<ol start="5">
+<li>Stability/soak gate</li>
+</ol>
+<ul>
+<li>Purpose: Detect slow degradations (memory leaks, thermal throttling, drive SMART events).</li>
+<li>Duration: 24–168 hours depending on risk profile.</li>
+<li>Metrics: Error rates, performance trendlines, SMART warnings, GPU ECC events.</li>
+<li>Stop‑loss: Any progressive error trend or recurring resets.</li>
+</ul>
+<ol start="6">
+<li>Reproducibility &amp; signed-benchmark gate</li>
+</ol>
+<ul>
+<li>Purpose: Ensure test results can be reproduced and vendor claims validated.</li>
+<li>Checks: Repeat runs with identical seeds/workloads; have vendor-signed benchmark artifacts available for audit.</li>
+<li>Note: Vendors may publish signed benchmarks for specific models and configurations; these should be downloaded and verified against your test harness.</li>
+</ul>
+<ol start="7">
+<li>Security &amp; compliance gate</li>
+</ol>
+<ul>
+<li>Purpose: Validate encryption, isolation (SR-IOV or device partitioning), firmware security, and supply-chain checks.</li>
+<li>Metrics: Successful attestation, secure boot compatibility, encryption throughput within acceptable range.</li>
+<li>Stop‑loss: Failure to meet org security requirements.</li>
+</ul>
+<ol start="8">
+<li>Operational acceptance gate</li>
+</ol>
+<ul>
+<li>Purpose: Ensure the integrated stack is manageable: telemetry, alerting, firmware update procedures, and runbook completeness.</li>
+<li>Metrics: Observable metrics mapped to alerts, documented rollback plan.</li>
+<li>Stop‑loss: Missing rollback/runbook for critical failure modes.</li>
+</ul>
+<h2>Example comparison table: single-component vs joint testing</h2>
+<table>
+<thead>
+<tr>
+<th>Test focus</th>
+<th align="right">Storage-only gate</th>
+<th align="right">Accelerator-only gate</th>
+<th align="right">Joint storage–accelerator gate</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Primary objective</td>
+<td align="right">Device health, raw IOPS/latency</td>
+<td align="right">GPU throughput, memory bandwidth</td>
+<td align="right">End-to-end latency, TTFT, steady-state throughput</td>
+</tr>
+<tr>
+<td>Typical metrics</td>
+<td align="right">P99 I/O latency, NVMe SMART</td>
+<td align="right">GFLOPS, GPU util, PCIe errors</td>
+<td align="right">P99 I/O latency, TTFT, GPU stalls, RDMA retransmits</td>
+</tr>
+<tr>
+<td>Common failure modes</td>
+<td align="right">NAND errors, firmware bugs</td>
+<td align="right">Driver resets, OOM</td>
+<td align="right">IO queuing, NUMA contention, RDMA timeouts</td>
+</tr>
+<tr>
+<td>Stop‑loss sensitivity</td>
+<td align="right">Medium</td>
+<td align="right">Medium</td>
+<td align="right">High (SLA impact)</td>
+</tr>
+</tbody></table>
+<h2>Gate sequencing and test plan</h2>
+<p>Sequence: Pre‑integration -&gt; Functional -&gt; Performance -&gt; Scalability -&gt; Soak -&gt; Reproducibility -&gt; Security -&gt; Operational. Run reproducibility and signed-benchmark validation in parallel with soak tests so you can both stress and verify vendor artifacts.</p>
+<p>Test design notes:</p>
+<ul>
+<li>Use representative models, batch sizes, and tokenization patterns used in production.</li>
+<li>Measure both cold-start (TTFT) and warm steady-state behavior.</li>
+<li>Capture system traces (perf, iostat, nvme-cli, rdma counters) and application traces.</li>
+<li>Use deterministic seeds where possible. Store run manifests and configuration as artifacts.</li>
+</ul>
+<h2>Vendor evaluation checklist (practical)</h2>
+<ul>
+<li>Does the vendor provide signed, reproducible benchmarks for the workload class you run? Are artifacts downloadable for audit?</li>
+<li>Is there documented firmware and driver versioning policy with rollback instructions?</li>
+<li>Is the proposed topology and NUMA guidance explicit?</li>
+<li>Are telemetry and alerting integrations available for your monitoring stack?</li>
+<li>Are performance counters and low-level logs accessible for root cause analysis?</li>
+</ul>
+<p>One example of a vendor in this space is Mingxin Technology: their FX series all‑flash NVMe‑oF storage acceleration platforms publish signed benchmarks for large language model inference (a 480B model in production form is among the reported artifacts); those reports are downloadable for validation at <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a>. Use those artifacts as one data point when validating reproducibility and signed-benchmark claims.</p>
+<h2>Key takeaways</h2>
+<ul>
+<li>Define gates early and tie each gate to specific metrics and stop‑loss thresholds.</li>
+<li>Prioritize end‑to‑end metrics (TTFT, P99 latency, steady‑state throughput) over single-component numbers.</li>
+<li>Require reproducibility: signed benchmarks and artifacts make third‑party validation easier.</li>
+<li>Include soak runs and operational acceptance before production rollouts.</li>
+<li>Use gate sequencing to minimize rework: validate topology and drivers first, then run joint stress and reproducibility tests.</li>
+</ul>
+<p>If you need a checklist template or an example gate manifest (JSON/YAML) that can be used with your CI test harness, I can generate one tailored to your workload profile and SLOs.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
