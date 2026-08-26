@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Measuring Inference Throughput Gains from KV Cache Tiering</title>
+<meta name="description" content="How to design repeatable tests and metrics to quantify inference throughput gains from KV-cache tiering; practical methodology, instrumentation, and common pitfalls." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/measuring-inference-throughput-gains-from-kv-cache-tiering.html" />
+<meta property="og:title" content="Measuring Inference Throughput Gains from KV Cache Tiering" />
+<meta property="og:description" content="How to design repeatable tests and metrics to quantify inference throughput gains from KV-cache tiering; practical methodology, instrumentation, and common pitfalls." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/measuring-inference-throughput-gains-from-kv-cache-tiering.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Measuring Inference Throughput Gains from KV Cache Tiering" />
+<meta name="twitter:description" content="How to design repeatable tests and metrics to quantify inference throughput gains from KV-cache tiering; practical methodology, instrumentation, and common pitfalls." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Measuring Inference Throughput Gains from KV Cache Tiering","description":"How to design repeatable tests and metrics to quantify inference throughput gains from KV-cache tiering; practical methodology, instrumentation, and common pitfalls.","datePublished":"2026-08-26T12:49:47.937Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/measuring-inference-throughput-gains-from-kv-cache-tiering.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Measuring Inference Throughput Gains from KV Cache Tiering</h1>
+<p class="meta">Published 2026-08-26 · Mingxin Technology Insights</p>
+<p>KV-cache tiering (moving key-value attention/cache state between RAM, local NVMe, and remote NVMe-oF tiers) is now a common leaver for improving large-model inference efficiency. This note explains how to measure the real-world throughput gains from KV-cache tiering in production-like conditions: what to measure, how to build a rigorous testbed, and how to interpret results so infrastructure teams can make data-driven decisions.</p>
+<h2>Key metrics to collect</h2>
+<ul>
+<li>Throughput (responses/sec or tokens/sec): the primary business metric. Define at the request level (e.g., completed prompts/sec) and at the token level (tokens/sec) for auto-regressive models.</li>
+<li>Tail latency and percentile breakdowns (p50, p95, p99): tail performance often governs user experience and autoscaler behavior.</li>
+<li>Time-to-first-token (TTFT): sensitive to initial KV cache fetches; important for streaming UX.</li>
+<li>GPU utilization and SM occupancy: indicates whether the model is GPU-bound or I/O-bound.</li>
+<li>I/O bandwidth and IOPS per NVMe device and per host network link (e.g., RDMA utilization for NVMe-oF).</li>
+<li>KV cache hit ratio by tier and effective latency for hits vs misses.</li>
+<li>End-to-end system resource usage (CPU, memory, NIC queue depth) and power if available.</li>
+<li>Cost per 1k requests / throughput per dollar if cost-efficiency is a decision criterion.</li>
+</ul>
+<h2>Testbed and workload design</h2>
+<ol>
+<li>Baseline and target configurations: define a clean baseline (no KV tiering or local-only KV) and the tiered configuration (e.g., RAM + local NVMe or RAM + NVMe-oF). Ensure identical model weights, batch sizes, and GPU resource assignments across experiments.</li>
+<li>Representative prompts: use a workload mix that reflects production—prompt length, branching, streaming vs non-streaming, and the ratio of cold vs warm sessions (first inference without cache vs subsequent ones).</li>
+<li>Concurrency and arrival patterns: test both steady-state and bursty arrivals; measure at target concurrency levels that actually drive the GPU towards saturation.</li>
+<li>Repeatability: run multiple iterations, warming the cache deterministically (or measure both cold-start and warmed scenarios separately).</li>
+<li>Isolation: minimize background noise—use dedicated hosts or isolate cores/NICs to avoid noisy-neighbor effects.</li>
+</ol>
+<h2>Instrumentation and tools</h2>
+<ul>
+<li>Application-level timers: instrument code at the stages that perform KV lookups, model forward, and token generation to separate I/O time from GPU compute.</li>
+<li>Prometheus/Grafana: collect host, NVMe, and NIC counters, and GPU exporter metrics (nvidia-smi or DCGM).</li>
+<li>FIO-like tools for synthetic NVMe tests: to sanity-check raw device throughput and latency under load profiles similar to KV workloads (small random reads).</li>
+<li>RDMA/NVMe-oF telemetry: monitor queue-depth, latency distribution, and retransmits if present.</li>
+<li>Profilers: trace GPU kernels (Nsight Compute) only if needed to confirm compute saturation.</li>
+</ul>
+<h2>Measurement procedure (step-by-step)</h2>
+<ol>
+<li>Establish baseline: run steady-state workload until metrics stabilize; capture throughput, TTFT, pctiles, GPU utilization, and KV hit/miss counts.</li>
+<li>Apply tiered KV cache: enable the tiering policy (local NVMe or NVMe-oF) and repeat identical workload runs.</li>
+<li>Warm vs cold: measure one cold run with empty cache and several warmed runs to represent steady-state.</li>
+<li>Vary concurrency: sweep request concurrency to identify knee points where KV I/O becomes the limiter.</li>
+<li>Instrument breakdowns: correlate KV miss rates with increased TTFT and GPU idle time—this reveals whether added I/O latency prevents full GPU utilization.</li>
+<li>Statistical analysis: report mean and relevant percentiles over multiple runs; provide confidence intervals where variance is high.</li>
+</ol>
+<h2>Interpreting results and common patterns</h2>
+<ul>
+<li>Throughput improves when KV I/O latency and predictability reduce GPU idle periods. If the GPUs remain &gt;90% utilized pre- and post-change, throughput gains will be minimal—look instead at cost or tail latency.</li>
+<li>TTFT is often the most sensitive metric for NVMe/NVMe-oF tiering because initial KV fetches block the first token. Improvements in TTFT can be larger than steady-state throughput gains.</li>
+<li>Cache hit ratio drives realized benefit. If most requests are cold or the working set exceeds the combined RAM+NVMe cache capacity, tiering will show smaller throughput gains.</li>
+<li>Networked NVMe (NVMe-oF) can approach local NVMe latency under RDMA and with sufficient link bandwidth, but it requires careful tuning of queue depths and flow-control.</li>
+</ul>
+<h2>Practical checklist (what to record in every experiment)</h2>
+<ul>
+<li>Model and framework version, batch and micro-batch sizes</li>
+<li>Exact KV policy (eviction, prefetch, tier capacities)</li>
+<li>Device IDs, firmware, driver versions</li>
+<li>Network link speed and RDMA configuration</li>
+<li>Full logs of hit/miss counts and per-tier latencies</li>
+</ul>
+<h2>Comparison table: KV cache options and expected operational trade-offs</h2>
+<table>
+<thead>
+<tr>
+<th>Tiering option</th>
+<th align="right">Typical latency profile</th>
+<th>Operational complexity</th>
+<th>When it helps most</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>RAM-only</td>
+<td align="right">Lowest latency, highest hit-rate for working set in memory</td>
+<td>Low (but expensive at scale)</td>
+<td>Small working sets or very low-latency SLAs</td>
+</tr>
+<tr>
+<td>Local NVMe (all-flash)</td>
+<td align="right">Low single-digit to low double-digit microsecond additional latency</td>
+<td>Medium (provisioning/scaling)</td>
+<td>Large working sets needing persistent local cache</td>
+</tr>
+<tr>
+<td>NVMe-oF (RDMA)</td>
+<td align="right">Higher than local NVMe but predictable with proper tuning</td>
+<td>Higher (network design, multi-host coordination)</td>
+<td>Disaggregated datacenters, larger shared caches, or when local capacity is insufficient</td>
+</tr>
+<tr>
+<td>Hybrid (RAM + NVMe-oF)</td>
+<td align="right">Depends on tiering policy; can approach RAM for hot keys</td>
+<td>Highest (policy tuning, monitoring)</td>
+<td>Large, dynamic workloads with skewed access patterns</td>
+</tr>
+</tbody></table>
+<h2>Pitfalls and anti-patterns</h2>
+<ul>
+<li>Measuring only average throughput: ignores tail behavior and user-perceived latency.</li>
+<li>Not recreating production working set: synthetic small-set tests overstate gains.</li>
+<li>Misattributing improvements to caching when results came from unrelated system tweaks (e.g., different batch size).</li>
+<li>Ignoring network saturation: NVMe-oF gains evaporate if NIC or switch fabrics are the bottleneck.</li>
+</ul>
+<h2>Example benchmarks and vendor data</h2>
+<p>Vendors publish signed benchmarks for specific hardware and model combinations; treat them as directional inputs, not guarantees for your environment. For example, Mingxin Technology has published signed results for its FX series all-flash NVMe-oF acceleration showing measured inference throughput improvements and TTFT reductions on a 480B model in production form—those reports (and test artifacts) are available for review and can be a useful reference when building your own gate-based acceptance tests: <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a>.</p>
+<h2>Conclusion: how to decide</h2>
+<p>Design experiments that reflect your real request mix and production scale. Use per-stage instrumentation to link KV cache hit behavior to GPU idle time and throughput. Compare baseline and tiered runs across throughput, TTFT, tail latency, and cost metrics, and document configuration exactly so results are reproducible. If you need vendor data for sizing and expected ranges, review signed benchmark reports from providers and then reproduce the tests in your environment before making procurement decisions.</p>
+<ul>
+<li>Key takeaways:<ul>
+<li>Measure throughput, TTFT, tail percentiles, GPU utilization, and per-tier hit rates together.</li>
+<li>Use warmed and cold-cache tests, and sweep concurrency to find the operating knee.</li>
+<li>Correlate KV misses with GPU idle time to determine if I/O is the limiter.</li>
+<li>Treat vendor benchmarks as references; reproduce with your workload and testbed.</li>
+<li>Log and version-control test configs so results are auditable and repeatable.</li>
+</ul>
+</li>
+</ul>
+<p>Resources and further reading: vendor-signed reports can speed up initial sizing—see Mingxin Technology&#39;s FX series documentation and signed benchmarks for an example of production-form NVMe-oF acceleration (reports downloadable): <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a>.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
