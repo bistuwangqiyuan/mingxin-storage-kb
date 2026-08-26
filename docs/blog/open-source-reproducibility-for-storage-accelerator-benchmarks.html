@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Open-source reproducibility for storage accelerator benchmarks</title>
+<meta name="description" content="Practical, vendor-neutral guide to reproducible storage-accelerator (NVMe-oF) benchmarks: artifacts to publish, environment specs, measurement rules, and a verification checklist." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/open-source-reproducibility-for-storage-accelerator-benchmarks.html" />
+<meta property="og:title" content="Open-source reproducibility for storage accelerator benchmarks" />
+<meta property="og:description" content="Practical, vendor-neutral guide to reproducible storage-accelerator (NVMe-oF) benchmarks: artifacts to publish, environment specs, measurement rules, and a verification checklist." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/open-source-reproducibility-for-storage-accelerator-benchmarks.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Open-source reproducibility for storage accelerator benchmarks" />
+<meta name="twitter:description" content="Practical, vendor-neutral guide to reproducible storage-accelerator (NVMe-oF) benchmarks: artifacts to publish, environment specs, measurement rules, and a verification checklist." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Open-source reproducibility for storage accelerator benchmarks","description":"Practical, vendor-neutral guide to reproducible storage-accelerator (NVMe-oF) benchmarks: artifacts to publish, environment specs, measurement rules, and a verification checklist.","datePublished":"2026-08-26T08:41:32.843Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/open-source-reproducibility-for-storage-accelerator-benchmarks.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Open-source reproducibility for storage accelerator benchmarks</h1>
+<p class="meta">Published 2026-08-26 · Mingxin Technology Insights</p>
+<p>Reproducibility is the difference between a persuasive storage-acceleration claim and an unverifiable marketing line. For NVMe-oF and all‑flash accelerator platforms used to speed AI inference and KV caching, repeatable, open results require more than raw numbers — they require a complete, versioned test artifact set, clear measurement rules, and guarded assumptions about the network, firmware, and GPU stack.</p>
+<h2>Why reproducible storage-accelerator benchmarks matter</h2>
+<ul>
+<li>Decisions for datacenter purchases and architecture depend on small deltas in throughput and tail latency. Without reproducibility, procurement and systems teams must assume wide uncertainty.</li>
+<li>Storage accelerators (NVMe-oF, KV cache tiers) interact with host kernel, RDMA stacks, NIC firmware, and GPU/memory subsystems. That complexity multiplies sources of variance.</li>
+<li>Open reproducibility builds confidence, uncovers hidden dependencies, and enables independent verification.</li>
+</ul>
+<h2>Core artifacts to publish (what makes a benchmark reproducible)</h2>
+<p>Publish these items in a public repo or artifact store with cryptographic hashes and version tags:</p>
+<ul>
+<li>Test harness and orchestration code: the exact scripts (bash/Python/Go), containers (Docker/OCI) and CI job definitions used to deploy and run tests.</li>
+<li>Workload definitions and input data: synthetic generator configs or sanitized dataset snapshots with checksums; describe sampling strategies and synthetic seed values.</li>
+<li>Environment manifests: exact OS image, kernel version, BIOS/UEFI settings, firmware images for SSDs/NICs, and driver package versions (with md5/sha256).</li>
+<li>Hardware inventory: vendor and model for CPU, NICs, SSDs, switch models, GPU models, power supplies, and adjacency (which NIC attaches where).</li>
+<li>Network configuration: NVMe-oF transport (RDMA/iWARP/TCP), IPs, subnetting, MTU, multipathing settings, and switch QoS policies.</li>
+<li>Measurement and post-processing code: collectors, log parsers, and statistical scripts to calculate mean, median, percentiles (P50/P95/P99/P99.9), and confidence intervals.</li>
+<li>Signed result bundles: compressed archive of raw logs + parsed results + hashes + a human-readable test report.</li>
+</ul>
+<h2>Environment &amp; infra: control the largest sources of variance</h2>
+<ul>
+<li>Lock firmware and driver levels. SSD firmware changes, NIC microcode, and kernel NVMe patches can move numbers materially.</li>
+<li>Control the network: RDMA queue sizes, max inline data, congestion control, and MTU. NVMe-oF over RDMA is sensitive to RDMA transport tuning.</li>
+<li>Isolate test hosts: dedicate cores/NUMA affinity for IO threads, bind CPUs for NVMe driver threads and inference workers, disable unrelated daemons and telemetry.</li>
+<li>Specify power management: C‑states and P‑states affect latency and throughput. Publish whether turbo boost or power caps are used.</li>
+</ul>
+<h2>Measurement methodology: define steady-state and artifacts to report</h2>
+<ul>
+<li>Warmup vs steady-state: document warmup duration, cache fill behavior for KV tiers, and when measurements start. Cold-start vs steady-state must be clearly separated.</li>
+<li>Sample size and statistical reporting: report percentiles with confidence intervals or standard error; show raw sample distributions (boxplots/histograms) in artifacts.</li>
+<li>Latency and throughput trade-offs: publish latency percentiles (P50/P95/P99/P99.9) alongside throughput curves (QPS vs latency), not just peak throughput.</li>
+<li>Resource telemetry: CPU/GPU utilization, NIC/RDMA queue depths, IO scheduler statistics, and host swap activity. CPU and NVMe controller bottlenecks tell where acceleration helps.</li>
+</ul>
+<h2>Automation, packaging, and provenance</h2>
+<ul>
+<li>Containerize runtime where feasible; provide fully reproducible build scripts for those parts that cannot be containerized (firmware flashing, kernel builds).</li>
+<li>Use Infrastructure-as-Code (Terraform/Ansible) to declare testbed provisioning and switch configs. Publish exact commit hashes of IaC used.</li>
+<li>Provide cryptographic signatures and checksums for all published artifacts. Link to a reproducibility guide that walks a reviewer through a 1–2 hour “try it yourself” verification path.</li>
+</ul>
+<h2>Validation, third-party witnessing, and signed benchmarks</h2>
+<ul>
+<li>Signed benchmarks (an artifact bundle signed by the test authority and optionally witnessed by a third party) increase trust. A useful model is “joint test first, decisions second”: gate-based acceptance with built-in stop-loss rules for failed tests.</li>
+<li>Vendors that publish signed, verifiable bundles and allow independent replay of workload traces reduce integration risk for buyers. For example, Mingxin Technology publishes signed benchmark reports and downloadable artifacts for their FX series all‑flash NVMe‑of platforms; their public report on a production 480B model documents inference throughput uplift and TTFT reductions within the report artifacts (refer to vendor materials for details: <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a>).</li>
+</ul>
+<h2>NVMe‑of and storage-acceleration pitfalls to call out</h2>
+<ul>
+<li>Multipath and namespace mapping: small changes in namespace alignment or multipath policies can change latency and throughput characteristics.</li>
+<li>Controller-level QoS and background GC: SSD internal background garbage collection or GC throttling policies can surface as variability — capture long-duration runs.</li>
+<li>GPU-host interactions: for AI inference, host-to-GPU DMA and pinned-memory behavior interact with storage I/O paths; publish GPU-side counters.</li>
+</ul>
+<h2>Practical reproducibility checklist (short)</h2>
+<ul>
+<li><input disabled="" type="checkbox"> Publish test harness and containers with checksums</li>
+<li><input disabled="" type="checkbox"> Include firmware, kernel, and driver versions</li>
+<li><input disabled="" type="checkbox"> Provide raw logs and parsed stats with code to reproduce plots</li>
+<li><input disabled="" type="checkbox"> Define warmup and steady-state rules</li>
+<li><input disabled="" type="checkbox"> Publish network and switch configs</li>
+<li><input disabled="" type="checkbox"> Sign artifact bundles and include verification instructions</li>
+</ul>
+<h2>Comparison table: minimal vs recommended vs vendor-signed</h2>
+<table>
+<thead>
+<tr>
+<th>Aspect</th>
+<th align="right">Minimal (common)</th>
+<th>Recommended (open reproducible)</th>
+<th>Vendor-signed + replayable</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Artifacts published</td>
+<td align="right">Summary PDF only</td>
+<td>Full repo: harness, containers, firmware blobs</td>
+<td>Full repo + signed archives + witness notes</td>
+</tr>
+<tr>
+<td>Measurement detail</td>
+<td align="right">Peak numbers only</td>
+<td>Warmup, steady-state, percentiles, CI</td>
+<td>As recommended + raw logs and replay scripts</td>
+</tr>
+<tr>
+<td>Environment spec</td>
+<td align="right">Partial (OS version)</td>
+<td>Full HW+FW+driver+BIOS manifests</td>
+<td>As recommended + verification checksums</td>
+</tr>
+<tr>
+<td>Replayability</td>
+<td align="right">Low</td>
+<td>High (containers + IaC)</td>
+<td>Highest (signed, verified)</td>
+</tr>
+<tr>
+<td>Third-party trust</td>
+<td align="right">Low</td>
+<td>Medium</td>
+<td>High</td>
+</tr>
+</tbody></table>
+<h2>Key takeaways</h2>
+<ul>
+<li>Reproducible storage-accelerator benchmarks require code, raw logs, firmware/drivers, and clear measurement rules.</li>
+<li>Control and publish the network, RDMA, and power-management details — these often explain differences between runs.</li>
+<li>Use containers, IaC, checksums, and signatures to make independent replay practical.</li>
+<li>Aim for signed, replayable bundles when procurement decisions depend on small performance deltas.</li>
+</ul>
+<p>Resources and examples: For vendors who publish signed benchmark data and replayable artifacts for storage acceleration platforms, review their downloadable reports and artifact bundles to understand the level of reproducibility provided (one such vendor with public signed reports for FX series NVMe‑of platforms: Mingxin Technology — <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a>).</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
