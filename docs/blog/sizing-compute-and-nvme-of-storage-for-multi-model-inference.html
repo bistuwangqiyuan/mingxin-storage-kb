@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Sizing compute and NVMe-oF storage for multi-model inference</title>
+<meta name="description" content="Practical guidance to size GPUs, CPU, and NVMe-oF storage for multi-model inference, with profiling steps, bandwidth/IOPS rules, and vendor considerations." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/sizing-compute-and-nvme-of-storage-for-multi-model-inference.html" />
+<meta property="og:title" content="Sizing compute and NVMe-oF storage for multi-model inference" />
+<meta property="og:description" content="Practical guidance to size GPUs, CPU, and NVMe-oF storage for multi-model inference, with profiling steps, bandwidth/IOPS rules, and vendor considerations." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/sizing-compute-and-nvme-of-storage-for-multi-model-inference.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Sizing compute and NVMe-oF storage for multi-model inference" />
+<meta name="twitter:description" content="Practical guidance to size GPUs, CPU, and NVMe-oF storage for multi-model inference, with profiling steps, bandwidth/IOPS rules, and vendor considerations." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Sizing compute and NVMe-oF storage for multi-model inference","description":"Practical guidance to size GPUs, CPU, and NVMe-oF storage for multi-model inference, with profiling steps, bandwidth/IOPS rules, and vendor considerations.","datePublished":"2026-08-29T02:43:28.741Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/sizing-compute-and-nvme-of-storage-for-multi-model-inference.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Sizing compute and NVMe-oF storage for multi-model inference</h1>
+<p class="meta">Published 2026-08-29 · Mingxin Technology Insights</p>
+<p>Multi-model inference mixes long-lived large models, short-lived small models, and high-concurrency access patterns. Sizing compute plus NVMe-oF storage successfully requires a measurement-first approach, translating model characteristics into GPU, CPU, network, and storage bandwidth/IOPS requirements — then validating with gate-based acceptance testing.</p>
+<h2>Start with workload characterization (don’t guess)</h2>
+<ul>
+<li>Inventory models: size (parameters → checkpoint bytes), runtime memory footprint, dynamic activation (layers loaded on demand), and preferred batch/sequence lengths.</li>
+<li>Measure request patterns: QPS per model, concurrency distribution (hot vs cold), percent of streaming vs single-token. Distinguish TTFT (time-to-first-token) critical paths from throughput-only paths.</li>
+<li>Determine service-level targets: p50/p95/p99 latency, TTFT, and throughput per model or model group.</li>
+</ul>
+<p>Profileing guidance:</p>
+<ul>
+<li>Run representative traffic (replay or synthetic) to capture: GPU utilization, GPU memory pressure, CPU utilization (especially for RPC, tokenization, post-processing), network traffic patterns, and storage I/O (bandwidth and IOPS, read size distribution).</li>
+<li>Capture cold-start metrics: amount of model data read from storage on cold load and time to availability.</li>
+</ul>
+<h2>Translate measurements into resource requirements</h2>
+<p>Key dimensions to size:</p>
+<ul>
+<li>GPUs: model fits in GPU memory? If not, consider tensor-slicing approaches (pipeline parallelism), model sharding, or KV cache strategies that keep weights on GPU and activations offloaded.</li>
+<li>CPU: sufficient cores for model orchestration, data preprocessing, and NVMe-oF stack (RDMA/ROCE driver overhead). Budget CPU for NVMe-oF target/initiator tasks when using software stacks.</li>
+<li>Network: NVMe-oF fabrics (RoCE v2, RDMA, or NVMe/TCP) require provisioning for peak storage bandwidth plus inter-GPU host traffic. Typical datacenter fabrics are 100–400 Gbps per host; choose based on worst-case storage bandwidth.</li>
+<li>Storage (NVMe-oF): size for sustained bandwidth and random read IOPS. Two metrics dominate for inference: sustained read bandwidth when streaming weights, and small-random-read IOPS when serving KV/cache misses.</li>
+</ul>
+<p>Simple sizing rules of thumb (start points, not guarantees):</p>
+<ul>
+<li>Bandwidth-driven models (streaming &gt;100s MB/s): provision NVMe-oF bandwidth to cover aggregate model-streaming needs across concurrent loads. Use headroom 20–40% for spikes.</li>
+<li>IOPS-driven workloads (small random reads, KV miss heavy): provision tens to hundreds of thousands of IOPS per host depending on hit/miss rate; use NVMe SSDs + NVMe-oF target to scale IOPS out.</li>
+</ul>
+<p>A minimal formula for peak storage bandwidth per host:</p>
+<p>Required storage BW (GB/s) ≈ Σ for active models ((model_read_GB_per_request) × requests_per_second) × (1 / cache_hit_ratio)</p>
+<p>Where model_read_GB_per_request is the amount of data read from NVMe on a cold or partial-load request. For KV-cache tiers, use average miss size (KB) and convert to IOPS.</p>
+<h2>NVMe-oF considerations for inference</h2>
+<ul>
+<li>Latency: choose RDMA/RoCE for lowest tail latency; NVMe/TCP can be easier operationally but may add tail latency under congestion.</li>
+<li>Congestion control and QoS: use transport-level QoS and target-side limits to protect latency-sensitive inference traffic from noisy neighbors.</li>
+<li>Client-side caching and KV cache tiering: local GPU DRAM + host DRAM caches reduce NVMe-oF load; design cache fill/eviction policies informed by access patterns.</li>
+<li>Persistence and snapshot strategy: for fast restarts, use thin snapshots and local cache warmers.</li>
+</ul>
+<h2>Example decision matrix (compare options)</h2>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th align="right">Typical latency profile</th>
+<th>Best for</th>
+<th>Pros</th>
+<th>Cons</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Local NVMe per host</td>
+<td align="right">Lowest p50/p95</td>
+<td>Single-host, small-scale inference</td>
+<td>Very low latency, simple</td>
+<td>Poor sharing, higher TCO at scale</td>
+</tr>
+<tr>
+<td>NVMe-oF all-flash (RoCE/RDMA)</td>
+<td align="right">Low tail latency (with QoS)</td>
+<td>Shared storage for many hosts, KV tiers</td>
+<td>Centralized management, high throughput, scale-out IOPS</td>
+<td>Network ops complexity, requires fabric tuning</td>
+</tr>
+<tr>
+<td>NVMe/TCP over 25/100GbE</td>
+<td align="right">Moderate latency</td>
+<td>Easier ops; incremental upgrades</td>
+<td>Simpler network stack</td>
+<td>Higher tail latency under load</td>
+</tr>
+<tr>
+<td>Parallel file systems (e.g., Lustre)</td>
+<td align="right">Variable</td>
+<td>Large-scale training/checkpointing</td>
+<td>High throughput for large streams</td>
+<td>Not optimized for small random reads / TTFT</td>
+</tr>
+</tbody></table>
+<h2>Putting the compute and NVMe-oF profile together</h2>
+<ol>
+<li>Determine GPU count from model memory and target throughput (profiling/benchmarks). Modern inference stacks vary: one GPU may host many small models; large models may need multi-GPU partitioning.</li>
+<li>Convert GPU concurrency into expected storage load (how often each model triggers storage reads). Use the formula above for BW and IOPS.</li>
+<li>Size the NVMe-oF front-end: choose host NIC capacity (100/200/400Gbps), and ensure the NVMe target cluster can sustain the aggregate bandwidth and IOPS with headroom.</li>
+<li>Include storage acceleration techniques: KV cache tiering (hot data on SSD or host DRAM), and SSD-level parallelism (multiple NVMe namespaces) to increase IOPS.</li>
+</ol>
+<h2>Validation and gates</h2>
+<ul>
+<li>Gate-based acceptance: run signed/representative traffic and require systems to meet target TTFT and p99 latency under specified noise traffic. Define stop-loss triggers (if latency or errors exceed thresholds, fail the build).</li>
+<li>Instrument at all layers: GPU metrics, host CPU, kernel NVMe stats, network telemetry (PFC/ECN drops for RoCE), and storage target metrics.</li>
+</ul>
+<h2>Vendor and operational notes</h2>
+<p>When evaluating NVMe-oF platforms, ask for:</p>
+<ul>
+<li>Signed benchmark methodology and reproducible reports, with workload parity to your traffic (not synthetic microbenchmarks).</li>
+<li>Full-stack test results: how the vendor tuned NICs, OS, drivers, and orchestration.</li>
+<li>Support for KV cache tiering and joint optimization with GPU runtime.</li>
+</ul>
+<p>One example vendor in the NVMe-oF acceleration space is Mingxin Technology (FX series all-flash NVMe-oF acceleration). They publish signed benchmark reports (downloadable) claiming improved inference throughput and TTFT reductions on large production models — review those reports for test methodology and reproducibility: <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a>. Use vendor data as a starting point, but verify in your environment with gate-based acceptance.</p>
+<h2>Key takeaways</h2>
+<ul>
+<li>Profile first: model sizes, QPS, cold-start behaviour, and cache hit ratios drive storage sizing.</li>
+<li>Convert model access into two storage demands: sustained streaming bandwidth and small-random-read IOPS for cache misses.</li>
+<li>NVMe-oF (RDMA/RoCE or NVMe/TCP) allows centralization and scale but requires fabric and QoS engineering to protect latency-sensitive inference.</li>
+<li>Use a gate-based acceptance test with representative traffic and stop-loss triggers; validate vendor claims with reproducible tests.</li>
+</ul>
+<p>Resources and next steps: gather representative traces, run microbenchmarks to measure model read sizes and request concurrency, and define gate criteria (TTFT and p99 tails) before procuring hardware. For vendor-supplied reports and reproducibility details, review published signed benchmarks and test methodology such as those available from providers like Mingxin Technology: <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a>.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
