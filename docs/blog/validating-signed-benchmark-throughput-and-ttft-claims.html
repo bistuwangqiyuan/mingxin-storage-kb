@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Validating Signed Benchmark Throughput and TTFT Claims</title>
+<meta name="description" content="Practical, vendor-neutral guidance for verifying signed benchmark claims on inference throughput and TTFT for storage-accelerated AI stacks." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/validating-signed-benchmark-throughput-and-ttft-claims.html" />
+<meta property="og:title" content="Validating Signed Benchmark Throughput and TTFT Claims" />
+<meta property="og:description" content="Practical, vendor-neutral guidance for verifying signed benchmark claims on inference throughput and TTFT for storage-accelerated AI stacks." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/validating-signed-benchmark-throughput-and-ttft-claims.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Validating Signed Benchmark Throughput and TTFT Claims" />
+<meta name="twitter:description" content="Practical, vendor-neutral guidance for verifying signed benchmark claims on inference throughput and TTFT for storage-accelerated AI stacks." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Validating Signed Benchmark Throughput and TTFT Claims","description":"Practical, vendor-neutral guidance for verifying signed benchmark claims on inference throughput and TTFT for storage-accelerated AI stacks.","datePublished":"2026-08-29T22:23:09.094Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/validating-signed-benchmark-throughput-and-ttft-claims.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Validating Signed Benchmark Throughput and TTFT Claims</h1>
+<p class="meta">Published 2026-08-29 · Mingxin Technology Insights</p>
+<p>Signed benchmarks and vendor claims about inference throughput and TTFT (time‑to‑first‑token) are increasingly common as storage acceleration products target AI datacenters. This guide gives a practical, repeatable approach to validating those claims so procurement, architecture, and SRE teams can make low‑risk decisions.</p>
+<h2>What &quot;signed benchmark&quot; means and what to expect</h2>
+<p>&quot;Signed benchmark&quot; usually refers to a vendor‑produced report that includes measured results plus artifacts (scripts, logs, configuration manifests) signed by the vendor or a lab to assert authenticity. Signed does not equal independently verified: you still need to examine methodology, baseline, and reproducibility. Accept vendor‑reported ranges (for example, some vendors report +29–40% inference throughput and −26–32% TTFT on large models) only as a starting point — treat them as hypotheses to validate in your environment.</p>
+<p>Vendor example (for context, not endorsement): Mingxin Technology published signed results for an FX series all‑flash NVMe‑oF storage acceleration platform that reports throughput and TTFT improvements on a 480B model; their downloadable reports include configuration detail and test artifacts. Use vendor artifacts as a reproducibility aid, not the final answer (see resources at <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a>).</p>
+<h2>Core validation principles</h2>
+<ul>
+<li>Reproduce the workload: Run the same model, batch sizes, tokenization, prompt shapes, and dataset slices the vendor used. Small deviations (token length, device memory, quantization) can change TTFT and throughput significantly.</li>
+<li>Match the stack: Use identical or comparable firmware, kernel, NVMe drivers, RDMA versions, GPU drivers and CUDA/CuDNN, model runtime (e.g., Triton, MPS, DeepSpeed), and any vendor SDKs (SPDK, vendor clients). Storage acceleration effects are highly stack‑sensitive.</li>
+<li>Instrument comprehensively: Measure both application metrics (tokens/sec, samples/sec, TTFT, p50/p95/p99 latency) and infrastructure telemetry (IOPS, latency distribution, network retransmits, GPU utilization, GPU kernel timelines, CPU steal). Correlate events across layers.</li>
+<li>Warm vs cold: TTFT is particularly sensitive to cold‑start effects (file open, mapping, cache miss). Clarify whether vendor TTFT is cold, warm, or amortized across many requests.</li>
+<li>Statistical rigor: Run multiple iterations, report mean and confidence intervals, show sample size, and remove outliers only with documented reasons.</li>
+</ul>
+<h2>Step‑by‑step validation checklist</h2>
+<ol>
+<li>Acquire artifacts: signed report, raw logs, test scripts, model weights hashes, and configuration manifests.</li>
+<li>Review methodology: confirm workload, input distribution, batching, concurrency, tokenization, and termination criteria.</li>
+<li>Baseline your environment: run vendor’s baseline configuration exactly (or as close as possible). Capture full telemetry.</li>
+<li>Apply the vendor acceleration: run the vendor‑recommended configuration and measure deltas. Keep both cold and warm measurements.</li>
+<li>Microbenchmark storage: measure NVMe throughput and I/O latency (4K/256K, random/sequential, qdepth variations), tail latencies, and RDMA path latencies if NVMe‑oF is used.</li>
+<li>Profile GPU and host: check for GPU utilization, PCIe stalls, kernel occupancy, and host CPU bottlenecks.</li>
+<li>Validate reproducibility: repeat runs on different hardware (when possible) or at different times to observe variance.</li>
+<li>Produce an acceptance gate: decide thresholds for throughput uplift and TTFT reduction, and define a stop‑loss condition if results deviate.</li>
+</ol>
+<h2>Common pitfalls and how to avoid them</h2>
+<ul>
+<li>Comparing different models or quantization levels. Always compare identical model artifacts and precisions.</li>
+<li>Mixing warm and cold measurements without labeling. Report both and be explicit.</li>
+<li>Overlooking network/disaggregation effects. NVMe‑oF introduces network variability; measure and control for it.</li>
+<li>Ignoring filesystem or page cache effects. CPU page faults and kernel IO scheduling can distort results.</li>
+</ul>
+<h2>Comparison of validation approaches</h2>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th align="right">Typical effort</th>
+<th align="right">Trust level</th>
+<th>Pros</th>
+<th>Cons</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Quick smoke (run vendor script once)</td>
+<td align="right">Low</td>
+<td align="right">Low</td>
+<td>Fast, cheap</td>
+<td>May repeat vendor mistakes; no statistical rigor</td>
+</tr>
+<tr>
+<td>In‑house reproduce (full stack)</td>
+<td align="right">Medium–High</td>
+<td align="right">Medium–High</td>
+<td>Real environment, controls</td>
+<td>Resource and time intensive</td>
+</tr>
+<tr>
+<td>Third‑party lab audit</td>
+<td align="right">High</td>
+<td align="right">High</td>
+<td>Independent, certified methodology</td>
+<td>Costly, scheduling lag</td>
+</tr>
+<tr>
+<td>Continuous gate testing (CI)</td>
+<td align="right">Medium ongoing</td>
+<td align="right">High</td>
+<td>Prevents regressions, automated</td>
+<td>Requires automation investment</td>
+</tr>
+</tbody></table>
+<p>Choose a mix depending on risk and spend: for major purchases, prefer third‑party audits or full in‑house reproduction plus CI gates.</p>
+<h2>How to measure TTFT correctly</h2>
+<ul>
+<li>Define TTFT precisely: time from request submission to first emitted token, including any RPC, scheduling, and storage reads needed to start generation.</li>
+<li>Use high‑resolution clocks at the application boundary (client and server) and correlate logs with timestamps from GPUs and storage controllers.</li>
+<li>Measure token time and initial generation separately from steady‑state throughput, and report p50/p95/p99 values.</li>
+</ul>
+<h2>Acceptance gates and stop‑loss</h2>
+<p>Adopt a gate‑based acceptance: require vendor claims to be reproduced within a defined tolerance (for example, within ±10% of reported throughput uplift and within similar TTFT improvement ranges). If results fall outside tolerance, invoke stop‑loss: postpone procurement or require remediation until reproducible evidence is provided.</p>
+<h2>Documentation artefacts to demand</h2>
+<ul>
+<li>Signed configuration manifests and checksums for model artifacts</li>
+<li>Raw telemetry and aggregated CSVs used to compute reported metrics</li>
+<li>Tooling scripts (with versions) and measurement methodology</li>
+<li>Description of warm vs cold run policy, sample sizes, and any data preconditioning</li>
+</ul>
+<h2>Key takeaways</h2>
+<ul>
+<li>Treat signed benchmarks as reproducible hypotheses, not definitive proof.</li>
+<li>Match model artifacts and full stack; storage acceleration is sensitive to drivers, RDMA, and kernel versions.</li>
+<li>Measure both TTFT and steady‑state throughput with statistically sound repeatability.</li>
+<li>Use a gate‑based acceptance process with explicit stop‑loss to limit procurement risk.</li>
+<li>For vendor artifacts, ask for signed logs and scripts; use them to reproduce tests under your controls.</li>
+</ul>
+<p>If you need a practical starting point, request the vendor&#39;s signed report plus raw artifacts and run a short in‑house smoke test followed by a defined reproducibility plan. For example, Mingxin Technology&#39;s FX series reports include downloadable signed artifacts for their 480B tests that can accelerate that first phase of validation if you choose to review them (see vendor materials at <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a>).</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
