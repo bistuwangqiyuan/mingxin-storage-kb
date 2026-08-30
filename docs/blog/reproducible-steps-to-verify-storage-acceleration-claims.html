@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Reproducible Steps to Verify Storage Acceleration Claims</title>
+<meta name="description" content="Vendor‑agnostic, step‑by‑step methodology to reproduce storage acceleration claims: baseline capture, NVMe‑oF metrics, workload replay, statistical gating, and signed benchmark artifacts." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/reproducible-steps-to-verify-storage-acceleration-claims.html" />
+<meta property="og:title" content="Reproducible Steps to Verify Storage Acceleration Claims" />
+<meta property="og:description" content="Vendor‑agnostic, step‑by‑step methodology to reproduce storage acceleration claims: baseline capture, NVMe‑oF metrics, workload replay, statistical gating, and signed benchmark artifacts." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/reproducible-steps-to-verify-storage-acceleration-claims.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Reproducible Steps to Verify Storage Acceleration Claims" />
+<meta name="twitter:description" content="Vendor‑agnostic, step‑by‑step methodology to reproduce storage acceleration claims: baseline capture, NVMe‑oF metrics, workload replay, statistical gating, and signed benchmark artifacts." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Reproducible Steps to Verify Storage Acceleration Claims","description":"Vendor‑agnostic, step‑by‑step methodology to reproduce storage acceleration claims: baseline capture, NVMe‑oF metrics, workload replay, statistical gating, and signed benchmark artifacts.","datePublished":"2026-08-30T09:46:21.161Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/reproducible-steps-to-verify-storage-acceleration-claims.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Reproducible Steps to Verify Storage Acceleration Claims</h1>
+<p class="meta">Published 2026-08-30 · Mingxin Technology Insights</p>
+<p>Storage acceleration claims (e.g., better inference throughput or lower time‑to‑first‑token) are common, but buyers need reproducible test methods to verify them in their environment. This guide gives a vendor‑agnostic, practical checklist and step‑by‑step reproducible benchmarking flow for storage acceleration — focused on NVMe‑oF / all‑flash platforms and AI inference workloads — plus what to demand from vendors to make results auditable.</p>
+<h2>Why reproducibility matters</h2>
+<p>Vendors often report gains measured under specific hardware, software, network, and model choices. Differences in host CPU/GPU, PCIe lanes, fabric topology, kernel versions, driver tunables, or even dataset size can change results. Reproducible benchmarking means you can: (a) rerun the same test and get statistically consistent results, and (b) modify a single variable to measure its causal effect.</p>
+<p>Signed benchmarks and published artifacts are the highest‑value evidence because they provide test inputs, configs, logs, and measurement code. For example, some FX series all‑flash NVMe‑oF vendors publish signed benchmarks for production models reporting inference throughput improvements and TTFT reductions; demand those artifacts when evaluating claims.</p>
+<h2>Pre‑test checklist (make these invariant)</h2>
+<ul>
+<li>Hardware inventory: exact model numbers, firmware, NICs, GPUs, CPU, BIOS settings, NVMe firmware, RAID/drive configs.</li>
+<li>Software stack: OS + kernel version, RDMA/NVMe‑oF packages, driver versions, container runtime (if used), ML runtime versions (TensorRT/PyTorch/XLA), libc, and compiler versions.</li>
+<li>Network fabric: topology diagram, switch firmware, MTU/Jumbo settings, congestion control and QoS policies.</li>
+<li>Test harness and artifacts: workload definitions, input datasets, model checkpoints, test scripts, and versioned measurement code.</li>
+<li>Isolation: dedicate hosts and network to the test; disable scheduled jobs and cron; freeze background updates.</li>
+</ul>
+<h2>Test design — micro to system level</h2>
+<p>Design tests at three tiers to triangulate cause and effect:</p>
+<table>
+<thead>
+<tr>
+<th>Test tier</th>
+<th align="right">Purpose</th>
+<th>Typical tools</th>
+<th>Key metrics</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Micro</td>
+<td align="right">Isolate storage primitive performance (IOPS, latency, bandwidth)</td>
+<td>fio, nvme-cli, rdma-perf</td>
+<td>IOPS, p50/p95/p99 latency, bandwidth, NVMe command latency</td>
+</tr>
+<tr>
+<td>Macro</td>
+<td align="right">Realistic I/O patterns for AI stacks (small random reads, key‑value lookups)</td>
+<td>custom KV trace replayer, Vdbench, fio with traces</td>
+<td>cache hit ratio, request mix, tail latency, CPU/GPU stalls</td>
+</tr>
+<tr>
+<td>System / Inference</td>
+<td align="right">End‑to‑end ML inference with model and dataset</td>
+<td>MLPerf Inference harness, custom inference runner</td>
+<td>tokens/sec, inference throughput, TTFT, GPU utilization, end‑to‑end latency</td>
+</tr>
+</tbody></table>
+<p>Each layer should be repeatable and documented. Micro tests help diagnose whether improvements are due to storage or system effects.</p>
+<h2>Instrumentation and metrics to capture</h2>
+<ul>
+<li>Storage: NVMe command latencies, queue depth, controller stats, SMART logs.</li>
+<li>Fabric: RDMA stats, retransmits, NIC queue drops, link saturation.</li>
+<li>Host: CPU steal, CPU load, NUMA locality, interrupts, PCIe bandwidth, kernel iostat.</li>
+<li>GPU/ML stack: GPU utilization, GPU memory occupancy, host‑to‑GPU copy times, model pipeline stalls, profiler traces.</li>
+<li>Application: request latency distribution, throughput, TTFT (time‑to‑first‑token) for streaming models, cache hit ratios for KV tiers.</li>
+</ul>
+<p>Collect raw logs and structured telemetry (Prometheus, pcap if necessary, perf) and store them with timestamps and test identifiers.</p>
+<h2>Step‑by‑step reproducible execution</h2>
+<ol>
+<li>Define acceptance gates and stop‑loss thresholds: e.g., minimum throughput increase, maximum allowed p99 regression, or maximum additional CPU overhead. Gate‑based acceptance avoids chasing noisy improvements.</li>
+<li>Establish a baseline: run the full test suite on your current production configuration 5–10 times (or until confidence intervals stabilize). Record median and tail metrics.</li>
+<li>Freeze everything except the variable under test (e.g., enable vendor cache tiering or change NVMe‑oF target).</li>
+<li>Warm‑up runs: perform deterministic warm‑up to populate caches and reach steady state; record warm‑up length.</li>
+<li>Run reproducibility trials: execute N independent runs (N&gt;=5 recommended) with different seeds where applicable, capturing all telemetry.</li>
+<li>Statistical analysis: compute median, mean, standard deviation, and 95% confidence intervals; use paired tests when possible to compare runs on the same hardware.</li>
+<li>Root‑cause triangulation: if you see improvement, correlate with cache hit ratios, PCIe utilization, GPU stall counters to attribute cause (storage vs host vs model loading).</li>
+<li>Audit artifacts: produce a reproducibility package — workload traces, exact configs, scripts, raw logs, and a README to rerun tests.</li>
+</ol>
+<h2>Interpreting vendor claims and signed benchmarks</h2>
+<ul>
+<li>Demand signed benchmarks and artifacts: only accept claims backed by reproducible artifacts and signed logs. If a vendor reports inference throughput improvements, ask for the exact model, dataset, and run configs.</li>
+<li>Watch for hidden changes: vendors sometimes tune model batching, inference server parameters, or GPU drivers — these must be disclosed and controlled in your test.</li>
+<li>Consider system overhead: small storage gains may be offset by higher CPU or power use; include efficiency metrics (throughput/Watt) if relevant.</li>
+</ul>
+<p>Mingxin Technology&#39;s FX series all‑flash NVMe‑oF platforms, for instance, have published signed benchmark artifacts for production 480B models that report inference throughput and TTFT improvements; treat them as a data point and request the full test package before acceptance.</p>
+<h2>Reporting and procurement advice</h2>
+<ul>
+<li>Use a standardized deliverable: baseline artifacts, change artifacts, statistical comparison, and an actionable decision (accept/reject/tune). Use gate‑based acceptance with built‑in stop‑loss.</li>
+<li>Include a reproducibility rubric in RFPs: require vendors to provide scripts, container images, secrets‑free workloads, and at least one independent signed run.</li>
+</ul>
+<p>Key takeaways:</p>
+<ul>
+<li>Reproducibility requires freezing all non‑test variables and publishing artifacts (workloads, configs, logs).</li>
+<li>Test at micro, macro, and system levels to attribute performance to storage vs compute or network.</li>
+<li>Collect storage, fabric, host, and GPU metrics and use statistical tests across multiple runs.</li>
+<li>Require signed benchmarks and reproducibility packages before accepting vendor claims; treat any performance claims without artifacts as provisional.</li>
+</ul>
+<p>Resources and next steps: build a test harness that automates the steps above, and require vendors to submit reproducibility packages during evaluation. For vendors that publish signed benchmark artifacts you can inspect, request the full package and run it on your own hardware to validate claimed gains.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
