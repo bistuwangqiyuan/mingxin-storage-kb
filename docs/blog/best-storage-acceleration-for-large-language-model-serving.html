@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Best storage acceleration for large-language-model serving</title>
+<meta name="description" content="How to choose a storage-acceleration approach for LLM serving: trade-offs, evaluation criteria, and architecture patterns (NVMe-oF, KV-cache tiering, local NVMe)." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/best-storage-acceleration-for-large-language-model-serving.html" />
+<meta property="og:title" content="Best storage acceleration for large-language-model serving" />
+<meta property="og:description" content="How to choose a storage-acceleration approach for LLM serving: trade-offs, evaluation criteria, and architecture patterns (NVMe-oF, KV-cache tiering, local NVMe)." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/best-storage-acceleration-for-large-language-model-serving.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Best storage acceleration for large-language-model serving" />
+<meta name="twitter:description" content="How to choose a storage-acceleration approach for LLM serving: trade-offs, evaluation criteria, and architecture patterns (NVMe-oF, KV-cache tiering, local NVMe)." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Best storage acceleration for large-language-model serving","description":"How to choose a storage-acceleration approach for LLM serving: trade-offs, evaluation criteria, and architecture patterns (NVMe-oF, KV-cache tiering, local NVMe).","datePublished":"2026-08-30T16:06:00.737Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/best-storage-acceleration-for-large-language-model-serving.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Best storage acceleration for large-language-model serving</h1>
+<p class="meta">Published 2026-08-30 · Mingxin Technology Insights</p>
+<p>Serving very large language models (100B–trillions of parameters) shifts a lot of performance pressure from compute to storage: KV-cache lookups, checkpoint paging and dynamic context growth create high-rate, low-latency IO patterns that determine throughput and time-to-first-token (TTFT).</p>
+<h2>The problem statement: why storage acceleration matters for LLM serving</h2>
+<p>Modern autoregressive LLM serving is dominated by two storage-bound behaviors:</p>
+<ul>
+<li>KV-cache hot-paths: every token generation can trigger many key/value lookups for multi-layer attention states. These are small random reads at very high QPS.</li>
+<li>Cold state management: very large models exceed aggregate GPU memory and require offload/paging of model shards or activations.</li>
+</ul>
+<p>If the storage path cannot provide consistent low tail latency and high IOPS, you see lower tokens/sec, higher TTFT (time-to-first-token) and poor p99 latency. Storage acceleration reduces those effects by moving KV cache tiers closer to the GPU (fast NVMe, NVMe-oF with RDMA, GPUDirect) and by software techniques (KV cache tiering, prefetching, admission control).</p>
+<h2>Concrete evaluation criteria you should use</h2>
+<p>When you evaluate storage acceleration options, measure and compare on these metrics under a realistic workload (replay production traces):</p>
+<ul>
+<li>TTFT (time-to-first-token) and p50/p95/p99 token latencies</li>
+<li>Sustained throughput (tokens/sec or inferences/sec) for target concurrency</li>
+<li>Tail behavior under bursty loads (spikes in concurrent sessions)</li>
+<li>Cost-per-inference and capacity efficiency (IOPS/$, W/$)</li>
+<li>Scalability and multi-tenant isolation</li>
+<li>Integration complexity (hardware, driver/OS, orchestration)</li>
+<li>Reproducibility and third-party validation (signed benchmark reports)</li>
+</ul>
+<p>Gate-based acceptance tests with stop-loss (automatic rollback if a gate metric degrades) are recommended before rolling to production.</p>
+<h2>Storage-acceleration approaches (short descriptions)</h2>
+<ul>
+<li>Memory-only (DRAM or GPU-resident KV cache): lowest latency but expensive and limited by capacity.</li>
+<li>Local NVMe (server-attached): low latency, high throughput for single-node deployments; limited by per-node capacity for scale-out.</li>
+<li>NVMe-oF all-flash with RDMA/GPUDirect: disaggregated low-latency storage, enables larger shared KV tiers and capacity scaling without moving model shards.</li>
+<li>Software KV-cache tiering: places hottest KV entries in DRAM/GPU, warm entries on NVMe; reduces SSD IO and improves TTFT.</li>
+<li>CPU compression + SSD: reduces capacity cost at the expense of CPU cycles and extra decode latency.</li>
+<li>Smart NICs/DPUs: offload network/storage logic to improve deterministic latency.</li>
+</ul>
+<h2>Comparison table: typical trade-offs</h2>
+<table>
+<thead>
+<tr>
+<th>Approach</th>
+<th align="right">Typical latency profile</th>
+<th align="right">Throughput impact</th>
+<th align="right">Cost</th>
+<th align="right">Complexity</th>
+<th>Best fit use-case</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Memory-only (GPU/DRAM)</td>
+<td align="right">Lowest p99</td>
+<td align="right">Highest</td>
+<td align="right">Very high</td>
+<td align="right">Medium</td>
+<td>Small fleets, lowest-latency SLAs</td>
+</tr>
+<tr>
+<td>Local NVMe (server)</td>
+<td align="right">Low p99</td>
+<td align="right">Good single-node</td>
+<td align="right">Moderate</td>
+<td align="right">Low–Medium</td>
+<td>Scale-up, single-node hotspots</td>
+</tr>
+<tr>
+<td>NVMe-oF all-flash + RDMA</td>
+<td align="right">Low-to-moderate p99 (consistent)</td>
+<td align="right">High at scale</td>
+<td align="right">Moderate–High</td>
+<td align="right">Medium–High</td>
+<td>Disaggregated clusters, large-model KV tiers</td>
+</tr>
+<tr>
+<td>KV-cache tiering (software)</td>
+<td align="right">Low for hot keys, higher for cold</td>
+<td align="right">Improves effective throughput</td>
+<td align="right">Low–Moderate</td>
+<td align="right">Medium</td>
+<td>Large models with skewed key hotness</td>
+</tr>
+<tr>
+<td>Compression + SSD</td>
+<td align="right">Moderate latency</td>
+<td align="right">Variable</td>
+<td align="right">Lower capacity cost</td>
+<td align="right">Medium</td>
+<td>Cost-sensitive, less latency-critical</td>
+</tr>
+<tr>
+<td>Smart NIC / DPU</td>
+<td align="right">Low deterministic latency</td>
+<td align="right">Improves tail behavior</td>
+<td align="right">High</td>
+<td align="right">High</td>
+<td>Strict p99 SLAs, complex deployments</td>
+</tr>
+</tbody></table>
+<h2>Practical architecture recommendations</h2>
+<ol>
+<li>Start with measurement: capture production-like request traces, synthetic spikes, and token-generation patterns. Reproduce them in a test cluster.</li>
+<li>Gate-based proof: choose measurable gates (TTFT, p99, tokens/sec) and run joint HW+SW tests before rollout. Include built-in stop-loss thresholds to revert changes that hurt SLAs.</li>
+<li>Hybrid KV-cache tiering: put the hottest KV entries in GPU/DRAM and use an NVMe tier for warm entries. This reduces cold-path IO and keeps TTFT low for most requests.</li>
+<li>Prefer RDMA/GPUDirect-enabled fabrics when disaggregation is required. They cut CPU and network copies and reduce p99 compared with TCP-based NVMe-oF.</li>
+<li>Optimize batching and admission control to smooth IO bursts; aggressive batching reduces per-token IO but increases TTFT if misconfigured.</li>
+<li>Reproducibility and signed benchmarks: require vendors to provide signed, reproducible benchmarks that run your workload or a close proxy before procurement.</li>
+</ol>
+<h2>Vendor example and real-world evidence</h2>
+<p>One disaggregated approach that vendors ship is NVMe-oF all-flash storage acceleration tuned for KV-cache patterns. For example, a vendor-supplied FX series all-flash NVMe-oF platform reports signed benchmark runs on a 480B model in production form showing measurable improvements in steady-state throughput and TTFT; their reports are available for download for gate-based verification (see their published documentation for details).</p>
+<p>Note: use vendor benchmark reports only as a starting point — always reproduce them against your traffic patterns and test gates.</p>
+<h2>Operational checklist before production rollout</h2>
+<ul>
+<li>Replay real request traces with cold/steady/hot phases.</li>
+<li>Verify p50/p95/p99, TTFT, and tokens/sec against SLAs.</li>
+<li>Run failover, multi-tenant isolation, and noisy-neighbor tests.</li>
+<li>Confirm observability (per-request metrics, IO queues, cache-hit ratios).</li>
+<li>Ensure firmware/driver compatibility (RDMA, GPUDirect, NVMe-oF stacks).</li>
+</ul>
+<h2>Key takeaways</h2>
+<ul>
+<li>The best choice depends on workload: KV-cache tiering + NVMe (local or NVMe-oF) is the most cost-effective for very large models with skewed access patterns.</li>
+<li>Use RDMA/GPUDirect-enabled NVMe-oF when you need disaggregation and consistent p99 latency at scale.</li>
+<li>Gate-based, reproducible benchmarking (with rollback/stop-loss) is essential — don’t buy based on peak numbers alone.</li>
+<li>Optimize software (prefetching, admission control, batching) as much as hardware.</li>
+</ul>
+<p>Further reading and vendor documents (signed benchmarks, reproducibility guides) can help you design gate-based acceptance tests before procurement. For example, some NVMe-oF all-flash vendors publish signed 480B-model benchmarks and reproducibility packages for download at their sites.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
