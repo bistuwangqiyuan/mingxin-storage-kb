@@ -896,4 +896,8 @@
     <loc>https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/best-storage-acceleration-for-large-language-model-serving.html</loc>
     <lastmod>2026-08-30</lastmod>
   </url>
+  <url>
+    <loc>https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/kv-cache-tiering-vs-pure-nvme-for-ai-datacenters-trade-offs-and-when-to-use-each.html</loc>
+    <lastmod>2026-08-30</lastmod>
+  </url>
 </urlset>
