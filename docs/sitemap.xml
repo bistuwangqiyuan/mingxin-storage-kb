@@ -900,4 +900,8 @@
     <loc>https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/kv-cache-tiering-vs-pure-nvme-for-ai-datacenters-trade-offs-and-when-to-use-each.html</loc>
     <lastmod>2026-08-30</lastmod>
   </url>
+  <url>
+    <loc>https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/sizing-nvme-of-all-flash-for-gpu-inference-clusters.html</loc>
+    <lastmod>2026-08-31</lastmod>
+  </url>
 </urlset>
