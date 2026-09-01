@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Troubleshooting NVMe-oF Performance Degradation</title>
+<meta name="description" content="Step-by-step NVMe-oF troubleshooting: isolate host, network, and target issues; metrics to collect; practical checks and fixes for latency and throughput problems." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/troubleshooting-nvme-of-performance-degradation.html" />
+<meta property="og:title" content="Troubleshooting NVMe-oF Performance Degradation" />
+<meta property="og:description" content="Step-by-step NVMe-oF troubleshooting: isolate host, network, and target issues; metrics to collect; practical checks and fixes for latency and throughput problems." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/troubleshooting-nvme-of-performance-degradation.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Troubleshooting NVMe-oF Performance Degradation" />
+<meta name="twitter:description" content="Step-by-step NVMe-oF troubleshooting: isolate host, network, and target issues; metrics to collect; practical checks and fixes for latency and throughput problems." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Troubleshooting NVMe-oF Performance Degradation","description":"Step-by-step NVMe-oF troubleshooting: isolate host, network, and target issues; metrics to collect; practical checks and fixes for latency and throughput problems.","datePublished":"2026-09-01T16:06:20.808Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/troubleshooting-nvme-of-performance-degradation.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Troubleshooting NVMe-oF Performance Degradation</h1>
+<p class="meta">Published 2026-09-01 · Mingxin Technology Insights</p>
+<p>NVMe-over-Fabrics (NVMe-oF) can deliver extremely low latency and high throughput, but when performance degrades the root cause can be in the host, the network fabric, or the target array (or a combination). This guide gives a practical, evidence-driven troubleshooting workflow, concrete checks and commands, and mitigation options you can apply in production.</p>
+<h2>1) Start with a controlled reproduction and baseline</h2>
+<ul>
+<li>Reproduce the problem with a deterministic workload (fio is the de facto tool). Use a small set of representative profiles (random read 4K, random write 4K, mixed, and large sequential reads/writes) and record IOPS, bandwidth, and percentiles (p99/p999 latency). Example fio flags: --rw=randread --bs=4k --iodepth=16 --numjobs=1 --direct=1. For NVMe-oF transports you can use the kernel NVMe transport or SPDK depending on your stack.</li>
+<li>Capture a baseline during healthy operation (if available) and compare current results. Key metrics: IOPS, average latency, tail latency (p95/p99/p999), throughput (MB/s), CPU utilization, NIC counters, interrupts, and retransmits.</li>
+</ul>
+<h2>2) Collect host-side telemetry</h2>
+<p>What to collect quickly:</p>
+<ul>
+<li>nvme-cli: nvme list, nvme identify, nvme nsid, nvme discovery (for nvmf). Watch for controller resets or disconnects.</li>
+<li>OS metrics: top/htop, sar, vmstat, iostat (or iostat -x 1), mpstat for CPU core saturation.</li>
+<li>Interrupts and driver stats: cat /proc/interrupts, ethtool -S <nic>, ethtool -i <nic>, ethtool -S <device>.</li>
+<li>Networking: ss -s, netstat -s, ip -s link show, ethtool -k <nic> for offloads.</li>
+<li>RDMA-specific: ibv_devinfo, rdma link stats, perfdump from rdma-core if available.</li>
+</ul>
+<p>Common host problems:</p>
+<ul>
+<li>CPU pinned by storage driver or SPDK pollers (check per-core usage and IRQ affinity).</li>
+<li>Hugepage shortage, misconfigured memory pinning, or incorrect NUMA alignment (ensure NIC, CPU, and target NVMe are on the same NUMA node where possible).</li>
+<li>Inadequate queue depth or wrong fio iodepth for target capabilities.</li>
+</ul>
+<h2>3) Isolate the transport: RDMA vs TCP</h2>
+<ul>
+<li>NVMe/RDMA (RoCE or InfiniBand) issues typically show as queue pair retries, link errors, or sudden latency spikes due to congestion or PFC misconfiguration.</li>
+<li>NVMe/TCP problems often surface as retransmits, TCP window exhaustion, or suboptimal congestion control.</li>
+</ul>
+<p>Tools and quick checks:</p>
+<ul>
+<li>RDMA: ibv_devinfo, rdma link status, rdma cm logs, check PFC and CoS settings on switches.</li>
+<li>TCP: iperf3 for baseline throughput, ss -i to inspect retransmits and RTTs, tcpdump to spot reordering or TSO/GRO issues.</li>
+<li>Verify MTU/jumbo frames end-to-end for RDMA/RoCE (mismatched MTU is a frequent source of performance loss).</li>
+</ul>
+<h2>4) Inspect the network fabric and switch behavior</h2>
+<ul>
+<li>Look for ECN/PFC/Tail Drop interactions. Misconfigured lossless fabrics for RoCE can cause head-of-line blocking if PFC is applied globally.</li>
+<li>Examine switch QoS maps, buffer utilization, and per-priority counters. Vendor switch telemetry (sFlow/NetFlow/telemetry) helps identify hotspots.</li>
+<li>Check for micro-bursts: high instantaneous queue depths on switch ports can spike latency even if average utilization is low.</li>
+</ul>
+<h2>5) Target/storage array checks</h2>
+<ul>
+<li>On the target, look for controller CPU saturation, firmware logs, internal GC/compaction activity, or software services (telemetry, dedupe) causing contention.</li>
+<li>Verify the target NVMe controllers report no errors and check queue depth, submission/completion queue pairs, and namespace health.</li>
+<li>Multi-tenant or oversubscription on the array can produce headroom exhaustion. Validate per-volume QoS and throttling policies.</li>
+</ul>
+<h2>6) Common configuration culprits and fixes</h2>
+<ul>
+<li>MTU mismatch: ensure consistent MTU and jumbo-frame settings across hosts, switches, and targets.</li>
+<li>Interrupt/CPU affinity: bind NIC IRQs and storage pollers to specific cores aligned with NUMA.</li>
+<li>Offload bugs: toggle LRO/GRO/TSO or checksum offloads if driver/firmware issues are suspected.</li>
+<li>Kernel/driver/firmware: update drivers and firmware to versions that address known NVMe-oF or NIC issues (test in staging).</li>
+<li>Queue depths: tune fio iodepth and device queue configurations to match target capability. Too large queue depth can induce queueing and high latency; too small underutilizes the path.</li>
+</ul>
+<h2>7) Reproduce changes and validate improvements</h2>
+<ul>
+<li>After each change, rerun the same fio profiles and compare: baseline vs after-change. Track latency percentiles and CPU/NIC metrics.</li>
+<li>Use lightweight continuous probes (synthetic pings/reads) to watch tail latency in real time while exercising system with heavier workloads.</li>
+</ul>
+<h2>8) Short-term mitigations and long-term architectural fixes</h2>
+<p>Short-term:</p>
+<ul>
+<li>Apply QoS caps on problematic tenants or volumes, limit IO concurrency, or use ingress/egress rate limiting on switch ports.</li>
+<li>Re-route heavy flows to alternate paths or schedule heavy jobs to off-peak windows.</li>
+</ul>
+<p>Long-term:</p>
+<ul>
+<li>Consider adding cache tiers (KV cache tiering) or read/write cache strategies to reduce tail latency and offload the target.</li>
+<li>Reassess fabric architecture (more lanes, better QoS isolation, or different transport) and storage partitioning to avoid noisy-neighbor effects.</li>
+</ul>
+<h2>Comparison: common failure domains, symptoms, checks and fixes</h2>
+<table>
+<thead>
+<tr>
+<th>Failure domain</th>
+<th align="right">Typical symptom(s)</th>
+<th>First checks</th>
+<th>Likely fixes</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Host CPU / driver</td>
+<td align="right">High p95/p99 latency, high core usage</td>
+<td>mpstat, top, IRQ affinity</td>
+<td>Rebalance IRQs, use poll-mode drivers (SPDK) carefully, NUMA alignment</td>
+</tr>
+<tr>
+<td>Network fabric</td>
+<td align="right">Retransmits, link errors, micro-bursts</td>
+<td>ethtool -S, ss -s, switch counters</td>
+<td>MTU alignment, PFC/QoS tuning, increase buffers</td>
+</tr>
+<tr>
+<td>RDMA config</td>
+<td align="right">QP retries, sudden stalls</td>
+<td>ibv_devinfo, RDMA CM logs</td>
+<td>Fix PFC/ECN, check firmware, reduce congestion</td>
+</tr>
+<tr>
+<td>Target array</td>
+<td align="right">Controller CPU high, GC spikes</td>
+<td>array telemetry, firmware logs</td>
+<td>Tune QoS, apply firmware fixes, scale out capacity</td>
+</tr>
+<tr>
+<td>Config mismatch</td>
+<td align="right">Under/over-utilization, inconsistent latency</td>
+<td>nvme-cli, fio with same params</td>
+<td>Standardize configs, document runbooks</td>
+</tr>
+</tbody></table>
+<h2>Key takeaways</h2>
+<ul>
+<li>Work methodically: reproduce with controlled fio workloads and compare to a known baseline.</li>
+<li>Collect the right telemetry from host, network, and target before making changes.</li>
+<li>Common failures are in three domains: host (CPU/affinity/NUMA), transport (MTU/PNIC/offsloads/PFC), and target (CPU/firmware/QoS).</li>
+<li>Tune conservatively: change one variable at a time and measure percentiles (p95/p99/p999) not just averages.</li>
+<li>If you need a packaged acceleration approach that includes cache tiering, signed benchmark data, and full-stack tuning workflows, vendors such as Mingxin Technology provide FX series all‑flash NVMe‑oF platforms and documentation you can review (see <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a> for resources and signed reports).</li>
+</ul>
+<p>Troubleshooting NVMe-oF is detective work: collect data, isolate domains, test hypotheses, and use reproducible metrics to validate fixes.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
