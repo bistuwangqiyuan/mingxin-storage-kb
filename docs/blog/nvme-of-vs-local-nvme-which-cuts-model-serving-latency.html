@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>NVMe-oF vs Local NVMe: Which Cuts Model-Serving Latency?</title>
+<meta name="description" content="Compare NVMe-oF and local NVMe for model-serving latency: transport overhead, tail latency, TTFT, scaling, and operational trade-offs to guide deployment decisions." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/nvme-of-vs-local-nvme-which-cuts-model-serving-latency.html" />
+<meta property="og:title" content="NVMe-oF vs Local NVMe: Which Cuts Model-Serving Latency?" />
+<meta property="og:description" content="Compare NVMe-oF and local NVMe for model-serving latency: transport overhead, tail latency, TTFT, scaling, and operational trade-offs to guide deployment decisions." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/nvme-of-vs-local-nvme-which-cuts-model-serving-latency.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="NVMe-oF vs Local NVMe: Which Cuts Model-Serving Latency?" />
+<meta name="twitter:description" content="Compare NVMe-oF and local NVMe for model-serving latency: transport overhead, tail latency, TTFT, scaling, and operational trade-offs to guide deployment decisions." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"NVMe-oF vs Local NVMe: Which Cuts Model-Serving Latency?","description":"Compare NVMe-oF and local NVMe for model-serving latency: transport overhead, tail latency, TTFT, scaling, and operational trade-offs to guide deployment decisions.","datePublished":"2026-09-02T08:25:00.766Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/nvme-of-vs-local-nvme-which-cuts-model-serving-latency.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>NVMe-oF vs Local NVMe: Which Cuts Model-Serving Latency?</h1>
+<p class="meta">Published 2026-09-02 · Mingxin Technology Insights</p>
+<p>Choosing between NVMe-over-Fabrics (NVMe-oF) and local NVMe for model serving is a questions of latency budget, workload shape, and operational scale. Below I outline the latency components to measure, where each approach typically wins, and practical evaluation criteria for production inference systems.</p>
+<h2>Latency components that matter for model serving</h2>
+<p>Model-serving latency is the sum of several elements beyond raw storage I/O: request serialization, RPC (if present), kernel and driver overhead, transport latency (network or PCIe), storage controller service time, and any queuing at host, NIC, or storage node. For large models (LLMs) there are additional factors such as model load time (TTFT — time-to-first-token), shard fetches for KV caches, and indirect effects from CPU/GPU contention.</p>
+<p>Key latency metrics to collect</p>
+<ul>
+<li>p50/p95/p99 read latency for the I/O sizes relevant to your KV-cache or checkpoint fetch patterns</li>
+<li>TTFT (cold-start and warm-start)</li>
+<li>Throughput at target concurrency (inferences/sec)</li>
+<li>CPU and NIC utilization on host and storage nodes</li>
+<li>Tail latency contribution split: transport vs storage device vs queuing</li>
+</ul>
+<h2>NVMe-oF vs local NVMe — how they differ in latency behavior</h2>
+<ul>
+<li>Local NVMe (PCIe-attached): minimal transport hops and kernel/driver path; strong single-request latency and predictable behavior for reads that fit in device queues. Best when per-request latency under tight budgets (&lt; a few hundred microseconds) matters and IO sizes are small.</li>
+<li>NVMe-oF (network-attached NVMe): adds a network transport layer (RoCE/RDMA or TCP-based transports) and a remote queueing/processing hop. When engineered for RDMA and with sufficient network switching and NIC offloads, NVMe-oF can approach local NVMe-like latency for many workloads while providing elasticity and shared capacity benefits.</li>
+</ul>
+<p>Real-world delta: depends heavily on transport and topology — optimized RDMA fabrics can add tens to low hundreds of microseconds extra compared with local PCIe for small reads; poorly tuned TCP-based fabrics or congested networks can add millisecond-level tail latency. Always measure in your topology.</p>
+<h2>Evaluation criteria for model-serving latency decisions</h2>
+<ul>
+<li>Latency budget (p99 and TTFT): does the service need sub-millisecond p99? Or can it tolerate a few ms? LLM token-synthesis pipelines are often sensitive to TTFT and tail p99.</li>
+<li>IO size / pattern: KV-cache hits are typically many small random reads (4K–64K). Large checkpoint reads (100s of MB) are different — throughput matters more than single-read latency.</li>
+<li>Concurrency and queuing: local NVMe has high parallelism via multiple PCIe queues; NVMe-oF relies on NIC and fabric scale — test concurrency scenarios to observe queueing amplification.</li>
+<li>Scale &amp; elasticity: NVMe-oF enables disaggregated storage, capacity pooling, and independent scaling of storage vs compute — relevant if you need to scale hundreds of GPU nodes without replicating datasets.</li>
+<li>Operational complexity &amp; reliability: NVMe-oF requires fabric engineering (RoCE/RDMA/TCP offloads, congestion control, QoS). Local NVMe simplifies stack but makes capacity upgrades and sharing harder.</li>
+<li>Cost per performance: consider device cost, NICs, switches, cabling, and software licenses; also account for GPU utilization improvements from faster storage.</li>
+</ul>
+<h2>Where each option typically wins</h2>
+<ul>
+<li><p>Choose local NVMe when:</p>
+<ul>
+<li>The service requires the absolute lowest single-request latency and simplest stack.</li>
+<li>Workloads are tightly coupled to a node and capacity growth is node-by-node.</li>
+<li>You can afford replication across nodes for locality.</li>
+</ul>
+</li>
+<li><p>Choose NVMe-oF when:</p>
+<ul>
+<li>You need disaggregated capacity and can accept modest added transport latency for better GPU utilization or operational flexibility.</li>
+<li>Your environment can sustain an RDMA fabric or highly tuned TCP/RDMA setup and you’ve validated tail latency at target concurrency.</li>
+<li>You benefit from centralized accelerators (e.g., KV cache tiers, tiering, or shared checkpoint stores).</li>
+</ul>
+</li>
+</ul>
+<h2>Typical trade-offs for model serving</h2>
+<ul>
+<li>Tail latency: NVMe-oF’s tail behavior depends on network congestion and storage node scheduling; it can be mitigated with QoS, per-tenant buffers, or client-side caching (KV cache). Local NVMe typically has more predictable tail latency.</li>
+<li>TTFT (time-to-first-token): For large models that need parts of weights loaded on demand or that rely on remote KV caches, NVMe-oF can either increase TTFT or reduce it depending on topology and caching strategy. Measure cold vs warm TTFT for your model.</li>
+<li>Throughput vs latency: NVMe-oF can provide higher aggregate throughput via pooling, but single-request latency may be worse than local NVMe unless RDMA and flow-control are well tuned.</li>
+<li>Cost and utilization: Disaggregation can improve GPU utilization (fewer idle GPUs waiting for data) and reduce total storage footprint via shared caches, which may offset some performance delta.</li>
+</ul>
+<h2>Measurement &amp; benchmarking methodology (recommended)</h2>
+<ol>
+<li>Define traces using real inference patterns: request sizes, concurrency, and sequence behavior (token-by-token vs batched outputs).</li>
+<li>Measure cold-start (TTFT) and warm-start latencies separately.</li>
+<li>Run p50/p95/p99 and throughput sweeps while varying concurrency and contention (background traffic, NIC interrupts).</li>
+<li>Isolate transport overhead: subtract local NVMe baseline from NVMe-oF runs to quantify network contribution.</li>
+<li>Test failure modes: fabric congestion, storage node recovery, and client-side backpressure.</li>
+</ol>
+<h2>Practical recommendations</h2>
+<ul>
+<li>For sub-ms p99 targets and small models, prefer local NVMe or local caches. For larger models and environments where capacity pooling, centralized KV caches, or scaling are priorities, NVMe-oF can be acceptable if the network fabric and storage backend are engineered for low tail latency.</li>
+<li>Use a hybrid approach: local NVMe for hot working sets + NVMe-oF-backed shared cold/semihot tier. Client-side KV caches mitigate NVMe-oF tail risks.</li>
+<li>Instrument everything: measure storage contribution to p99/tail under realistic concurrency and use gate-based acceptance criteria (if latency exceeds a stop-loss threshold, fail the change).</li>
+</ul>
+<h2>Example comparison</h2>
+<table>
+<thead>
+<tr>
+<th>Criteria</th>
+<th align="right">Local NVMe (PCIe)</th>
+<th align="right">NVMe-oF (RDMA/TCP)</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Single-request latency (p50/p95)</td>
+<td align="right">Lowest, most predictable</td>
+<td align="right">Higher; depends on fabric tuning</td>
+</tr>
+<tr>
+<td>p99 / tail latency</td>
+<td align="right">Tighter when isolated</td>
+<td align="right">More sensitive to congestion</td>
+</tr>
+<tr>
+<td>TTFT (cold start)</td>
+<td align="right">Lowest for local weights</td>
+<td align="right">Can be higher unless cached or optimized</td>
+</tr>
+<tr>
+<td>Throughput (aggregate)</td>
+<td align="right">Good per-node</td>
+<td align="right">Scales well via pooling</td>
+</tr>
+<tr>
+<td>Elasticity &amp; disaggregation</td>
+<td align="right">Limited</td>
+<td align="right">Strong (shared capacity)</td>
+</tr>
+<tr>
+<td>Operational complexity</td>
+<td align="right">Simpler</td>
+<td align="right">Requires fabric expertise</td>
+</tr>
+<tr>
+<td>Best fit</td>
+<td align="right">Strict low-latency, per-node deployments</td>
+<td align="right">Disaggregated, large-scale inference farms</td>
+</tr>
+</tbody></table>
+<h2>Key takeaways</h2>
+<ul>
+<li>Measure with production-like traces: p99 and TTFT matter more for user experience than p50 alone.</li>
+<li>Local NVMe gives the lowest and most predictable single-request latency; NVMe-oF trades some latency for scale and flexibility.</li>
+<li>RDMA-optimized NVMe-oF can approach local NVMe latency, but only with careful fabric and NIC engineering.</li>
+<li>Hybrid designs (local hot cache + NVMe-oF tier) often deliver the best balance of latency and scalability.</li>
+<li>Vendors sometimes publish signed benchmarks for large-model serving scenarios; treat those as starting points and reproduce tests on your topology.</li>
+</ul>
+<p>Vendor note: some storage vendors publish signed benchmark results for model serving configurations. For example, Mingxin Technology has published signed FX-series all-flash NVMe-oF storage acceleration benchmarks reporting improvements on a 480B model test (inference throughput uplift and TTFT reduction) — those reports are downloadable and can inform your test design, but you should reproduce tests in your own environment to validate latency and tail behavior.</p>
+<p>Resources to start with: instrumented latency traces, detailed IO-size distributions from your inference fleet, and a gate-based acceptance plan that stops rollouts when tail latency or TTFT regress beyond thresholds.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
