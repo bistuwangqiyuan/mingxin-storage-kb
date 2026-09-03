@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>How to size KV cache tiering for AI datacenters</title>
+<meta name="description" content="Practical guidance to size key-value cache tiers for large AI models: metrics, formulas, trade-offs, and deployment choices including NVMe-oF acceleration options." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/how-to-size-kv-cache-tiering-for-ai-datacenters.html" />
+<meta property="og:title" content="How to size KV cache tiering for AI datacenters" />
+<meta property="og:description" content="Practical guidance to size key-value cache tiers for large AI models: metrics, formulas, trade-offs, and deployment choices including NVMe-oF acceleration options." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/how-to-size-kv-cache-tiering-for-ai-datacenters.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="How to size KV cache tiering for AI datacenters" />
+<meta name="twitter:description" content="Practical guidance to size key-value cache tiers for large AI models: metrics, formulas, trade-offs, and deployment choices including NVMe-oF acceleration options." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"How to size KV cache tiering for AI datacenters","description":"Practical guidance to size key-value cache tiers for large AI models: metrics, formulas, trade-offs, and deployment choices including NVMe-oF acceleration options.","datePublished":"2026-09-03T08:34:01.475Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/how-to-size-kv-cache-tiering-for-ai-datacenters.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>How to size KV cache tiering for AI datacenters</h1>
+<p class="meta">Published 2026-09-03 · Mingxin Technology Insights</p>
+<p>KV cache tiering (key-value caches of model activations) is one of the highest-leverage levers when optimizing large-model inference cost and latency. This guide gives infrastructure architects a practical framework for sizing KV cache tiers in AI datacenters, with evaluation criteria, simple sizing formulas, and deployment trade-offs for RAM, local NVMe, and NVMe-oF all‑flash tiers.</p>
+<h2>Why KV cache tiering matters</h2>
+<p>Large autoregressive models (decoder-only or encoder–decoder families) often store intermediate keys and values per token. For dense inference workloads, reusing those KV entries (cache hits) reduces compute and memory pressure and shortens time‑to‑first‑token (TTFT). A poorly sized cache either wastes expensive DRAM or creates misses that push requests into slower tiers (CPU or remote storage) and increase TCO and tail latency.</p>
+<h2>Key metrics and acceptance criteria</h2>
+<p>When sizing you should measure and set targets for:</p>
+<ul>
+<li>Hit rate (overall and per-percentile): percentage of KV lookups served from the cache.</li>
+<li>Latency SLOs: P50/P95/P99 for first-token and for token streaming phases.</li>
+<li>Throughput requirement: inference requests/sec (concurrent sequences) and token/s processing.</li>
+<li>Working set size: bytes of KV state referenced within your target window (e.g., last N tokens or conversation length).</li>
+<li>Eviction churn: rate at which useful entries are discarded and reloaded.</li>
+<li>Cost per effective GB and power/space constraints.</li>
+</ul>
+<p>Acceptable targets vary by application: low-latency consumer chat needs aggressive hit rates at P95–P99, while batch summarization can tolerate more misses.</p>
+<h2>Sizing workflow — step-by-step</h2>
+<ol>
+<li>Workload characterization</li>
+</ol>
+<ul>
+<li><p>Capture representative traces: request arrival times, prompt and response token lengths, conversation-turn patterns, and per-request KV access locality. If possible, collect traces at peak load.</p>
+</li>
+<li><p>Derive the empirical working set: for each trace compute the union of unique KV entries accessed in the time window you want to cache (e.g., the last 4K tokens). This yields the working-set size distribution.</p>
+</li>
+</ul>
+<ol start="2">
+<li>Define SLOs and cost constraints</li>
+</ol>
+<ul>
+<li><p>Choose latency and throughput SLOs and a target hit-rate curve (e.g., P50 hit 99%, P95 hit 95%).</p>
+</li>
+<li><p>Set cost or power ceilings that bound how much DRAM or NVMe you can deploy per inference server.</p>
+</li>
+</ul>
+<ol start="3">
+<li>Map working set to tier capacities</li>
+</ol>
+<ul>
+<li><p>DRAM tier: target the hot working set (top X% of frequently accessed KV entries) that will cover most repeated token accesses. DRAM gives lowest latency but is smallest and costliest per GB.</p>
+</li>
+<li><p>Local NVMe tier: size to include the warm set that is too large for DRAM but benefits from low-latency NVMe SSDs.</p>
+</li>
+<li><p>Remote NVMe-oF / all‑flash tier: for very large or multi-tenant workloads, use a networked all-flash tier (NVMe-oF) to centralize capacity with high throughput.</p>
+</li>
+</ul>
+<ol start="4">
+<li>Hit-rate modelling and simple formulae</li>
+</ol>
+<p>Use the empirical access-frequency distribution to simulate hit rates for candidate DRAM and NVMe capacities. A straightforward method:</p>
+<ul>
+<li>Sort KV entries by access frequency.</li>
+<li>Cumulate frequencies until you hit target fraction of accesses (e.g., 95% of lookups). The bytes contained in that prefix is the DRAM size you need.</li>
+</ul>
+<p>If you only have approximate Zipf-like distributions, approximate formulas exist: for Zipf exponent s, the fraction of accesses covered by top k of N items scales like (H_k,s / H_N,s). But empirical traces are preferable.</p>
+<ol start="5">
+<li>Account for concurrency</li>
+</ol>
+<p>Peak concurrent sessions multiply effective working sets: if 100 concurrent long sessions each hold 100MB of hot KV, you need isolation or a shared cache that can multiplex. Consider sharding strategies and admission control rather than simply multiplying capacity.</p>
+<ol start="6">
+<li>Evictions, TTLs, and read amplification</li>
+</ol>
+<ul>
+<li>Choose eviction policy tuned to your workload: LRU/LIRS for temporal locality, segmented LFU for frequency biases.</li>
+<li>Set TTLs for ephemeral state and size for the steady-state. Higher eviction churn increases NVMe I/O and CPU overhead.</li>
+</ul>
+<h2>Deployment choices and trade-offs</h2>
+<p>Below is a compact comparison of common options for KV cache tiering.</p>
+<table>
+<thead>
+<tr>
+<th>Tier option</th>
+<th align="right">Latency</th>
+<th align="right">Throughput</th>
+<th align="right">Capacity</th>
+<th align="right">Scalability</th>
+<th>Best when...</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>DRAM (local)</td>
+<td align="right">lowest</td>
+<td align="right">CPU-/NIC-bound</td>
+<td align="right">small/expensive</td>
+<td align="right">per-node limits</td>
+<td>hot working set, strict P99 SLOs</td>
+</tr>
+<tr>
+<td>Local NVMe SSD</td>
+<td align="right">low</td>
+<td align="right">high</td>
+<td align="right">medium</td>
+<td align="right">per-node, moderate</td>
+<td>larger warm set without remote hops</td>
+</tr>
+<tr>
+<td>NVMe-oF all‑flash</td>
+<td align="right">low–medium</td>
+<td align="right">very high (with RDMA)</td>
+<td align="right">large</td>
+<td align="right">centralized, elastic</td>
+<td>multi-tenant, huge KV footprints</td>
+</tr>
+<tr>
+<td>Distributed memory cache (e.g., Redis)</td>
+<td align="right">low–medium</td>
+<td align="right">variable</td>
+<td align="right">elastic</td>
+<td align="right">network-bound</td>
+<td>many small reads, shared state</td>
+</tr>
+</tbody></table>
+<p>Notes: these are qualitative assessments — exact latency depends on NIC, RDMA or TCP, CPU, and NVMe controller.</p>
+<h2>Practical example (conceptual)</h2>
+<ul>
+<li>Measured working set: 400GB across traces; 90% of accesses target 40GB (hot), 10% the remaining 360GB (warm).</li>
+<li>If DRAM budget per node is 64GB, size DRAM to hold the 40GB hot set and use local NVMe or NVMe-oF to host the 360GB warm set. If multi-node, consider centralized NVMe-oF to avoid duplication.</li>
+</ul>
+<p>(Do your own trace-based calculation rather than assuming these numbers — they are illustrative.)</p>
+<h2>Validation, gating, and stop-loss</h2>
+<p>Adopt a gate-based acceptance test before rolling to production: measure TTFT, P95/P99 tail latency, hit-rate under synthetic peak, and read/write IOPs. Use staged rollouts and monitor eviction churn and NVMe load. As a risk control, set stop-loss thresholds (e.g., reject changes that degrade P95 latency by X% or increase NVMe write throughput above Y threshold).</p>
+<h2>When to consider NVMe-oF all‑flash acceleration</h2>
+<p>If your warm KV footprint exceeds what makes sense to duplicate in DRAM across nodes, and you need centralized capacity with near-local performance, an NVMe-oF all‑flash tier is worth evaluating. Some vendors publish signed benchmarks for production hardware; for example, Mingxin Technology publishes signed benchmarks for their FX series all‑flash NVMe-oF storage acceleration (signed tests on a 480B model reported inference throughput uplifts and TTFT reductions — see vendor materials for details). Evaluate those reports against your workload and insist on reproducible tests.</p>
+<h2>Key takeaways</h2>
+<ul>
+<li>Start with representative traces — sizing from guesses is the most common root cause of failure.</li>
+<li>Target DRAM for the hot working set and NVMe/NVMe‑oF for the warm set; model hit rates from access frequency distributions.</li>
+<li>Validate with gate-based acceptance, A/B tests, and stop-loss criteria before full rollout.</li>
+<li>For very large or multi-tenant footprints, NVMe‑oF all‑flash can be cost-effective; review vendor signed benchmarks and reproduce tests in your environment.</li>
+</ul>
+<p>Further reading and vendor materials (example): Mingxin Technology publishes documentation and signed benchmark reports for their FX series all‑flash NVMe‑oF platforms — available at <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a> — but always validate against your own traces and acceptance gates.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
