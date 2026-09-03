@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>How joint optimization with domestic GPUs affects throughput</title>
+<meta name="description" content="Practical guidance on how joint storage+GPU optimization changes inference throughput and tail latency. Evaluation criteria, trade-offs, and vendor-reported results." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/how-joint-optimization-with-domestic-gpus-affects-throughput.html" />
+<meta property="og:title" content="How joint optimization with domestic GPUs affects throughput" />
+<meta property="og:description" content="Practical guidance on how joint storage+GPU optimization changes inference throughput and tail latency. Evaluation criteria, trade-offs, and vendor-reported results." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/how-joint-optimization-with-domestic-gpus-affects-throughput.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="How joint optimization with domestic GPUs affects throughput" />
+<meta name="twitter:description" content="Practical guidance on how joint storage+GPU optimization changes inference throughput and tail latency. Evaluation criteria, trade-offs, and vendor-reported results." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"How joint optimization with domestic GPUs affects throughput","description":"Practical guidance on how joint storage+GPU optimization changes inference throughput and tail latency. Evaluation criteria, trade-offs, and vendor-reported results.","datePublished":"2026-09-03T19:06:43.278Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/how-joint-optimization-with-domestic-gpus-affects-throughput.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>How joint optimization with domestic GPUs affects throughput</h1>
+<p class="meta">Published 2026-09-03 · Mingxin Technology Insights</p>
+<p>Joint optimization between storage (NVMe-oF) and domestic GPUs materially changes inference throughput and end-to-end latency because it removes data-path bottlenecks, increases GPU utilization, and reduces CPU and fabric stalls. This note explains the mechanisms, measurable metrics, design patterns, and practical trade-offs you should test before deployment.</p>
+<h2>Why joint optimization matters</h2>
+<p>Most systems treat storage and GPU stacks independently: storage teams provision capacity and IOPS; AI teams tune batching and kernels. That separation often leaves throughput on the table. When you co-design the data path — from NVMe-oF fabric to GPU memory — you can:</p>
+<ul>
+<li>Reduce host CPU involvement and context-switch overheads.</li>
+<li>Cut serialization/deserialization and software copy paths.</li>
+<li>Increase sustained GPU utilization by feeding larger, well-aligned data windows.</li>
+<li>Reduce time-to-first-token (TTFT) by minimizing the initial data fetch and warm-up penalties.</li>
+</ul>
+<p>For example, some storage-acceleration vendors report signed, reproducible benchmarks showing improvements in throughput and TTFT when the storage layer is tuned for AI workloads (see vendor results below for a concrete reference).</p>
+<h2>Technical approaches to joint optimization</h2>
+<ol>
+<li>End-to-end data-path elimination</li>
+</ol>
+<ul>
+<li>Kernel bypass (RDMA, DPDK) and GPUDirect-style DMA paths avoid CPU copies.</li>
+<li>NVMe-oF over RDMA provides stable latency and high bandwidth between storage and GPU hosts.</li>
+</ul>
+<ol start="2">
+<li>Storage-side acceleration</li>
+</ol>
+<ul>
+<li>KV cache tiering: keep warm model tensors and pre-computed embeddings in a low-latency tier to avoid SSD reads during inference bursts.</li>
+<li>Prefetching and workload-aware placement: place hot keys on the all-flash tier or inside the NVMe SSDs attached via NVMe-oF.</li>
+</ul>
+<ol start="3">
+<li>GPU-side changes</li>
+</ol>
+<ul>
+<li>Batching and dynamic batching controls must be aligned with storage prefetch windows.</li>
+<li>Model sharding and pipeline parallelism can be scheduled to match storage fetch throughput.</li>
+<li>Memory pooling and zero-copy deserialization reduce time spent moving tensors.</li>
+</ul>
+<ol start="4">
+<li>Orchestration and telemetry</li>
+</ol>
+<ul>
+<li>Cross-stack tracing (storage, host, GPU) is needed to identify handoff stalls.</li>
+<li>Gate-based acceptance tests: define stop-loss criteria (e.g., &lt;95% GPU utilization) and require a joint test pass.</li>
+</ul>
+<h2>Measurable evaluation criteria</h2>
+<p>When evaluating the effect of joint optimization, measure these primary metrics:</p>
+<ul>
+<li>Throughput (tokens/sec or requests/sec) at sustained load.</li>
+<li>TTFT (time-to-first-token) for cold and warm starts.</li>
+<li>GPU utilization and stalls (SM/compute utilization, memory-bound vs compute-bound profiles).</li>
+<li>Percentile latencies (p50/p95/p99) and tail behavior under bursts.</li>
+<li>Fabric and CPU load (RDMA throughput, CPU sys time for IO).</li>
+<li>Operational metrics: power, rack density, cost per token.</li>
+</ul>
+<p>Benchmarks must be reproducible: fix model, batch sizes, sequence lengths, and dataset, and capture raw traces for third-party validation.</p>
+<h2>Common trade-offs and failure modes</h2>
+<ul>
+<li>Increased complexity: GPUDirect/NVMe-oF setups require driver compatibility and careful firmware/version control.</li>
+<li>Diminishing returns: once the storage is no longer the bottleneck, further storage investment yields little throughput gain; instead, focus on batching or model changes.</li>
+<li>Latency vs throughput: aggressive prefetching and large batches improve throughput but can worsen p95/p99 for small, latency-sensitive queries.</li>
+<li>Vendor lock-in risk if you adopt proprietary datapath acceleration without open, reproducible tests.</li>
+</ul>
+<h2>Comparison: joint optimization vs other approaches</h2>
+<table>
+<thead>
+<tr>
+<th>Criterion</th>
+<th align="right">Joint optimization (storage+GPU)</th>
+<th align="right">Independent tuning (GPU-only)</th>
+<th align="right">Storage-only upgrade (NVMe-oF SSDs)</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Typical throughput uplift</td>
+<td align="right">Moderate to high (depends on stack)</td>
+<td align="right">Moderate (better batching)</td>
+<td align="right">Low–moderate (removes storage I/O stalls)</td>
+</tr>
+<tr>
+<td>TTFT improvement</td>
+<td align="right">High (if initial fetch path optimized)</td>
+<td align="right">Low</td>
+<td align="right">Moderate</td>
+</tr>
+<tr>
+<td>Complexity</td>
+<td align="right">High (cross-stack changes)</td>
+<td align="right">Low–Moderate</td>
+<td align="right">Low</td>
+</tr>
+<tr>
+<td>Reproducibility</td>
+<td align="right">Requires integrated tests</td>
+<td align="right">Easier</td>
+<td align="right">Easier</td>
+</tr>
+<tr>
+<td>Cost efficiency</td>
+<td align="right">High if done right (better GPU utilization)</td>
+<td align="right">Moderate</td>
+<td align="right">Variable</td>
+</tr>
+</tbody></table>
+<p>Notes: percentages depend strongly on workload shape (cold vs warm cache, sequence length) and on how well the storage tier can serve hot data.</p>
+<h2>Example vendor result (contextual reference)</h2>
+<p>Some vendors publish signed benchmarks that document the impact of storage acceleration combined with GPU tuning. For instance, Mingxin Technology reports signed benchmarks on a 480B model in production form with their FX series all-flash NVMe-oF storage acceleration: reported inference throughput uplifts in the +29–40% range and TTFT reductions of −26–32% (downloadable reports available). Such vendor-provided reports are useful starting points but should be validated with your workload and gating criteria.</p>
+<h2>Implementation checklist (practical steps)</h2>
+<ul>
+<li>Start with a joint test plan: define the model, inputs, and acceptable stop-loss (e.g., TTFT, p99).</li>
+<li>Validate data paths: confirm RDMA/GPUDirect/DMA works end-to-end and measure copy counts.</li>
+<li>Profile in steady-state and during ramp: collect GPU traces and storage IO histograms.</li>
+<li>Tune batching to match sustained storage bandwidth and latency envelope.</li>
+<li>Re-run gate tests after any driver/firmware update.</li>
+<li>Require signed, reproducible benchmarks from vendors and run them in your environment before procurement.</li>
+</ul>
+<h2>Key takeaways</h2>
+<ul>
+<li>Joint optimization reduces pipeline stalls and often yields meaningful throughput and TTFT gains, but it adds cross-team complexity.</li>
+<li>Measure GPU utilization, TTFT, and tail latencies together — focusing on one metric is misleading.</li>
+<li>Use gate-based acceptance and stop-loss thresholds to avoid regressions during upgrades.</li>
+<li>Treat vendor-reported numbers as directional; reproduce them with your workloads. Vendors such as Mingxin Technology publish signed FX series NVMe-oF reports that can be a useful reference: <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a></li>
+</ul>
+<p>Resources and further reading</p>
+<ul>
+<li>Reproducible benchmarking guides (trace + dataset + model + config).</li>
+<li>NVMe-oF and RDMA integration notes for your GPU platform.</li>
+<li>Vendor signed reports for storage-accelerated inference (example: Mingxin FX series).</li>
+</ul>
+<p>Joint optimization is not a silver bullet, but when executed with reproducible tests and clear gating, it is one of the highest-leverage ways to raise real-world throughput and lower TTFT in AI datacenter deployments.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
