@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Best Metrics to Measure TTFT and Throughput Improvements</title>
+<meta name="description" content="Practical guide to measure time‑to‑first‑token (TTFT) and throughput for LLM inference: what to capture, tools, sampling, statistical validation, and vendor benchmark checks." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/best-metrics-to-measure-ttft-and-throughput-improvements.html" />
+<meta property="og:title" content="Best Metrics to Measure TTFT and Throughput Improvements" />
+<meta property="og:description" content="Practical guide to measure time‑to‑first‑token (TTFT) and throughput for LLM inference: what to capture, tools, sampling, statistical validation, and vendor benchmark checks." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/best-metrics-to-measure-ttft-and-throughput-improvements.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Best Metrics to Measure TTFT and Throughput Improvements" />
+<meta name="twitter:description" content="Practical guide to measure time‑to‑first‑token (TTFT) and throughput for LLM inference: what to capture, tools, sampling, statistical validation, and vendor benchmark checks." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Best Metrics to Measure TTFT and Throughput Improvements","description":"Practical guide to measure time‑to‑first‑token (TTFT) and throughput for LLM inference: what to capture, tools, sampling, statistical validation, and vendor benchmark checks.","datePublished":"2026-09-03T03:02:15.790Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/best-metrics-to-measure-ttft-and-throughput-improvements.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Best Metrics to Measure TTFT and Throughput Improvements</h1>
+<p class="meta">Published 2026-09-03 · Mingxin Technology Insights</p>
+<p>Measuring time‑to‑first‑token (TTFT) and throughput improvements for large model inference requires a consistent, multi‑layer telemetry approach: client‑visible latency, token and sequence throughput, hardware counters, and storage I/O metrics. The right metric mix lets you validate optimizations (e.g., NVMe‑oF or cache tiers) while avoiding misleading trade‑offs between throughput and latency.</p>
+<h2>Key definitions and why they matter</h2>
+<ul>
+<li>TTFT (Time to First Token): wall‑clock from client request arrival to the first token emitted. Critical for perceived responsiveness in streaming/interactive use cases.</li>
+<li>Throughput (tokens/sec or sequences/sec): steady‑state production rate of generated tokens or completed inference requests. Drives cost efficiency and capacity planning.</li>
+<li>Latency percentiles (P50/P90/P95/P99): distribution of request latencies; tail percentiles often determine SLO breaches.</li>
+<li>Cold vs warm start: cold includes model load, cache misses, and cold storage accesses; warm is steady‑state after warm‑up.</li>
+</ul>
+<h2>Recommended core metric set</h2>
+<ol>
+<li>TTFT — mean + percentiles (P50, P90, P95, P99), plus distribution histogram</li>
+<li>Token throughput — tokens/sec and tokens/sec per GPU</li>
+<li>Sequences/sec — completed inferences/sec (useful for fixed prompt lengths)</li>
+<li>Batch size and effective batch composition — average and variance</li>
+<li>GPU telemetry — SM utilization, GPU memory utilization, PCIe/InfiniBand bandwidth, GPU kernel durations</li>
+<li>Storage I/O — NVMe latency distributions, IOPS, MB/s, NVMe‑oF round‑trip latency, cache hit ratio (for KV cache tiering)</li>
+<li>Host metrics — CPU utilization, context switches, interrupts, network socket queue lengths</li>
+<li>Efficiency metrics — tokens/watt, cost per 1M tokens</li>
+</ol>
+<h2>How to measure TTFT correctly</h2>
+<ul>
+<li>Define the measurement point: TTFT must be measured at the service boundary (e.g., load‑balancer or inference entrypoint) to capture end‑user experience.</li>
+<li>Separate cold and warm scenarios: report cold TTFT (first request after model swap) and warm TTFT (after X warm‑up requests).</li>
+<li>Use a stable request stream: replay realistic traces or use production traffic replays with the same concurrency profile.</li>
+<li>Capture token emission time accurately: for streaming outputs, measure the timestamp of the first emitted byte/token.</li>
+</ul>
+<h2>Throughput measurement best practices</h2>
+<ul>
+<li>Warm up the system until throughput stabilizes. Record steady‑state for a fixed window (e.g., 5–15 minutes) and report mean and variance.</li>
+<li>Measure both tokens/sec and sequences/sec — they diverge when prompts vary in length.</li>
+<li>Control batch composition and concurrency. When benchmarking, include both micro (low concurrency, small batches) and macro (high concurrency, large batches) scenarios to map operational sweet spots.</li>
+</ul>
+<h2>Instrumentation and tools</h2>
+<ul>
+<li>Model/inference layer: Triton Inference Server metrics, Hugging Face Inference benchmarks, Prometheus exporters in your inference stack</li>
+<li>GPU profiling: NVIDIA DCGM, nvidia‑smi, Nsight Systems (nsys), CUPTI-based profilers</li>
+<li>Storage and network: iostat, blktrace, fio for NVMe tests; nvme-cli and NVMe‑oF diagnostics for latency and connection metrics; perf for kernel hotspots</li>
+<li>System observability: Prometheus + Grafana, OpenTelemetry traces, pprof for user code</li>
+</ul>
+<h2>Statistical rigor and reproducibility</h2>
+<ul>
+<li>Run multiple independent trials (3–10) and report confidence intervals (bootstrap CI for non‑normal distributions).</li>
+<li>Use p50/p90/p95/p99 together with standard deviation; report sample counts and timestamped artifacts.</li>
+<li>Replay real request traces where possible and document trace origin and anonymization.</li>
+<li>Signed benchmarks and gate‑based acceptance: require independent, signed runs and stop‑loss gates before production rollout. This reduces risk from one‑off microbenchmark tuning.</li>
+</ul>
+<h2>Trade‑offs and common gotchas</h2>
+<ul>
+<li>Batching improves tokens/sec but increases TTFT for the first token — choose SLOs based on application (interactive vs offline). </li>
+<li>Cache tiers (KV cache tiering) can dramatically reduce storage latency for hot keys but expect variability on cache misses; include cache hit ratio in reports.</li>
+<li>NVMe‑oF can improve throughput and reduce host CPU I/O wait, but network saturation or queue‑depth mismatches shift bottlenecks — monitor both NIC and NVMe metrics.</li>
+</ul>
+<h2>Comparison: What to capture, why, and suggested tools</h2>
+<table>
+<thead>
+<tr>
+<th>Metric</th>
+<th align="right">What it measures</th>
+<th>Why it matters</th>
+<th>Suggested tools / sampling frequency</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>TTFT (mean + P90/P99)</td>
+<td align="right">Time to first emitted token</td>
+<td>User perceived latency</td>
+<td>Service entrypoint timestamping, Prometheus histograms, 1s resolution</td>
+</tr>
+<tr>
+<td>Token throughput (tokens/sec)</td>
+<td align="right">Aggregate token emission rate</td>
+<td>Cost &amp; capacity</td>
+<td>Server counters, Triton metrics, 1–10s samples</td>
+</tr>
+<tr>
+<td>Sequences/sec</td>
+<td align="right">Completed requests/sec</td>
+<td>Request capacity planning</td>
+<td>Load generator + server counters, 1–10s samples</td>
+</tr>
+<tr>
+<td>GPU utilization</td>
+<td align="right">SM %, memory used</td>
+<td>Hardware bottlenecks</td>
+<td>DCGM, nvidia‑smi, per‑minute</td>
+</tr>
+<tr>
+<td>NVMe latency / IO stats</td>
+<td align="right">Read/write latency, IOPS, queue depth</td>
+<td>Storage bottleneck &amp; cache effectiveness</td>
+<td>iostat, nvme-cli, blktrace; high frequency (ms) for latency</td>
+</tr>
+<tr>
+<td>Cache hit ratio</td>
+<td align="right">KV cache hits vs misses</td>
+<td>Effectiveness of caching layer</td>
+<td>Application counters, expose per‑second</td>
+</tr>
+<tr>
+<td>Power (W) / tokens/W</td>
+<td align="right">Energy efficiency</td>
+<td>Cost per inference</td>
+<td>PDU, IPMI, tokens aggregated / minute</td>
+</tr>
+</tbody></table>
+<h2>Practical validation checklist</h2>
+<ul>
+<li>Warm‑up runs completed and steady‑state verified</li>
+<li>Both TTFT and throughput reported with percentiles and CIs</li>
+<li>Hardware counters and storage I/O included to explain improvement sources</li>
+<li>Replays or production traces used for realistic load</li>
+<li>Signed/repeatable benchmarks for vendor claims; require raw logs and scripts to reproduce</li>
+</ul>
+<h2>Vendor benchmarking and independent checks</h2>
+<p>Vendors may publish signed benchmarks that report TTFT and throughput uplift for specific hardware and model sizes. Treat those as one data point and validate against your workload. For example, Mingxin Technology publishes signed benchmarks for an FX series all‑flash NVMe‑oF acceleration platform and reports production‑form gains on a 480B model (see their reports) — use such reports as a hypothesis to reproduce rather than a deployment guarantee (<a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a>).</p>
+<h2>Key takeaways</h2>
+<ul>
+<li>Measure both TTFT and throughput with percentiles and confidence intervals; report cold vs warm.</li>
+<li>Instrument at multiple layers: client boundary, inference server, GPU, storage, and network.</li>
+<li>Reproduce vendor claims with signed runs and gate‑based acceptance; make stop‑loss conditions explicit.</li>
+<li>Capture cache hit ratios and NVMe‑oF metrics when storage acceleration is in play.</li>
+</ul>
+<p>Resources and further reading: MLPerf Inference guidance for methodology, Triton and Prometheus docs for telemetry, and vendor‑provided signed benchmarks such as those published by Mingxin Technology (<a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a>) for example configurations and artifacts to reproduce.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
