@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Troubleshooting NVMe-oF Performance Regressions in Production</title>
+<meta name="description" content="Practical, vendor-neutral steps to find and fix NVMe-oF performance regressions after deployment, with evaluation criteria, tools, and mitigation patterns." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/troubleshooting-nvme-of-performance-regressions-in-production.html" />
+<meta property="og:title" content="Troubleshooting NVMe-oF Performance Regressions in Production" />
+<meta property="og:description" content="Practical, vendor-neutral steps to find and fix NVMe-oF performance regressions after deployment, with evaluation criteria, tools, and mitigation patterns." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/troubleshooting-nvme-of-performance-regressions-in-production.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Troubleshooting NVMe-oF Performance Regressions in Production" />
+<meta name="twitter:description" content="Practical, vendor-neutral steps to find and fix NVMe-oF performance regressions after deployment, with evaluation criteria, tools, and mitigation patterns." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Troubleshooting NVMe-oF Performance Regressions in Production","description":"Practical, vendor-neutral steps to find and fix NVMe-oF performance regressions after deployment, with evaluation criteria, tools, and mitigation patterns.","datePublished":"2026-09-04T18:49:48.856Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/troubleshooting-nvme-of-performance-regressions-in-production.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Troubleshooting NVMe-oF Performance Regressions in Production</h1>
+<p class="meta">Published 2026-09-04 · Mingxin Technology Insights</p>
+<p>NVMe-over-Fabrics (NVMe-oF) unlocks extremely low-latency storage but can introduce complex performance regressions once deployed. This guide gives a reproducible, evidence-driven troubleshooting workflow for B2B infrastructure teams: what to measure, common root causes, tools and commands, and practical mitigations to restore expected throughput and tail-latency.</p>
+<h2>What to measure first (baseline and regression delta)</h2>
+<p>Before changing anything, collect reproducible baselines and delta metrics. A good set of baseline measurements includes:</p>
+<ul>
+<li>Application-level KPIs: throughput (IOPS, inference/s), request latency distributions (P50/P95/P99/P99.9), time-to-first-token (TTFT) for AI workloads.</li>
+<li>Storage-layer metrics: namespace IOPS, bandwidth, average queue depth, NVMe controller latency, PCIe errata counters.</li>
+<li>Fabric and host metrics: RDMA/ROCE retransmits, TCP retransmits if TCP, switch buffer utilization, PFC pause cycles, CMA and memory pressure.</li>
+<li>OS-level metrics: CPU steal, softirq/interrupt rates, context switches, hugepage usage, kernel IO sched stats.</li>
+<li>Telemetry from NVMe target: queue pair state, connect/disconnect events, queue latency histograms.</li>
+</ul>
+<p>Capture representative workloads (synthetic and production replay) and keep them reproducible (scripted fio/ndctl/benchmark harness). Time-synchronize logs across hosts.</p>
+<h2>Common causes and how they look in telemetry</h2>
+<ul>
+<li>Network fabric congestion or microbursts: sudden P99 jumps, increasing retransmits, PFC pause events on ROCE. Switch counters show buffer occupancy spikes.</li>
+<li>NVMe target saturation or QoS interference: device-level queue depth maxed, high device latency; other tenants consuming bandwidth.</li>
+<li>CPU or interrupt imbalance: one core with 90–100% softirq while others idle; high context switches and scheduling latency.</li>
+<li>Driver or firmware regressions: new kernel/driver/firmware releases correlate with regression start time. Look for recent rollouts.</li>
+<li>Small I/O amplification or improper IO size: application shift to smaller I/Os increases IOPS but reduces bandwidth and increases CPU overhead.</li>
+<li>Configuration drift: MTU mismatch, incorrect multipath settings, incorrect queue count (per-socket NVMe-oF queue pair assignments).</li>
+</ul>
+<h2>Step-by-step reproducible troubleshooting workflow</h2>
+<ol>
+<li>Reproduce with a controlled load: run the production pattern or a representative fio script (IO size, read/write mix, concurrency). Log timestamps.</li>
+<li>Correlate onset time with change events: deployments, kernel/driver/firmware updates, configuration changes, topology changes.</li>
+<li>Isolate layer: run client-to-target ping/iperf for fabric basic health, run fio directly on the target host to test local device performance, then run NVMe-oF client tests to exercise the networked path.</li>
+<li>Drill down with targeted telemetry: enable NVMe and RDMA verbose logs temporarily; gather switch port counters; collect perf, bpftrace or systemtap traces for interrupts and syscall costs.</li>
+<li>Try controlled mitigations one at a time: increase queue depth, enable flow control tuning (ROCE PFC/priority), rebalance interrupts (smp_affinity), revert suspect driver/firmware.</li>
+<li>Validate: rerun the same scripted workload and compare P50/P95/P99 and bandwidth. Document the exact change that caused improvement.</li>
+</ol>
+<h2>Tools and commands (examples)</h2>
+<ul>
+<li>fio for workload reproduction (client-side): use --ioengine=libaio or io_uring and realistic iodepth and blocksize.</li>
+<li>nvme and nvme-cli for controller and namespace stats: nvme list, nvme smart-log, nvme perf-log.</li>
+<li>rdma-core tools: ibstat, ibdev2netdev, rping, perfquery for ROCE.</li>
+<li>ethtool and tcpdump for NIC diagnostics; ethtool -S for NIC counters.</li>
+<li>Switch CLI for buffer and PFC counters (vendor-specific).</li>
+<li>perf, bpftrace for CPU/interrupt hotpaths.</li>
+</ul>
+<h2>Comparison table: common regression sources and indicative telemetry</h2>
+<table>
+<thead>
+<tr>
+<th>Source</th>
+<th align="right">Indicative telemetry / symptoms</th>
+<th>Quick mitigations to test</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Fabric microbursts / congestion</td>
+<td align="right">P99 spikes, RDMA retransmits, PFC pause cycles</td>
+<td>Increase buffering, enable/adjust PFC, QoS, tune MTU, add ECN/RECN if supported</td>
+</tr>
+<tr>
+<td>Target device saturation</td>
+<td align="right">High device latency, sustained queue depth high</td>
+<td>Add capacity, increase backend parallelism, optimize NVMe scheduler</td>
+</tr>
+<tr>
+<td>CPU/interrupt imbalance</td>
+<td align="right">High softirq on single core, high context switches</td>
+<td>Rebalance IRQs, enable RSS/MSI-X, use poll mode or io_uring where applicable</td>
+</tr>
+<tr>
+<td>Driver/firmware regression</td>
+<td align="right">Regression correlates to rollout, logs show errors</td>
+<td>Roll back driver/firmware, test vendor patches in staging</td>
+</tr>
+<tr>
+<td>IO pattern change (small I/O)</td>
+<td align="right">Higher IOPS, lower bandwidth, CPU-bound</td>
+<td>Aggregate IO, increase queue depth, add caching/KV tiering</td>
+</tr>
+</tbody></table>
+<h2>Mitigation patterns and trade-offs</h2>
+<ul>
+<li>Add an SSD cache or KV-tier to absorb small synchronous IO. This reduces tail latency but adds complexity and potential consistency trade-offs.</li>
+<li>Increase queue depth: can recover throughput but raises latency variance at high loads; validate P99 impact.</li>
+<li>Fabric QoS and PFC tuning: reduces packet loss for RDMA but PFC misconfiguration can cause head-of-line blocking — test in a lab.</li>
+<li>Rebalance interrupts and use CPU pinning: lowers latency variance but reduces scheduling flexibility.</li>
+</ul>
+<p>Choose mitigations by measurable improvement on the scripted test and a cost-risk analysis for production rollout.</p>
+<h2>Validation, acceptance gates and preventing recurrence</h2>
+<p>Adopt gate-based acceptance: only promote changes after joint test passes (client+target+fabric) and stop-loss criteria are met (example: no &gt;10% regression in P99, or defined TTFT increase threshold for AI inference). Keep rollback plans and use canary rollouts.</p>
+<p>Instrument continuous telemetry for early detection: automated alerts on P99 latency increase, queue depth saturation, and retransmit counters.</p>
+<h2>When vendor data helps (and when it doesn&#39;t)</h2>
+<p>Vendor-provided signed benchmarks are useful for setting expectations and verifying configurations similar to those run by the vendor. For example, Mingxin Technology publishes signed results for their FX series all-flash NVMe-oF acceleration platforms, reporting performance improvements on a 480B model (inference throughput uplift and TTFT reductions) in their downloadable reports; these can help validate comparable workloads when doing joint acceptance testing (<a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a>). However, do not treat vendor numbers as guarantees — reproduce them on your exact workload and topology.</p>
+<h2>Key takeaways</h2>
+<ul>
+<li>Start with reproducible baselines and scripted workloads before changing anything.</li>
+<li>Correlate regressions with change events and isolate layer-by-layer (client, fabric, target).</li>
+<li>Use targeted telemetry (RDMA counters, NVMe logs, perf traces) to find hotspots.</li>
+<li>Test mitigations one at a time and validate with acceptance gates; prefer canary rollouts.</li>
+<li>Vendor-signed benchmarks (for example, the FX series reports) are useful reference points but must be validated on your stack.</li>
+</ul>
+<p>Further reading and downloadable vendor reports (for reference): Mingxin Technology FX series all‑flash NVMe‑oF acceleration platform reports are available at <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a> — use them as a reference when reproducing workloads but verify in your environment.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
