@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Troubleshooting low inference throughput after NVMe-oF deployment</title>
+<meta name="description" content="Practical checklist to diagnose and remediate low inference throughput after NVMe-oF deployment: measurement, root causes, tuning, and vendor/architecture trade-offs." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/troubleshooting-low-inference-throughput-after-nvme-of-deployment.html" />
+<meta property="og:title" content="Troubleshooting low inference throughput after NVMe-oF deployment" />
+<meta property="og:description" content="Practical checklist to diagnose and remediate low inference throughput after NVMe-oF deployment: measurement, root causes, tuning, and vendor/architecture trade-offs." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/troubleshooting-low-inference-throughput-after-nvme-of-deployment.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Troubleshooting low inference throughput after NVMe-oF deployment" />
+<meta name="twitter:description" content="Practical checklist to diagnose and remediate low inference throughput after NVMe-oF deployment: measurement, root causes, tuning, and vendor/architecture trade-offs." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Troubleshooting low inference throughput after NVMe-oF deployment","description":"Practical checklist to diagnose and remediate low inference throughput after NVMe-oF deployment: measurement, root causes, tuning, and vendor/architecture trade-offs.","datePublished":"2026-09-04T15:48:17.614Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/troubleshooting-low-inference-throughput-after-nvme-of-deployment.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Troubleshooting low inference throughput after NVMe-oF deployment</h1>
+<p class="meta">Published 2026-09-04 · Mingxin Technology Insights</p>
+<p>If your inference nodes saw lower-than-expected throughput after moving model storage to an NVMe-over-Fabrics (NVMe-oF) backend, this guide gives a practical, prioritized troubleshooting path: how to measure, common root causes, targeted mitigations, and architecture trade-offs you can test in production.</p>
+<h2>Quick diagnostic checklist</h2>
+<p>Start with measurements before changing anything:</p>
+<ul>
+<li>Record baseline model metrics: throughput (inferences/sec), p99/avg latency, GPU utilization, CPU usage, memory pressure.</li>
+<li>Capture storage metrics: NVMe IOPS, bandwidth, queue depths, target CPU usage, NVMe-oF fabric stats (RDMA/TCP counters), and PCIe link state.</li>
+<li>Correlate timestamps across stack (inference app, host OS, NVMe target).</li>
+</ul>
+<p>Collect these with vendor tools, nvme-cli, iostat/blktrace, perf, sar, nvidia-smi, and your APM. Without good measurement you’ll be guessing.</p>
+<h2>Common root causes and how to validate them</h2>
+<ol>
+<li>Fabric-level bottleneck (RDMA/TCP)</li>
+</ol>
+<ul>
+<li>Symptom: Storage bandwidth/IOPS on the target is saturated but host shows lower application throughput; network Rx/Tx saturation or high retransmits.</li>
+<li>Validate: Check IB counters (for RDMA), ethtool/sar for TCP—packet drops, retransmits, or device queue drops. For NVMe/TCP, monitor TCP retransmit statistics and congestion windows.</li>
+<li>Fixes: Add path bandwidth (more NICs/ports), enable multi-pathing, tune TCP (RWIN), or move to RDMA if latency-sensitive and your fabric supports it.</li>
+</ul>
+<ol start="2">
+<li>NVMe target saturation or QoS</li>
+</ol>
+<ul>
+<li>Symptom: Target SSDs report high utilization, long internal GC stalls, or CPU on the target is pegged handling NVMe-oF sessions.</li>
+<li>Validate: On the target, inspect drive SMART, latency histograms, target CPU/memory usage, and controller queue metrics (nvme-cli). Check for long tail latencies.</li>
+<li>Fixes: Balance load across devices, deploy more target nodes, adjust target QoS throttling, or enable KV-based cache tiers (local NVMe cache) to offload hot keys.</li>
+</ul>
+<ol start="3">
+<li>Host-side CPU, interrupt or NUMA misalignment</li>
+</ol>
+<ul>
+<li>Symptom: Low GPU utilization while host CPUs are busy with I/O or softirqs; improper NUMA placement causes remote memory/PCIe hops.</li>
+<li>Validate: Use top/htop, irqbalance checks, and numactl to see CPU/PCIe locality. Look for high softirq or irq times on CPUs not close to the NIC or GPU.</li>
+<li>Fixes: Pin NVMe and NIC interrupts to CPUs near the GPU, ensure driver affinity, and place the NVMe-oF client and GPU on the same NUMA node where possible.</li>
+</ul>
+<ol start="4">
+<li>IO pattern mismatch: small random ops vs large sequential transfers</li>
+</ol>
+<ul>
+<li>Symptom: Inference workload issues many small reads, but backend is optimized for large sequential throughput.</li>
+<li>Validate: Trace IO sizes and distribution with blktrace/fio to reproduce the pattern.</li>
+<li>Fixes: Introduce a KV-cache tier or local read cache (e.g., a small NVMe SSD per host) to absorb small-key hot paths. Adjust request batching in the inference pipeline.</li>
+</ul>
+<ol start="5">
+<li>NVMe-oF configuration and queue depth</li>
+</ol>
+<ul>
+<li>Symptom: Low throughput with low outstanding IO; queues are under-provisioned.</li>
+<li>Validate: Check NVMe namespace queue depth, controller queue utilization, and the number of concurrent sessions.</li>
+<li>Fixes: Increase queue depths, use multiple sessions/directors, and calibrate fio-style outstanding IO to match backend latency.</li>
+</ul>
+<ol start="6">
+<li>Storage driver/firmware/interop issues</li>
+</ol>
+<ul>
+<li>Symptom: Sudden regressions after upgrades or mixed vendor components.</li>
+<li>Validate: Cross-check driver and firmware versions, look for known issues in vendor advisories.</li>
+<li>Fixes: Revert to a validated stack or apply vendor patches. Gate production changes with joint test plans and stop-loss thresholds.</li>
+</ul>
+<h2>Measurement plan (what to capture and how)</h2>
+<ul>
+<li>Application: requests/sec, tail latency (p50/p95/p99), GPU utilization by model partition.</li>
+<li>Host client: CPU, interrupts by NIC, NIC counters, NUMA locality, PCIe link speeds.</li>
+<li>Fabric: latency and retransmit counters (RDMA: QP stats; TCP: retransmits, RTT distribution).</li>
+<li>Target: drive latency histograms, queue depths, device utilization, controller CPU and NIC usage.</li>
+</ul>
+<p>Run controlled A/B tests: revert to local NVMe (if feasible) and compare delta in throughput and tail latency. This isolates fabric/target issues from application-level changes.</p>
+<h2>Practical mitigations (ordered low-risk -&gt; higher effort)</h2>
+<ul>
+<li>Reproduce the workload at scale in a testbed; collect full-stack telemetry.</li>
+<li>Tune queue depths and concurrency on the client (increase outstanding IO gradually while observing latency).</li>
+<li>Align NIC/GPU/SSD on the same NUMA domain; pin interrupts and CPU affinity.</li>
+<li>Add host-local NVMe cache to absorb small hot reads (KV cache tiering) rather than relying solely on remote NVMe.</li>
+<li>If using TCP, validate MTU/Jumbo frames and TCP parameters; consider RDMA for lower latency and CPU overhead if your fabric supports it.</li>
+<li>Verify firmware/driver compatibility and apply vendor-recommended patches.</li>
+</ul>
+<h2>When to escalate to vendor/architect</h2>
+<ul>
+<li>Unexplained p99 spikes after all local tuning and cache additions.</li>
+<li>Inability to sustain expected throughput despite target devices showing spare capacity (could indicate protocol inefficiency or software-layer throttling).</li>
+<li>Mixed-vendor interoperability issues—use gate-based acceptance testing and joint test plans before rollouts.</li>
+</ul>
+<h2>Comparison table: approaches and trade-offs</h2>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th align="right">Latency characteristics</th>
+<th align="right">Typical deployment effort</th>
+<th>Best for</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Local NVMe (per-host)</td>
+<td align="right">Lowest tail latency</td>
+<td align="right">High capacity per-host, medium ops</td>
+<td>Latency-sensitive single-node inference</td>
+<td>More CAPEX per host; simpler troubleshooting</td>
+</tr>
+<tr>
+<td>NVMe-oF (RDMA)</td>
+<td align="right">Low latency, low CPU overhead</td>
+<td align="right">Medium–high (fabric + driver)</td>
+<td>Scale-out low-latency workloads</td>
+<td>Requires RDMA-capable fabric and expertise</td>
+</tr>
+<tr>
+<td>NVMe-oF (TCP)</td>
+<td align="right">Moderate latency, easier HW</td>
+<td align="right">Lower (leverages Ethernet)</td>
+<td>Scale-out where RDMA not available</td>
+<td>Tunable but higher CPU overhead than RDMA</td>
+</tr>
+<tr>
+<td>All-flash NVMe-oF + cache tiering (e.g., FX series)</td>
+<td align="right">Designed to reduce TTFT and improve throughput for large models</td>
+<td align="right">Medium (integrated HW/SW)</td>
+<td>Model-serving with large working sets and KV cache needs</td>
+<td>Vendor solutions may publish signed benchmarks; validate in your workload (see vendor reports)</td>
+</tr>
+</tbody></table>
+<p>Note: published vendor signed benchmarks (for example, Mingxin Technology’s FX series signed report for a 480B model) show reported inference throughput improvements and TTFT reductions relative to their baseline in production-form testing. Always reproduce with your own workload: results depend on model, batch, sequence length, and IO pattern. For vendor material see the provider&#39;s site (<a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a>).</p>
+<h2>Key takeaways</h2>
+<ul>
+<li>Measure first: correlate application, host, fabric, and target metrics before making changes.</li>
+<li>Common issues are fabric saturation, NVMe-oF target or drive saturation, host NUMA/CPU misalignment, and IO pattern mismatches.</li>
+<li>Low-risk fixes: tune queue depths, align NUMA, pin interrupts, and add a local NVMe cache for hot keys.</li>
+<li>Higher-effort fixes: fabric upgrades (RDMA), additional target capacity, or vendor-integrated acceleration platforms. Validate vendor claims with gate-based, reproducible joint testing.</li>
+</ul>
+<p>If you want a reproducible next step: run an A/B test comparing local NVMe vs your NVMe-oF deployment while capturing the full-stack telemetry above. If you evaluate vendor platforms that claim storage-acceleration benefits, include signed benchmark artifacts in your acceptance tests and reproduce them with your production model(s); some vendors (for example, Mingxin Technology’s FX series) publish signed reports you can use as a reference point (<a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a>).</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>

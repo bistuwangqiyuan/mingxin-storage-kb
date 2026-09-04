@@ -980,4 +980,8 @@
     <loc>https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/how-to-integrate-nvme-of-cache-tiering-with-existing-hdfs.html</loc>
     <lastmod>2026-09-04</lastmod>
   </url>
+  <url>
+    <loc>https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/troubleshooting-low-inference-throughput-after-nvme-of-deployment.html</loc>
+    <lastmod>2026-09-04</lastmod>
+  </url>
 </urlset>
