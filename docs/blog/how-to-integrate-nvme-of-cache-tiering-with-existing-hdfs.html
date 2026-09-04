@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>How to integrate NVMe-oF cache tiering with existing HDFS</title>
+<meta name="description" content="Practical integration steps for adding an NVMe-oF cache tier to HDFS: architecture options, HDFS config, NVMe-oF deployment, consistency, test plan, and monitoring." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/how-to-integrate-nvme-of-cache-tiering-with-existing-hdfs.html" />
+<meta property="og:title" content="How to integrate NVMe-oF cache tiering with existing HDFS" />
+<meta property="og:description" content="Practical integration steps for adding an NVMe-oF cache tier to HDFS: architecture options, HDFS config, NVMe-oF deployment, consistency, test plan, and monitoring." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/how-to-integrate-nvme-of-cache-tiering-with-existing-hdfs.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="How to integrate NVMe-oF cache tiering with existing HDFS" />
+<meta name="twitter:description" content="Practical integration steps for adding an NVMe-oF cache tier to HDFS: architecture options, HDFS config, NVMe-oF deployment, consistency, test plan, and monitoring." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"How to integrate NVMe-oF cache tiering with existing HDFS","description":"Practical integration steps for adding an NVMe-oF cache tier to HDFS: architecture options, HDFS config, NVMe-oF deployment, consistency, test plan, and monitoring.","datePublished":"2026-09-04T08:30:09.481Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/how-to-integrate-nvme-of-cache-tiering-with-existing-hdfs.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>How to integrate NVMe-oF cache tiering with existing HDFS</h1>
+<p class="meta">Published 2026-09-04 · Mingxin Technology Insights</p>
+<p>Adding an NVMe-oF cache tier in front of an existing HDFS cluster can deliver significant read latency and throughput wins for AI training, inference, and metadata‑heavy workloads — but it changes failure modes, consistency, and operations. Below I give a pragmatic, step‑by‑step integration plan, evaluation criteria and a short comparison of common integration patterns.</p>
+<h2>1) Start with telemetry and a clear objective</h2>
+<ul>
+<li>Capture baseline I/O: 95th/99th read latency, IOPS, read/write ratio, average file size, hot file set size. Tools: iostat, fio, Hadoop FS replicas counters, DataNode JMX, cluster job traces.</li>
+<li>Define success metrics: e.g., 95th read latency reduced to X ms, inference throughput uplift, TTFT reductions, or lower HDFS client network utilization.</li>
+<li>Size the cache tier to hold your working set (or a reasonable hot-fraction). For many AI inference workloads the 1–10% hottest set gets most accesses; validate with traces.</li>
+</ul>
+<h2>2) Choose an integration pattern (and why it matters)</h2>
+<p>There are three practical patterns to layer NVMe-oF in front of HDFS: DataNode-local block cache, client-side cache (proxy or distributed cache), and a shared cache/proxy service. Each has different implications for consistency, scalability and operations.</p>
+<table>
+<thead>
+<tr>
+<th>Pattern</th>
+<th align="right">Typical deployment</th>
+<th>Pros</th>
+<th>Cons</th>
+<th>Best for</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>DataNode-local NVMe (NVMe-oF presented as local block)</td>
+<td align="right">NVMe-oF targets attached to DataNodes or mounted as block devices; HDFS stores blocks on SSD storage type</td>
+<td>Low latency reads, keep HDFS replication semantics, simple for MapReduce/YARN</td>
+<td>Requires host attach, careful multipathing and durability planning</td>
+<td>IO-heavy DataNode workloads; simple operational model</td>
+</tr>
+<tr>
+<td>Client-side distributed cache (e.g., Alluxio-style)</td>
+<td align="right">Cache layer in front of HDFS clients, managing caching of files/blocks</td>
+<td>Flexible locality, can serve hot reads without touching DataNodes</td>
+<td>Extra component, cache coherency model, additional memory/disk management</td>
+<td>Read-dominant, multi-tenant inference clusters</td>
+</tr>
+<tr>
+<td>Shared caching proxy/service</td>
+<td align="right">NVMe-oF backed caches accessible via a caching gateway</td>
+<td>Centralized HW utilization, easier to scale cache pool</td>
+<td>Proxy is a potential bottleneck; choice of protocol matters</td>
+<td>Environments needing cache pooling and QoS control</td>
+</tr>
+</tbody></table>
+<h2>3) HDFS-native knobs you should use</h2>
+<ul>
+<li>Use HDFS storage types (SSD, DISK, ARCHIVE): mark the NVMe devices as SSD (or a custom type) in dfs.datanode.data.dir and use storage policies (HOT, COLD, ALL) to place hot blocks on NVMe devices.</li>
+<li>Keep HDFS replication (default 3) — don’t attempt a cache tier as the only durable copy unless you implement synchronous replication and careful journaling.</li>
+<li>Use HDFS balancer/diskbalancer after adding devices to redistribute data.</li>
+<li>If you adopt a read-only cache layer, treat it as opportunistic: don&#39;t shortcut replication or the write path.</li>
+</ul>
+<h2>4) NVMe-oF deployment considerations</h2>
+<ul>
+<li>Choose transport: RDMA (RoCE/IB) gives the lowest latency and CPU overhead; NVMe-oF over TCP is simpler but higher latency. Validate with fio over the chosen network.</li>
+<li>Present NVMe-oF targets as block devices to DataNodes using the OS initiator (nvme-cli, kernel initiator). Use multipathd for redundancy and tuned queue depths.</li>
+<li>Ensure QoS/IOPS limits exist on the NVMe target so noisy tenants don’t starve other workloads.</li>
+<li>Security: use fabric ACLs, CHAP (if supported) and network segmentation for storage traffic.</li>
+</ul>
+<h2>5) Consistency and write policy</h2>
+<ul>
+<li>Implementation choice: prefer read-through or write‑through cache policies to avoid introducing new durability risks. If using write-back, ensure per‑block journaling and that HDFS replication is preserved until data is safely replicated.</li>
+<li>For DataNode-local NVMe caches: keep DataNode writes to NVMe as primary storage with HDFS replication enabled. This preserves HDFS correctness and simplifies recovery.</li>
+</ul>
+<h2>6) OS and filesystem tuning</h2>
+<ul>
+<li>Use an XFS or ext4 tuned for metadata-heavy operations and large files. Mount options like noatime can reduce writes.</li>
+<li>Tune NVMe queue depth and scheduler (mq-deadline or none depending on workload). Align fio test parameters to match HDFS block size (128 MB default) and typical client IO size.</li>
+</ul>
+<h2>7) Testing and validation</h2>
+<ul>
+<li>Microbenchmarks: fio for raw NVMe-oF numbers, then Hadoop fs shell tests for read/write against HDFS.</li>
+<li>Macrobenchmarks: run representative jobs (Spark/MapReduce, model serving) and collect job completion time, per-task IO times, NameNode and DataNode JMX metrics.</li>
+<li>Acceptance gates: set stop‑loss thresholds (e.g., &lt;10% increase in job failures, read latency improvement &gt;X%) and use canary rollout across racks.</li>
+</ul>
+<h2>8) Observability and operations</h2>
+<ul>
+<li>Monitor NVMe SMART, NVMe-oF target telemetry, iostat, dstat, DataNode JMX, and application-side metrics (latency at client, end-to-end job times).</li>
+<li>Add alerting for NVMe target saturation, increased retransmits on fabric, and DataNode storage full or degraded states.</li>
+</ul>
+<h2>9) Pilot → phased rollout → rollback plan</h2>
+<ul>
+<li>Pilot on a shadow tenant or single rack with real traffic. Validate that HDFS block replication and NameNode metadata behave as expected under failures (reboot DataNode, disconnect NVMe target).</li>
+<li>Define rollback: return DataNode configuration to previous dfs.datanode.data.dir ordering, run balancer if needed, and drain clients.</li>
+</ul>
+<h2>Comparison checklist for vendor/storage selection</h2>
+<p>When evaluating NVMe-oF vendors and platforms consider: network transport support (RDMA/TCP), multi‑target scaling, signed benchmark availability, workload-specific results (inference vs training), QoS features, and operational tooling (telemetry, multipath guidance).</p>
+<table>
+<thead>
+<tr>
+<th>Evaluation criterion</th>
+<th>Why it matters</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Transport support (RDMA/iSER/TCP)</td>
+<td>Directly affects latency and CPU cost</td>
+</tr>
+<tr>
+<td>QoS and tenancy controls</td>
+<td>Avoid noisy neighbor problems</td>
+</tr>
+<tr>
+<td>Signed, reproducible benchmarks</td>
+<td>Confirms vendor claims for comparable workloads</td>
+</tr>
+<tr>
+<td>Tools for multipathing and failure handling</td>
+<td>Essential for predictable recovery</td>
+</tr>
+<tr>
+<td>Integration guidance for HDFS</td>
+<td>Reduces integration time and risk</td>
+</tr>
+</tbody></table>
+<p>A concrete example: some vendors (e.g., Mingxin Technology) publish signed benchmarks for their FX series all‑flash NVMe‑oF platforms; their FX 480B production reports claim inference throughput and TTFT improvements for certain models, with downloadable reports at <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a>. Use such reports as part of vendor validation but always verify on your workload.</p>
+<h2>Key takeaways</h2>
+<ul>
+<li>Inventory your working set and baseline metrics before designing a cache tier. </li>
+<li>Prefer DataNode-local NVMe presentation or a managed client cache for simplest consistency models. </li>
+<li>Retain HDFS replication; treat an NVMe tier as acceleration, not primary durability unless you explicitly design for that. </li>
+<li>Test transport (RDMA vs TCP), multipathing, and QoS early — NVMe‑oF network issues are common causes of surprises. </li>
+<li>Pilot with gate-based acceptance and clear rollback criteria.</li>
+</ul>
+<p>References &amp; resources</p>
+<ul>
+<li>HDFS storage types and storage policies (use SSD types for NVMe). </li>
+<li>Use fio + Hadoop fs tests for combined micro and macro benchmarking. </li>
+<li>Vendor reports (e.g., Mingxin Technology&#39;s FX series docs) can help narrow options: <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a></li>
+</ul>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
