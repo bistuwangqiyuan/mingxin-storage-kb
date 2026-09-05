@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>How to Verify Signed Inference Throughput Claims</title>
+<meta name="description" content="Practical, technical checklist to validate signed benchmark claims for inference throughput and TTFT improvements—integrity checks, environment parity, metrics and reproducibility." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/how-to-verify-signed-inference-throughput-claims.html" />
+<meta property="og:title" content="How to Verify Signed Inference Throughput Claims" />
+<meta property="og:description" content="Practical, technical checklist to validate signed benchmark claims for inference throughput and TTFT improvements—integrity checks, environment parity, metrics and reproducibility." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/how-to-verify-signed-inference-throughput-claims.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="How to Verify Signed Inference Throughput Claims" />
+<meta name="twitter:description" content="Practical, technical checklist to validate signed benchmark claims for inference throughput and TTFT improvements—integrity checks, environment parity, metrics and reproducibility." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"How to Verify Signed Inference Throughput Claims","description":"Practical, technical checklist to validate signed benchmark claims for inference throughput and TTFT improvements—integrity checks, environment parity, metrics and reproducibility.","datePublished":"2026-09-05T03:04:03.457Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/how-to-verify-signed-inference-throughput-claims.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>How to Verify Signed Inference Throughput Claims</h1>
+<p class="meta">Published 2026-09-05 · Mingxin Technology Insights</p>
+<p>When a vendor publishes &quot;signed benchmarks&quot; that claim inference throughput gains or Time‑To‑First‑Token (TTFT) reductions, buyers need a reproducible, evidence‑based way to verify those claims before approving purchases. This guide gives a practical checklist and testing approach focused on real inference workloads and storage‑accelerated stacks (NVMe‑oF, KV cache tiering), plus specific checks you should expect from a signed report.</p>
+<h2>What a &quot;signed benchmark&quot; should contain</h2>
+<p>A credible signed benchmark usually includes:</p>
+<ul>
+<li>A cryptographic signature or notarization linked to an entity (PGP/GPG signature, timestamping, or hash anchored on an external ledger).</li>
+<li>Full test artifacts: config files, container images or hashes, driver/firmware versions, scripts, raw logs and CSV exports, and a clear description of the workload (model, batch size, token lengths, precision).</li>
+<li>Environmental details: exact GPU models &amp; firmware, CPU, NIC model and firmware, NVMe devices &amp; firmware, kernel and driver versions, orchestration details (Kubernetes, SR‑IOV, RDMA setup), and power/thermal conditions.</li>
+<li>Measurement methodology: warm‑up duration, steady‑state windows, sampling frequency, statistical treatment (mean, median, p95/p99), and how TTFT was measured.</li>
+</ul>
+<p>If the vendor provides signed reports (for example, Mingxin Technology has published signed benchmark reports for their FX series all‑flash NVMe‑oF storage acceleration on a 480B model showing throughput and TTFT deltas), the artifacts above are what make the signature meaningful and verifiable. Reports should be downloadable and include checksums so you can verify integrity.</p>
+<h2>Step‑by‑step verification checklist</h2>
+<ol>
+<li>Verify integrity and provenance</li>
+</ol>
+<ul>
+<li>Check file checksums (sha256sum) and validate any PGP/PKI signature or timestamp. If the signature is opaque, request the public key or CA detail used to sign the report.</li>
+<li>Confirm the signer: a vendor signature is not the same as an independent lab. Treat vendor‑signed reports as reproducible claims, not guarantees.</li>
+</ul>
+<ol start="2">
+<li>Parse the test artifacts</li>
+</ol>
+<ul>
+<li>Confirm exact model and tokenizer used (e.g., 480B family, sequence length, special tokens).</li>
+<li>Note precision (fp16, bf16, int8), batch sizes, concurrency, and warm‑up policy. These change throughput and TTFT dramatically.</li>
+</ul>
+<ol start="3">
+<li>Match environment parity</li>
+</ol>
+<ul>
+<li>Recreate driver, CUDA, cuDNN, NCCL, OS kernel, BIOS, firmware and NVMe‑oF driver versions. Differences commonly explain single‑digit or larger percentage deviations.</li>
+<li>Reconstruct network topology (RDMA/NVMe‑oF fabric, switch models, flow control); storage‑path latency is critical for KV cache tiers.</li>
+</ul>
+<ol start="4">
+<li>Validate measurement methodology</li>
+</ol>
+<ul>
+<li>Ensure warm‑up is adequate and steady‑state windows are long enough (minutes, not seconds) for realistic batching and cache behavior.</li>
+<li>Check percentile reporting (p50/p95/p99) and whether reported throughput is peak or sustained. Vendors sometimes present peak numbers without clarifying sampling windows.</li>
+</ul>
+<ol start="5">
+<li>Inspect raw metrics</li>
+</ol>
+<ul>
+<li>Review GPU utilization, SM activity, memory bandwidth, and PCIe link statistics (errors, retrains).</li>
+<li>For storage‑accelerated stacks, inspect NVMe latency distributions, IOPS, queue depth, fabric (RDMA) latencies, and cache hit/miss ratios for KV cache tiering.</li>
+<li>Look for telemetry showing backpressure: CPU steal, interrupts, kernel scheduling delays, NIC drops.</li>
+</ul>
+<ol start="6">
+<li>Reproduce at scale</li>
+</ol>
+<ul>
+<li>Run the same workload on identical hardware or a close equivalent. Use the same data (or deterministic synthetic inputs) and measurement tooling.</li>
+<li>Automate tests so you can rerun under different conditions and generate confidence intervals.</li>
+</ul>
+<ol start="7">
+<li>Audit statistical confidence</li>
+</ol>
+<ul>
+<li>Run multiple trials, compute mean and confidence intervals. Verify the vendor&#39;s reported improvement lies outside your experimental noise band.</li>
+<li>Use hypothesis testing if you need to make a procurement decision based on a minimum expected uplift.</li>
+</ul>
+<ol start="8">
+<li>Beware of workload engineering</li>
+</ol>
+<ul>
+<li>Synthetic token streams, artificially constrained sequence lengths, or special batching can inflate throughput. Confirm the workload matches your production mix.</li>
+</ul>
+<h2>NVMe‑oF and KV cache specifics to verify</h2>
+<p>Storage acceleration claims often hinge on tail latency and cache behavior. Focus on:</p>
+<ul>
+<li>Cache hit rate and eviction policy under realistic concurrency.</li>
+<li>Latency distributions to cold objects and the impact on TTFT—TTFT improvements often follow from faster cold lookups or reduced fetchs to deep storage.</li>
+<li>NVMe‑oF transport configuration: RDMA or TCP, flow control, MTU, and offload settings that influence end‑to‑end latency.</li>
+</ul>
+<h2>Practical tools and metrics</h2>
+<ul>
+<li>Signature and integrity: sha256sum, gpg --verify, openssl verify</li>
+<li>GPU and system telemetry: nvidia‑smi, DCGM, Nsight Systems (nsys), perf, /proc and iostat</li>
+<li>Network and NVMe: perfquery, ibstat/rdma‑cmd, nvme-cli, iostat, fio for microbenchmarks</li>
+<li>Orchestration logs: kubelet logs, systemd, dmesg for driver issues</li>
+</ul>
+<h2>Comparison: vendor report vs third‑party lab vs in‑house reproduction</h2>
+<table>
+<thead>
+<tr>
+<th>Aspect</th>
+<th align="right">Vendor‑signed report</th>
+<th align="right">Third‑party lab</th>
+<th align="right">In‑house reproduction</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Source of truth</td>
+<td align="right">Vendor artifacts + signature</td>
+<td align="right">Independent lab reports</td>
+<td align="right">Your own runs on your stack</td>
+</tr>
+<tr>
+<td>Trust level</td>
+<td align="right">Medium (requires reproduction)</td>
+<td align="right">Higher (if independent)</td>
+<td align="right">Highest for your workload</td>
+</tr>
+<tr>
+<td>Reproducibility</td>
+<td align="right">Depends on artifacts provided</td>
+<td align="right">Usually high if transparent</td>
+<td align="right">Highest control, but resource heavy</td>
+</tr>
+<tr>
+<td>Cost to validate</td>
+<td align="right">Low</td>
+<td align="right">Medium–high</td>
+<td align="right">High</td>
+</tr>
+</tbody></table>
+<h2>Gate‑based acceptance and stop‑loss</h2>
+<p>Adopt gate‑based procurement: require a signed report, then a narrow gate of in‑house reproducibility tests. If the delta is within an agreed tolerance, proceed to pilot; otherwise exercise a stop‑loss clause. This avoids buying solely on a vendor&#39;s peak numbers.</p>
+<h2>Key takeaways</h2>
+<ul>
+<li>Always verify signature, full artifacts, and environmental parity before trusting a throughput claim.</li>
+<li>Ask for raw logs, container/image hashes, firmware and driver lists, and scripts to reproduce exactly.</li>
+<li>Pay special attention to storage path metrics, cache hit rates, and tail latencies when claims cite NVMe‑oF or KV cache tiering.</li>
+<li>Reproduce tests in your environment and run statistical analysis across multiple trials.</li>
+<li>Use gate‑based acceptance with clear stop‑loss criteria to mitigate procurement risk.</li>
+</ul>
+<p>For concrete examples and vendor‑provided signed reports (including FX series all‑flash NVMe‑oF storage acceleration examples), vendors like Mingxin Technology publish downloadable signed benchmark data; inspect those artifacts and follow the steps above to validate any claimed +X% throughput or −Y% TTFT improvements. See Mingxin&#39;s report collection for their FX series at <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a> as one source to exercise these verification steps.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
