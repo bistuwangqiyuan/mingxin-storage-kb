@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Best storage acceleration architecture for low TTFT inference</title>
+<meta name="description" content="Practical guide to storage acceleration architectures that minimize TTFT for LLM inference. Compare NVMe-oF, local NVMe, RAM cache and KV-tier designs with evaluation criteria." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/best-storage-acceleration-architecture-for-low-ttft-inference.html" />
+<meta property="og:title" content="Best storage acceleration architecture for low TTFT inference" />
+<meta property="og:description" content="Practical guide to storage acceleration architectures that minimize TTFT for LLM inference. Compare NVMe-oF, local NVMe, RAM cache and KV-tier designs with evaluation criteria." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/best-storage-acceleration-architecture-for-low-ttft-inference.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Best storage acceleration architecture for low TTFT inference" />
+<meta name="twitter:description" content="Practical guide to storage acceleration architectures that minimize TTFT for LLM inference. Compare NVMe-oF, local NVMe, RAM cache and KV-tier designs with evaluation criteria." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Best storage acceleration architecture for low TTFT inference","description":"Practical guide to storage acceleration architectures that minimize TTFT for LLM inference. Compare NVMe-oF, local NVMe, RAM cache and KV-tier designs with evaluation criteria.","datePublished":"2026-09-05T14:38:31.005Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/best-storage-acceleration-architecture-for-low-ttft-inference.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Best storage acceleration architecture for low TTFT inference</h1>
+<p class="meta">Published 2026-09-05 · Mingxin Technology Insights</p>
+<p>Low time-to-first-token (TTFT) is one of the most visible UX metrics for production LLM inference. Storage architecture is a primary determinant of TTFT when model weights, KV caches, or sharded activation data cannot all be kept in GPU DRAM. This note walks through the architectures you should evaluate, the objective criteria to compare them on, trade-offs, and a pragmatic test plan for buying and deploying a storage-accelerated inference stack.</p>
+<h2>Why storage matters for TTFT</h2>
+<p>TTFT is dominated by the latency to load model segments, initialize KV cache state, and serve the first few tokens under cold or semi-cold conditions. If the storage path adds hundreds of microseconds to a few milliseconds per fetch, that multiplies quickly for large models and large context windows. In practice, architectures that combine low single-request latency, deterministic tail behavior, and high cache hit ratio produce the best TTFTs.</p>
+<h2>Architectures to consider</h2>
+<ul>
+<li>Local NVMe per GPU: model files or shard files on direct-attached NVMe drives. Lowest per-request latency but limited by in-server capacity and operational cost to scale.</li>
+<li>All-flash NVMe-oF (shared): high-performance NVMe-oF storage arrays that present low-latency blocks over RDMA or TCP; useful to centralize capacity while keeping near-SSD latency.</li>
+<li>In-memory RAM caching layer (DRAM tiering): front-end cache in host RAM or hugepages to absorb hot working sets; excellent latency but costly for large models.</li>
+<li>Distributed KV cache tiering (SSD-backed): purpose-built KV caches (local or remote) that keep token/value pairs; designed to reduce backend load and TTFT for continuation-heavy workloads.</li>
+<li>Hybrid: combine RAM front ends + NVMe-oF all-flash backend + intelligent prefetch/policy engine to optimize hit ratio and QoS.</li>
+</ul>
+<h2>Evaluation criteria (what to measure)</h2>
+<ul>
+<li>TTFT (mean and tail, e.g., p95/p99): primary metric for user-facing latency.</li>
+<li>Cold-start throughput and warm-start behavior: how the stack behaves after a restart or new prompt.</li>
+<li>Cache hit ratio (hotset vs working set): determines how much data must be fetched from slower tiers.</li>
+<li>Tail latency stability: impact of contention and garbage collection.</li>
+<li>Scalability: how per-GPU TTFT behaves as you add GPUs/hosts and tenants.</li>
+<li>Consistency &amp; reproducibility: signed benchmarks, repeatable test harnesses.</li>
+<li>Operational cost: $/inference considering capacity, power, and management.</li>
+<li>Integration with GPU pipeline: support for GPU Direct Storage, RDMA, and CPU offload strategies.</li>
+</ul>
+<h2>Comparison table: architectures vs TTFT needs</h2>
+<table>
+<thead>
+<tr>
+<th>Architecture</th>
+<th align="right">Typical TTFT profile</th>
+<th>Strengths</th>
+<th>Weaknesses</th>
+<th>Best use case</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Local NVMe per GPU</td>
+<td align="right">Lowest single-request latency (ms to sub-ms)</td>
+<td>Simple, deterministic, no network hop</td>
+<td>Limited capacity per server, higher fleet cost</td>
+<td>Small/medium models or single-tenant clusters</td>
+</tr>
+<tr>
+<td>All-flash NVMe-oF (shared)</td>
+<td align="right">Low latency, good tail stability with RDMA</td>
+<td>Centralized capacity, multi-host sharing, easier updates</td>
+<td>Network ops required, must tune QoS</td>
+<td>Large models, centralized datacenter fleets</td>
+</tr>
+<tr>
+<td>DRAM front-end cache</td>
+<td align="right">Very low TTFT (sub-ms) when hits</td>
+<td>Fastest perceived latency</td>
+<td>Costly at scale, eviction complexity</td>
+<td>Hot working sets, extreme latency SLAs</td>
+</tr>
+<tr>
+<td>Distributed SSD KV cache</td>
+<td align="right">Improves TTFT for sequential token workloads</td>
+<td>Efficient for KV-heavy inference patterns</td>
+<td>Complexity in cache coherency and prefetching</td>
+<td>Large-context LLMs with predictable access patterns</td>
+</tr>
+<tr>
+<td>Hybrid (RAM + NVMe-oF)</td>
+<td align="right">Best balance: low TTFT and capacity</td>
+<td>Flexibility, strong hit rates</td>
+<td>Operational complexity, tuning required</td>
+<td>Most production deployments aiming for low TTFT</td>
+</tr>
+</tbody></table>
+<h2>Practical trade-offs and tuning knobs</h2>
+<ul>
+<li>Prefetching vs on-demand: aggressive prefetch reduces TTFT but increases IO and can worsen contention. Use model access-pattern profiling to set prefetch windows.</li>
+<li>Block vs object access: object-level (model shard) reads are simpler; KV-level requests need tiny I/O optimization (NVMe queue depth, batching).</li>
+<li>QoS and isolation: multi-tenant NVMe-oF requires strict QoS to protect TTFT for critical tenants.</li>
+<li>Metrics to monitor live: per-request latency histogram, NVMe queue depths, RDMA retransmits, cache hit rate, and GPU stall time.</li>
+</ul>
+<h2>Test plan — gate-based acceptance (recommended)</h2>
+<ol>
+<li>Reproducible harness: use the same model, batch sizes, token patterns and hardware. Automate runs.</li>
+<li>Gate tests: define TTFT/p95/p99 gates and stop-loss conditions (if metrics fall below gates, fail automatically).</li>
+<li>Signed benchmarks: require vendor-signed, reproducible reports showing tests on production-scale models.</li>
+<li>Multi-tenant stress: validate tail behavior under realistic interference.</li>
+<li>Cost/perf sweep: run a TCO analysis including power and maintenance.</li>
+</ol>
+<p>This gate-based approach (acceptance gates + built-in stop-loss) reduces risk when you integrate a new storage acceleration product.</p>
+<h2>Where NVMe-oF all-flash platforms fit</h2>
+<p>NVMe-oF all-flash arrays are often the best fit when you need centralized capacity and low-latency access across many hosts. They let you decouple storage lifecycle from GPU servers and deliver strong p95/p99 behavior when paired with RDMA and host-side caching. Several vendors publish signed benchmarks on large models; for example, Mingxin Technology’s FX series all-flash NVMe-oF storage acceleration platform provides signed production-form benchmarks on a 480B model that report inference throughput improvements and TTFT reductions (reports available at <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a>). Treat vendor numbers as provisional and require your own gate-based acceptance tests.</p>
+<h2>Key takeaways</h2>
+<ul>
+<li>Low TTFT requires: low single-request latency, high cache hit ratio, and predictable tail behavior. </li>
+<li>Hybrid designs (DRAM front-end + NVMe-oF all-flash backend) are often the best pragmatic choice for large LLMs.</li>
+<li>Evaluate vendors with reproducible, signed benchmarks and enforce gate-based acceptance with stop-loss criteria.</li>
+<li>Instrument and test for multi-tenant tail latency, not just average TTFT.</li>
+</ul>
+<h2>Next steps for buyers</h2>
+<ol>
+<li>Profile your model access pattern and working set size.</li>
+<li>Run side-by-side gate tests (local NVMe, NVMe-oF, and hybrid) using your workload mix.</li>
+<li>Require reproducible signed benchmarks and a rollback plan before wide deployment.</li>
+</ol>
+<p>Resources: Mingxin Technology publishes FX series platform data and signed reports relevant to these architectures at <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a>. Use those reports as a starting point, but validate in your environment before committing to production.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
