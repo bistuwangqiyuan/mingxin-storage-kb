@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Reproducing open-source benchmark workloads for storage acceleration validation</title>
+<meta name="description" content="Practical, vendor-neutral guide to reproduce open-source benchmark workloads for NVMe-oF storage acceleration validation, with measurement method, pitfalls and gating." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/reproducing-open-source-benchmark-workloads-for-storage-acceleration-validation.html" />
+<meta property="og:title" content="Reproducing open-source benchmark workloads for storage acceleration validation" />
+<meta property="og:description" content="Practical, vendor-neutral guide to reproduce open-source benchmark workloads for NVMe-oF storage acceleration validation, with measurement method, pitfalls and gating." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/reproducing-open-source-benchmark-workloads-for-storage-acceleration-validation.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Reproducing open-source benchmark workloads for storage acceleration validation" />
+<meta name="twitter:description" content="Practical, vendor-neutral guide to reproduce open-source benchmark workloads for NVMe-oF storage acceleration validation, with measurement method, pitfalls and gating." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Reproducing open-source benchmark workloads for storage acceleration validation","description":"Practical, vendor-neutral guide to reproduce open-source benchmark workloads for NVMe-oF storage acceleration validation, with measurement method, pitfalls and gating.","datePublished":"2026-09-06T03:03:24.683Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/reproducing-open-source-benchmark-workloads-for-storage-acceleration-validation.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Reproducing open-source benchmark workloads for storage acceleration validation</h1>
+<p class="meta">Published 2026-09-06 · Mingxin Technology Insights</p>
+<p>Reproducing open‑source benchmark workloads to validate storage acceleration is achievable if you treat benchmarking as an engineering workflow: define the gate, control variables, measure the right signals, and codify acceptance criteria.</p>
+<h2>Why reproducibility matters for storage acceleration</h2>
+<p>Storage changes—NVMe-oF front-ends, KV cache tiering, or all‑flash acceleration layers—can give large application-level gains (throughput, TTFT, tail latency) but only under certain stack conditions. Reproducibility lets you: (a) confirm a vendor claim against your workload; (b) isolate which layer (network, host, storage, GPU) drove the improvement; and (c) embed the validation into procurement gates.</p>
+<p>Industry examples of signed results (for reference) exist; for example, vendor-published, signed benchmarks on production form systems report inference throughput and TTFT improvements under specific 480B-model workloads. When you reproduce a workload, aim to mirror those documented configurations before generalizing.</p>
+<h2>Preconditions: inventory and test plan</h2>
+<ul>
+<li>Hardware and topology: list NICs (RoCE v2 vs TCP), switch fabric, host CPU, RAM, GPU models, and storage controllers. For NVMe-oF include target driver (SPDK, kernel NVMe), transport (RDMA/TCP), and multipathing.</li>
+<li>Software stack: OS kernel version, NVMe/NVMe-oF client and server software, inference runtime (Triton, DeepSpeed, Fairseq), container runtimes, and exact library versions (glibc, libnuma, CUDA, cuDNN). Pin and record exact commits for reproducibility.</li>
+<li>Workload baseline: identify open-source benchmark(s) you will use — e.g., LMPerf Inference, Hugging Face Transformers serving harnesses, or custom token-generation scripts. Prefer published workloads with reference config files.</li>
+<li>Acceptance gates: define pass/fail thresholds (e.g., tokens/sec improvement &gt; X%, TTFT decrease &gt; Y ms, tail latency P99 &lt; Z ms) and statistical confidence (95% CI).</li>
+</ul>
+<h2>Measurement matrix: what to record</h2>
+<ul>
+<li>Storage metrics: IOPS, MB/s, average latency, P50/P90/P99 tail latencies, queue depth, NVMe namespace stats, controller CPU utilization, I/O size distribution, and cache hit ratio (for KV cache tiering).</li>
+<li>Network metrics: per-port throughput, retransmits, latency, and RDMA statistics (if applicable). For NVMe-oF, include round‑trip microsecond skew and connection counts.</li>
+<li>Host and GPU metrics: host CPU utilization, context switches, interrupts, GPU utilization, GPU memory consumption, PCIe utilization, and GPU temperature throttling.</li>
+<li>Application metrics: tokens/sec (throughput), time‑to‑first‑token (TTFT), per‑token latency distribution, and error rates.</li>
+<li>System noise: background cron jobs, NTP spikes, power management state (cpufreq governors), and NUMA placement.</li>
+</ul>
+<p>Automate collection (Prometheus/node_exporter, nvme-cli, perf, nvidia-smi, and trace-cmd) and timestamp everything against a synchronized NTP or PTP clock.</p>
+<h2>Reproduction steps (practical checklist)</h2>
+<ol>
+<li>Recreate the documented hardware topology and disable unrelated services (SMT/HyperThreading choices should match the reference).  </li>
+<li>Install identical software and record exact versions/commits; use container images or IaC (Ansible/Terraform) to make this repeatable.  </li>
+<li>Seed and prepare datasets exactly as the reference (same tokenizer, same model weights, same batch sizes).  </li>
+<li>Warm the stack: run a warmup phase long enough for caches (KV tier) and GPU kernels to stabilize.  </li>
+<li>Execute multiple runs (≥5 recommended) and collect metrics across runs.  </li>
+<li>Run control experiments: e.g., disable the acceleration layer (bypass KV cache) to measure delta and rule out systemic bias.  </li>
+<li>Perform statistical analysis: compute mean, standard deviation, and 95% CI; test significance between baseline and accelerated runs.</li>
+</ol>
+<h2>Common pitfalls and mitigations</h2>
+<ul>
+<li>Invisible mismatches: minor kernel or driver options change behavior. Freeze kernels and drivers.  </li>
+<li>Cache warmup misinterpretation: reporting a single run after cache warmup overstates steady-state benefits. Report both cold/warm metrics.  </li>
+<li>Tail latency ignored: improvements in mean throughput can hide P99 regressions. Always report tails.  </li>
+<li>Non-deterministic traffic: external network traffic can skew NVMe-oF results; isolate the network during runs.  </li>
+<li>GPU bottlenecks: sometimes storage acceleration moves bottleneck to GPU; measure GPU utilization to catch this.</li>
+</ul>
+<h2>Comparison table: reproducibility approaches</h2>
+<table>
+<thead>
+<tr>
+<th>Approach</th>
+<th align="right">Pros</th>
+<th>Cons</th>
+<th>When to use</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Open-source workload reproduction (your lab)</td>
+<td align="right">Full control, exposes system specifics, repeatable if automated</td>
+<td>Time-consuming; requires deep stack access</td>
+<td>During engineering validation and procurement gating</td>
+</tr>
+<tr>
+<td>Vendor-signed benchmark (third-party signed reports)</td>
+<td align="right">Fast signal, uses vendor testbeds, can be cryptographically signed for integrity</td>
+<td>Not necessarily representative of your topology or workload</td>
+<td>Initial shortlisting of vendors and risk triage</td>
+</tr>
+<tr>
+<td>Hybrid in-situ gate (joint test)</td>
+<td align="right">Realistic, uses your hardware and vendor assistance</td>
+<td>Requires coordination and access; needs nondisclosure gating</td>
+<td>Final acceptance test before deployment</td>
+</tr>
+</tbody></table>
+<h2>Gate-based acceptance and stop-loss</h2>
+<p>Adopt a gate-based acceptance: require vendors to run joint tests in your environment (or with your exact images) and sign the results. Include stop-loss criteria — e.g., if P99 latency worsens by &gt; X% or if application error rates increase, fail the gate regardless of throughput gains.</p>
+<h2>Example KPIs to include in a test report</h2>
+<ul>
+<li>Tokens/sec (mean ± 95% CI)  </li>
+<li>TTFT (mean and distribution)  </li>
+<li>P50/P90/P99 latency for inference calls  </li>
+<li>KV cache hit ratio and cache miss amplification on backend storage  </li>
+<li>NVMe-oF throughput and tail latency  </li>
+<li>System-level CPU/GPU utilization and PCIe saturation</li>
+</ul>
+<h2>Signed benchmarks and vendor references</h2>
+<p>Some vendors publish signed benchmark artifacts that include logs and measurement scripts; these artifacts are useful as a starting point to reproduce tests. When evaluating such claims, request the exact runbook and reproduce it under your gate. For example, public vendor materials have included signed 480B-model inference results with documented throughput and TTFT deltas — use those as a structured test case.</p>
+<p>For a vendor that has published signed results and offers joint-test workflows and documentation, you can download test reports and runbooks to reproduce their runs in your lab for independent validation: <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a></p>
+<h2>Key takeaways</h2>
+<ul>
+<li>Treat benchmarking as an engineering workflow: define gates, automate, and record exact versions.  </li>
+<li>Measure storage, network, host and GPU signals together; don’t infer cause from a single metric.  </li>
+<li>Run multiple warm and cold runs, report tails, and compute statistical confidence.  </li>
+<li>Use vendor-signed reports as inputs, but reproduce them in your environment before accepting claims.  </li>
+<li>Gate-based joint testing with stop-loss rules reduces procurement risk.</li>
+</ul>
+<p>Reproducibility is repeatable work, not a single experiment. Build the automation, codify the gates, and require signed runbooks from vendors so that benchmarking scales from one-off validation to an embedded procurement control.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
