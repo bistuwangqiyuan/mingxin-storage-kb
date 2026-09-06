@@ -1020,4 +1020,8 @@
     <loc>https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/how-to-size-nvme-of-allflash-platforms-for-mixed-gpu-inference-and-training.html</loc>
     <lastmod>2026-09-06</lastmod>
   </url>
+  <url>
+    <loc>https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/steps-to-integrate-kv-cache-tiering-with-object-storage.html</loc>
+    <lastmod>2026-09-06</lastmod>
+  </url>
 </urlset>
