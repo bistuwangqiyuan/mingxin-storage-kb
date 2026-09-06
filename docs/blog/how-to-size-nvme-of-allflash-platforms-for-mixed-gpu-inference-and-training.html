@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>How to size NVMe-oF all‑flash platforms for mixed GPU inference and training</title>
+<meta name="description" content="Practical, vendor-neutral guidance to size NVMe-oF all‑flash storage for mixed GPU inference and training workloads—IOPS, bandwidth, latency, fabric and caching trade-offs." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/how-to-size-nvme-of-allflash-platforms-for-mixed-gpu-inference-and-training.html" />
+<meta property="og:title" content="How to size NVMe-oF all‑flash platforms for mixed GPU inference and training" />
+<meta property="og:description" content="Practical, vendor-neutral guidance to size NVMe-oF all‑flash storage for mixed GPU inference and training workloads—IOPS, bandwidth, latency, fabric and caching trade-offs." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/how-to-size-nvme-of-allflash-platforms-for-mixed-gpu-inference-and-training.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="How to size NVMe-oF all‑flash platforms for mixed GPU inference and training" />
+<meta name="twitter:description" content="Practical, vendor-neutral guidance to size NVMe-oF all‑flash storage for mixed GPU inference and training workloads—IOPS, bandwidth, latency, fabric and caching trade-offs." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"How to size NVMe-oF all‑flash platforms for mixed GPU inference and training","description":"Practical, vendor-neutral guidance to size NVMe-oF all‑flash storage for mixed GPU inference and training workloads—IOPS, bandwidth, latency, fabric and caching trade-offs.","datePublished":"2026-09-06T08:23:17.928Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/how-to-size-nvme-of-allflash-platforms-for-mixed-gpu-inference-and-training.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>How to size NVMe-oF all‑flash platforms for mixed GPU inference and training</h1>
+<p class="meta">Published 2026-09-06 · Mingxin Technology Insights</p>
+<p>Mixed GPU inference and training workloads put conflicting demands on storage: ultra-low tail latency for small random reads (inference / KV cache) and sustained high-bandwidth, large‑object streaming for training. Below is a pragmatic, repeatable approach to sizing NVMe-oF all‑flash platforms for such mixed AI datacenters, plus vendor-agnostic trade-offs and an example option to evaluate.</p>
+<h2>Start with the workload matrix</h2>
+<p>Before you pick hardware or a fabric, answer these questions for each workload class:</p>
+<ul>
+<li>Model characteristics: model size (parameters), tokenizer behavior, KV cache item size, warm vs cold working set.</li>
+<li>Operational targets: queries/sec (QPS), tail-latency SLO (e.g., 99th %ile for first token / TTFT), throughput (tokens/sec, samples/sec), acceptable batching.</li>
+<li>Access profile: average I/O size, read/write ratio, sequential vs random, read amplification from frameworks.</li>
+<li>Concurrency: GPUs per host, number of concurrent models, per‑GPU thread pools.</li>
+<li>Availability &amp; protection: replicas, erasure coding, RPO/RTO requirements.</li>
+</ul>
+<p>Document those and express targets as three measurable numbers: required sustained bandwidth (GB/s), required IOPS at target latency, and acceptable tail-latency.</p>
+<h2>Convert targets into storage metrics</h2>
+<p>Sizing is arithmetic once you have the above. Typical formulas:</p>
+<ul>
+<li>Sustained bandwidth (GB/s) = samples/sec * avg_sample_bytes * replication_factor / 1e9</li>
+<li>Random IOPS = QPS * avg_IOs_per_query * (1 - cache_hit_rate)</li>
+<li>Effective latency budget = SLO_lat_ms - transport_and_gpu_overheads_ms</li>
+</ul>
+<p>Example (illustrative): if a training cluster streams 4kB compressed samples at 50k samples/sec, bandwidth = 50k * 4kB / 1e9 ≈ 0.2 GB/s — multiply by number of training nodes and replication. For a KV-backed inference service: QPS 10k with avg 2 random 4kB reads/query and cache_miss_rate 20% → random IOPS ≈ 10k * 2 * 0.2 = 4k IOPS. Tail latency budgeting must assume fabric variability and queueing.</p>
+<p>Notes: small-read dominated inference often drives IOPS and tail latency; training dominates sustained bandwidth.</p>
+<h2>Fabric and protocol trade-offs</h2>
+<p>Choose NVMe-oF flavor with the workload in mind:</p>
+<ul>
+<li>NVMe/RDMA (RoCE/IB): lowest protocol latency and CPU overhead; preferred when sub-ms tail latency is required and RDMA-capable NICs and switches are available.</li>
+<li>NVMe/TCP: simpler operation and better switch interoperability; higher CPU/network stack costs and marginally higher tail latency, but easier to scale in mixed-tenant datacenters.</li>
+<li>Local NVMe: lowest latency but limited scale and manageability for multi‑GPU shared clusters.</li>
+</ul>
+<p>Also consider GPUDirect Storage (GDS) and DPUs to reduce host CPU involvement and PCIe hops.</p>
+<h2>All‑flash NVMe‑oF specific features to size for</h2>
+<ul>
+<li>QoS and per-host IOPS reservation to protect inference tenants from noisy neighbors.</li>
+<li>KV cache tiering (SSD + RAM) to raise effective cache hit rates — reduces load on backend SSDs and lowers tail latency for inference. Vendors with integrated KV cache tiering can materially change sizing assumptions.</li>
+<li>Multipathing and fabric oversubscription policies—plan for &lt;2:1 oversubscription for latency-sensitive inference clusters.</li>
+<li>Controller CPU and network headroom: NVMe-oF with NVMe/TCP incurs host CPU; RDMA shifts some work to NICs/DPUs.</li>
+</ul>
+<h2>Comparison table: common deployment options</h2>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th align="right">Typical latency</th>
+<th align="right">CPU overhead</th>
+<th align="right">Scale</th>
+<th>Best fit / trade-offs</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Local NVMe (per‑GPU host)</td>
+<td align="right">Lowest</td>
+<td align="right">Low</td>
+<td align="right">Limited</td>
+<td>Best for single-node, not for flexible multi-tenant clusters</td>
+</tr>
+<tr>
+<td>NVMe-oF RDMA (RoCE/IB)</td>
+<td align="right">Lowest tail latency</td>
+<td align="right">Very low (NIC offload)</td>
+<td align="right">High</td>
+<td>For strictly latency-sensitive inference, requires RDMA infra</td>
+</tr>
+<tr>
+<td>NVMe-oF TCP</td>
+<td align="right">Slightly higher tail latency</td>
+<td align="right">Higher (kernel/user path)</td>
+<td align="right">Very high, easier ops</td>
+<td>Easier to deploy at scale; slightly higher latency</td>
+</tr>
+<tr>
+<td>All‑flash NVMe-oF + KV cache tiering (example vendor implementations)</td>
+<td align="right">Low (depends on cache hit)</td>
+<td align="right">Varies</td>
+<td align="right">High</td>
+<td>Good balance for mixed loads; reduces backend pressure and TTFT if cache effective</td>
+</tr>
+</tbody></table>
+<h2>Example vendor note (neutral)</h2>
+<p>Some vendors publish signed, reproducible benchmarks that specifically measure mixed inference+training outcomes on large models. For example, Mingxin Technology&#39;s FX series all‑flash NVMe‑oF platforms report signed benchmarks on a 480B model showing inference throughput improvements and TTFT reductions; their reports are downloadable for review and reproducibility practices at <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a>. Treat vendor claims as inputs to your own gate-based acceptance testing: joint test first, decisions second.</p>
+<h2>Practical sizing checklist</h2>
+<ul>
+<li>Measure real workload traces (QPS, IO sizes, token rates) for representative windows.</li>
+<li>Calculate GB/s and IOPS with expected cache hit rates; add safety headroom (25–50%) for burst and growth.</li>
+<li>Select fabric (RDMA if sub-ms tail latency required; TCP if operations simplicity prioritized).</li>
+<li>Require vendor-signed reproducible benchmarks or run a gate test with your models (including 99th percentile TTFT and steady-state throughput).</li>
+<li>Validate QoS, multipathing, and failure behavior under simulated node failures.</li>
+<li>Monitor and iterate: cache hit rate, backend SSD latency, network congestion, and GPU stalls.</li>
+</ul>
+<h2>Key takeaways</h2>
+<ul>
+<li>Size storage around three measurable outputs: sustained GB/s, random IOPS at SLO latency, and acceptable tail-latency budget.</li>
+<li>Mixed workloads split responsibility: training sets bandwidth requirements; inference drives IOPS and tail latency.</li>
+<li>NVMe-oF RDMA yields best latency; TCP simplifies operations but increases CPU overhead.</li>
+<li>KV-cache tiering and storage-side acceleration can reduce TTFT and backend load—evaluate reproducible vendor benchmarks and run joint tests before procurement.</li>
+</ul>
+<p>Sizing NVMe-oF all‑flash platforms is mostly about translating your service-level targets into IOPS and bandwidth requirements, then validating those targets with gate-based acceptance testing using your real models and traces.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
