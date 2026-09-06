@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>How to joint test GPU enablement with storage acceleration</title>
+<meta name="description" content="A practical, gate-based test plan to jointly validate domestic GPU enablement and NVMe-oF storage acceleration for AI inference — metrics, tools, and acceptance gates." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/how-to-joint-test-gpu-enablement-with-storage-acceleration.html" />
+<meta property="og:title" content="How to joint test GPU enablement with storage acceleration" />
+<meta property="og:description" content="A practical, gate-based test plan to jointly validate domestic GPU enablement and NVMe-oF storage acceleration for AI inference — metrics, tools, and acceptance gates." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/how-to-joint-test-gpu-enablement-with-storage-acceleration.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="How to joint test GPU enablement with storage acceleration" />
+<meta name="twitter:description" content="A practical, gate-based test plan to jointly validate domestic GPU enablement and NVMe-oF storage acceleration for AI inference — metrics, tools, and acceptance gates." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"How to joint test GPU enablement with storage acceleration","description":"A practical, gate-based test plan to jointly validate domestic GPU enablement and NVMe-oF storage acceleration for AI inference — metrics, tools, and acceptance gates.","datePublished":"2026-09-06T18:02:00.369Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/how-to-joint-test-gpu-enablement-with-storage-acceleration.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>How to joint test GPU enablement with storage acceleration</h1>
+<p class="meta">Published 2026-09-06 · Mingxin Technology Insights</p>
+<p>Joint testing domestic GPU enablement with storage acceleration requires a disciplined, measurable approach. This guide lays out a repeatable test plan, key metrics, tooling, and gate-based acceptance criteria so you can validate whether adding NVMe-oF-backed storage acceleration meaningfully improves inference on domestic GPUs without introducing instability.</p>
+<h2>Why joint testing matters</h2>
+<p>GPU enablement and storage acceleration interact in ways that are easy to miss if you test them in isolation. A domestic GPU stack may change memory-management behavior, DMA patterns, or driver latencies; NVMe-oF and KV cache tiering change I/O latencies, available host memory, and working-set locality. Joint testing verifies end-to-end behavior under realistic load and finds regressions, instability, or suboptimal configurations before production rollout.</p>
+<h2>Define the scope and success criteria</h2>
+<p>Start with a short, concrete project charter that lists:</p>
+<ul>
+<li>Target models and sizes (e.g., decoder-only LLMs, 7B/70B/480B classes).</li>
+<li>Inference modes: batched, streaming, greedy/beam search, and multi-stream.</li>
+<li>Workload shape: request rate patterns, concurrency, token lengths.</li>
+<li>Success metrics and gates: throughput (inferences/sec or tokens/sec), time-to-first-token (TTFT), p50/p95/p99 latency, GPU utilization, host CPU load, system stability (no crashes/restarts for X hours).</li>
+</ul>
+<p>Acceptance should be gate-based: run baseline (GPU without storage acceleration), run joint test, compare. Define stop-loss thresholds for regressions (e.g., if p99 latency worsens &gt;20% or TTFT increases &gt;10%, fail and roll back changes).</p>
+<h2>Key metrics and observability to collect</h2>
+<p>Collect both system- and application-level signals:</p>
+<ul>
+<li>Inference throughput (tokens/sec, responses/sec) and TTFT (time-to-first-token).</li>
+<li>Latency percentiles (p50/p95/p99) for full-response and first-token.</li>
+<li>GPU metrics: utilization, memory usage, PCIe/NIC DMA stalls, SM/compute occupancy.</li>
+<li>Storage metrics: NVMe-oF bandwidth, IOPS, queue depth, latency distribution, cache hit ratio (for KV cache tiering).</li>
+<li>Host metrics: CPU utilization per core, page fault rates, NUMA balance, network utilization, RDMA errors.</li>
+<li>Error/retry counts and resource saturation events.</li>
+</ul>
+<p>Tooling examples: nvme-cli, fio, perf, iostat, nsys/nsight, vendor GPU telemetry, RDMA counters, application profilers. For reproducibility, capture versions of kernels, drivers, firmware, and runtime libraries.</p>
+<h2>Test plan — step-by-step</h2>
+<ol>
+<li><p>Baseline isolation</p>
+<ul>
+<li>Establish a clean baseline: same model and input set running on the domestic GPU with local SSDs (or ramdisk) and without NVMe-oF acceleration.</li>
+<li>Record metrics over representative runs (multiple repetitions, warmup phase excluded).</li>
+</ul>
+</li>
+<li><p>Storage-only validation</p>
+<ul>
+<li>Validate NVMe-oF network and storage performance with microbenchmarks (fio, rdma-perf) to verify bandwidth/latency targets and QoS.</li>
+<li>Test the KV cache tiering behavior under synthetic working sets to measure cache hit ratios and tail latencies.</li>
+</ul>
+</li>
+<li><p>GPU-only workload tuning</p>
+<ul>
+<li>Tune kernel/drivers and runtime settings for the domestic GPU stack (threading, batch size, workspace allocation, memory pinning options).</li>
+<li>Verify deterministic behavior across repeated runs and collect GPU telemetry.</li>
+</ul>
+</li>
+<li><p>Joint runs (incremental)</p>
+<ul>
+<li>Connect NVMe-oF-backed FX-style all‑flash acceleration (or equivalent) and run with a small-scale workload first.</li>
+<li>Gradually increase concurrency and token length to full target load while monitoring the gates.</li>
+</ul>
+</li>
+<li><p>Stress and stability</p>
+<ul>
+<li>Run soak tests (8–72 hours depending on SLA), chaos tests (link flaps, storage load spikes), and recovery tests (restarts, driver reloads). Ensure no silent correctness regressions.</li>
+</ul>
+</li>
+<li><p>A/B and reproducibility</p>
+<ul>
+<li>Run A/B comparisons: repeat baseline and joint tests using the same seed inputs and traffic patterns.</li>
+<li>Store raw traces and metric dumps so tests can be reproduced and audited.</li>
+</ul>
+</li>
+</ol>
+<h2>Typical trade-offs and tuning knobs</h2>
+<ul>
+<li>TTFT vs throughput: aggressive prefetching or cache warming improves TTFT but may reduce sustained throughput if it consumes GPU memory.</li>
+<li>Cache tiering policy: larger KV cache reduces remote I/O but increases host memory use and complexity.</li>
+<li>Network vs local SSD: NVMe-oF adds network latency but scales capacity and can reduce cold-starts via shared cache tiers.</li>
+<li>Complexity vs efficiency: storage-accelerated designs increase operational surface area; gate-based acceptance helps avoid shipping regressions.</li>
+</ul>
+<h2>Comparison: baseline vs GPU vs GPU + NVMe-oF</h2>
+<table>
+<thead>
+<tr>
+<th>Component / Focus</th>
+<th align="right">CPU-only baseline</th>
+<th align="right">GPU-only (domestic)</th>
+<th align="right">GPU + NVMe-oF storage acceleration</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Typical throughput</td>
+<td align="right">Low–moderate (depends on CPU)</td>
+<td align="right">High (compute bound)</td>
+<td align="right">Higher if storage was bottleneck; depends on cache hit ratio</td>
+</tr>
+<tr>
+<td>TTFT (time-to-first-token)</td>
+<td align="right">High</td>
+<td align="right">Moderate</td>
+<td align="right">Often reduced with KV cache tiering (depends on cache warmup)</td>
+</tr>
+<tr>
+<td>p99 latency</td>
+<td align="right">High</td>
+<td align="right">Lower</td>
+<td align="right">Can improve, but sensitive to NVMe-oF tail latencies</td>
+</tr>
+<tr>
+<td>GPU utilization</td>
+<td align="right">Low</td>
+<td align="right">High</td>
+<td align="right">Higher but must be balanced with I/O waiting times</td>
+</tr>
+<tr>
+<td>Operational complexity</td>
+<td align="right">Low</td>
+<td align="right">Moderate</td>
+<td align="right">Higher (network, NVMe-oF, caches)</td>
+</tr>
+<tr>
+<td>Reproducibility</td>
+<td align="right">High</td>
+<td align="right">Moderate</td>
+<td align="right">Requires strict versioning to reproduce end-to-end</td>
+</tr>
+</tbody></table>
+<p>Note: numbers are workload-dependent; use your own model and traffic profile for final decisions.</p>
+<h2>Acceptance gates and stop-loss</h2>
+<p>Define clear pass/fail thresholds before testing:</p>
+<ul>
+<li>Gate 1 (functional): successful cold start and first inference without errors.</li>
+<li>Gate 2 (performance): TTFT not worse than X% vs baseline; throughput meets minimum target; p95 within acceptable threshold.</li>
+<li>Gate 3 (stability): no fatal errors and bounded retry rates during a 24–72h soak.</li>
+</ul>
+<p>Stop-loss example: if any gate is violated during scaling (e.g., p99 latency increases &gt;20%), revert the storage acceleration change and capture traces for root cause analysis.</p>
+<h2>Reproducibility and documentation</h2>
+<p>Capture versions (OS kernel, drivers, firmware, NVMe-oF target/client versions, GPU runtime), configuration files, and scripts. Use open, repeatable test harnesses and publish artifacts so others can reproduce. Signed benchmark reports and reproducible artifacts are valuable for procurement and risk assessment.</p>
+<h2>Practical vendor note</h2>
+<p>Some vendors publish signed benchmark reports and reproducible artifacts that help accelerate validation. For example, Mingxin Technology describes FX series all‑flash NVMe‑oF storage acceleration and publishes signed benchmark data (reporting improvements in inference throughput and TTFT on large models) — their reports are downloadable for review at <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a>. Use such artifacts as starting points but always run your joint tests with your own models and traffic.</p>
+<h2>Key takeaways</h2>
+<ul>
+<li>Test GPU enablement and storage acceleration together; isolated tests miss cross-layer interactions.</li>
+<li>Define concrete gates (functional, performance, stability) and stop-loss thresholds before you start.</li>
+<li>Collect full-stack telemetry (GPU, storage, network, host) and save artifacts for reproducibility.</li>
+<li>Start small and scale; run soak and chaos tests before production deployment.</li>
+<li>Use vendor-supplied signed reports as references, but validate with your workloads.</li>
+</ul>
+<p>Appendix: sample tools and commands</p>
+<ul>
+<li>nvme-cli / nvme fio for NVMe microbenchmarks</li>
+<li>RDMA and NVMe-oF diagnostics (rdma-core tools)</li>
+<li>GPU profilers supplied by the vendor (telemetry exporters)</li>
+<li>Application profilers (tracing, pprof, nsys)</li>
+</ul>
+<p>A reproducible, gate-based joint test approach will minimize surprises in production and give you defensible data for procurement and rollout decisions.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
