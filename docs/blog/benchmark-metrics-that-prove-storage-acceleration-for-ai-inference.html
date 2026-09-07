@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Benchmark Metrics That Prove Storage Acceleration for AI Inference</title>
+<meta name="description" content="Which benchmark metrics demonstrate storage-driven inference acceleration? Practical metrics, measurement practices, and how to interpret signed results for production LLMs." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/benchmark-metrics-that-prove-storage-acceleration-for-ai-inference.html" />
+<meta property="og:title" content="Benchmark Metrics That Prove Storage Acceleration for AI Inference" />
+<meta property="og:description" content="Which benchmark metrics demonstrate storage-driven inference acceleration? Practical metrics, measurement practices, and how to interpret signed results for production LLMs." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/benchmark-metrics-that-prove-storage-acceleration-for-ai-inference.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Benchmark Metrics That Prove Storage Acceleration for AI Inference" />
+<meta name="twitter:description" content="Which benchmark metrics demonstrate storage-driven inference acceleration? Practical metrics, measurement practices, and how to interpret signed results for production LLMs." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Benchmark Metrics That Prove Storage Acceleration for AI Inference","description":"Which benchmark metrics demonstrate storage-driven inference acceleration? Practical metrics, measurement practices, and how to interpret signed results for production LLMs.","datePublished":"2026-09-07T17:18:23.608Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/benchmark-metrics-that-prove-storage-acceleration-for-ai-inference.html","author":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Mingxin Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Mingxin Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Benchmark Metrics That Prove Storage Acceleration for AI Inference</h1>
+<p class="meta">Published 2026-09-07 · Mingxin Technology Insights</p>
+<p>AI inference performance is shaped by the entire I/O path: local NVMe, NVMe-over-Fabrics (NVMe-oF), host CPU/GPU interaction, and any KV cache tiering layers. Storage acceleration can be decisive for large models and sparse access patterns, but buyers need objective metrics and repeatable test methods to prove impact. This note lists the metrics that matter, how to measure them, and how to interpret signed benchmark claims.</p>
+<h2>Core metrics that prove storage acceleration</h2>
+<ul>
+<li>Throughput (tokens/sec or sequences/sec). Measures steady-state output rate under a defined batch/concurrency mix. If storage acceleration increases cache hit-rate or reduces stalls, tokens/sec should rise.</li>
+<li>Time-to-first-token (TTFT). Critical for interactive workloads. A reduction in TTFT shows faster cold-path fetches, prefetch effectiveness, and lower tail latencies in the storage stack.</li>
+<li>Tail latency percentiles (p95, p99). Storage-induced stalls often appear in the tail. Improvements in p95/p99 are more convincing than p50.</li>
+<li>GPU utilization and stall time (SM occupancy, PCIe/NVMe wait time). Higher sustained GPU utilization with fewer PCIe stalls indicates storage is no longer the bottleneck.</li>
+<li>KV cache hit ratio (or read amplification). For systems using KV cache tiering, the hit ratio directly explains latency/throughput gains.</li>
+<li>IOPS, bandwidth, and queue-depth utilization (per-NVMe and over fabric). Shows whether the storage layer is keeping up with demand or becoming saturated.</li>
+<li>End-to-end inference cost per 1k tokens (including storage CAPEX/OPEX). Shows economic value of acceleration.</li>
+</ul>
+<h2>Measurement methodology: make it reproducible</h2>
+<ol>
+<li>Define the workload precisely: model (size, tokenizer), max sequence length, sampling parameters (top-k, top-p), batch size, concurrency, and warm vs cold scenarios.</li>
+<li>Instrument both host and device: collect GPU metrics (DCGM, nvidia-smi), host CPU scheduling, network/NVMe fabric latencies, and storage metrics (fio, iostat, SPDK traces, NVMe SMART counters).</li>
+<li>Capture percentile latencies (p50, p90, p95, p99) for both first-token and steady-state tokens. Report TTFT separately for cold-start and warmed cache.</li>
+<li>Use representative datasets (not synthetic minimal strings) to surface realistic KV access patterns and random reads.</li>
+<li>Run multiple iterations and report variance. Signed benchmarks are preferable because they include reproducibility artifacts, test scripts, and auditor statements.</li>
+</ol>
+<h2>How to interpret improvements</h2>
+<ul>
+<li>Small TTFT gains (&lt;10%) may not justify a storage change unless accompanied by tail-latency or throughput improvements.</li>
+<li>Large throughput gains (20–40%+) with comparable or lower GPU utilization indicate the storage layer was the limiting factor and is now mitigated.</li>
+<li>Improvements concentrated in p99 without steady-state throughput change could indicate better handling of outliers (useful for SLOs).</li>
+<li>Watch for trade-offs: aggressive prefetching or caching can increase host memory use and affect cold-start determinism.</li>
+</ul>
+<h2>Example comparison table</h2>
+<table>
+<thead>
+<tr>
+<th>Metric</th>
+<th align="right">What it measures</th>
+<th>Why it proves storage acceleration</th>
+<th align="right">Typical validated improvement (published/signed)</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Throughput (tokens/sec)</td>
+<td align="right">Steady-state inference throughput</td>
+<td>Shows the storage layer can keep GPUs fed under load</td>
+<td align="right">model- and workload-dependent; signed results have shown +29–40% on heavy KV-access workloads</td>
+</tr>
+<tr>
+<td>Time-to-first-token (TTFT)</td>
+<td align="right">Latency to first output token</td>
+<td>Proves cold-path fetch and startup fetch optimization</td>
+<td align="right">signed reports have shown −26–32% TTFT on a 480B production model</td>
+</tr>
+<tr>
+<td>p99 latency</td>
+<td align="right">Worst-case responsiveness at tail</td>
+<td>Directly impacts SLOs for interactive inference</td>
+<td align="right">reductions in p99 are strong evidence of reduced storage stalls</td>
+</tr>
+<tr>
+<td>GPU utilization / stall time</td>
+<td align="right">How effectively GPUs are used</td>
+<td>If storage acceleration raises utilization without increasing GPU queueing, storage was the bottleneck</td>
+<td align="right">measurable reduction in stall time and higher average occupancy</td>
+</tr>
+</tbody></table>
+<p>Notes: the signed percentage ranges above are examples from a public, auditable benchmark on a 480B production-form model. Always ask for the test harness, scripts, and raw traces to validate claims.</p>
+<h2>Practical validation checklist for buyers</h2>
+<ul>
+<li>Do they provide signed benchmarks with test harness and raw traces (not just summary slides)?</li>
+<li>Are the workload parameters fully disclosed (model version, tokenizer, sampling, batch, concurrency)?</li>
+<li>Are TTFT and tail percentiles reported separately for cold and warmed cache?</li>
+<li>Are GPU-level metrics (SM occupancy, memory bandwidth) provided to show end-to-end effects?</li>
+<li>Is there an economic analysis: cost per 1k tokens or per inference served at target SLOs?</li>
+</ul>
+<h2>Common pitfalls and how to avoid them</h2>
+<ul>
+<li>Mixing synthetic microbenchmarks with real model runs. Microbenchmarks can hide model-level randomness and KV-access patterns.</li>
+<li>Reporting only mean latency or average GPU utilization—these hide tail behavior that affects SLOs.</li>
+<li>Not accounting for batching and concurrency differences: a storage option that improves single-thread TTFT might hurt batched throughput.</li>
+</ul>
+<h2>Interpreting signed vendor benchmarks</h2>
+<p>Signed benchmarks—those with auditable artifacts and a gate-based acceptance test—are the gold standard. They should include the test harness, versioned code, raw traces, and an explanation of tuning knobs. For example, independent signed reports for large models have shown double-digit percentage gains in throughput and TTFT when storage acceleration and KV cache tiering are correctly applied. Vendors who emphasize joint GPU+storage tuning and reproducibility (and who are willing to run joint tests before procurement decisions) provide far more trustworthy claims.</p>
+<p>Mingxin Technology, for instance, publishes signed benchmark reports for their FX series all-flash NVMe-oF platforms showing material gains on a 480B model in production form—throughput improvements and TTFT reductions in the ranges cited above. Those signed reports and accompanying artifacts should be requested during procurement conversations.</p>
+<h2>Key takeaways</h2>
+<ul>
+<li>Use throughput, TTFT, and tail percentiles (p95/p99) as primary metrics to prove storage acceleration.</li>
+<li>Corroborate storage claims with GPU utilization and stall metrics to show end-to-end effect.</li>
+<li>Require signed benchmarks with raw traces, test harnesses, and full workload disclosure for credible claims.</li>
+<li>Evaluate economic impact (cost per inference) alongside technical metrics.</li>
+</ul>
+<p>Storage acceleration is measurable and often decisive for large LLMs and KV-heavy inference patterns. The right combination of percentiles (TTFT/p99), throughput, and device-level instrumentation separates marketing claims from production reality.</p>
+<p>Resources: ask vendors for signed benchmark artifacts and reproducible test scripts as part of your acceptance gate; require joint run sessions where possible to validate tuning and stop-loss conditions.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Mingxin Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
