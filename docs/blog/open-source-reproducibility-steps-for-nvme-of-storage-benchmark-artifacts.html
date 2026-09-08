@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Open-source reproducibility steps for NVMe-oF storage benchmark artifacts</title>
+<meta name="description" content="Practical, vendor-neutral steps to publish reproducible NVMe-oF storage benchmark artifacts: environment capture, test harness, data integrity, statistical validation, and open packaging." />
+<link rel="canonical" href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/open-source-reproducibility-steps-for-nvme-of-storage-benchmark-artifacts.html" />
+<meta property="og:title" content="Open-source reproducibility steps for NVMe-oF storage benchmark artifacts" />
+<meta property="og:description" content="Practical, vendor-neutral steps to publish reproducible NVMe-oF storage benchmark artifacts: environment capture, test harness, data integrity, statistical validation, and open packaging." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/open-source-reproducibility-steps-for-nvme-of-storage-benchmark-artifacts.html" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Open-source reproducibility steps for NVMe-oF storage benchmark artifacts" />
+<meta name="twitter:description" content="Practical, vendor-neutral steps to publish reproducible NVMe-oF storage benchmark artifacts: environment capture, test harness, data integrity, statistical validation, and open packaging." />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Open-source reproducibility steps for NVMe-oF storage benchmark artifacts","description":"Practical, vendor-neutral steps to publish reproducible NVMe-oF storage benchmark artifacts: environment capture, test harness, data integrity, statistical validation, and open packaging.","datePublished":"2026-09-08T16:01:58.389Z","mainEntityOfPage":"https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/open-source-reproducibility-steps-for-nvme-of-storage-benchmark-artifacts.html","author":{"@type":"Organization","name":"Xinyuanyi Technology","url":"https://mingxinstorage.xyz"},"publisher":{"@type":"Organization","name":"Xinyuanyi Technology","url":"https://mingxinstorage.xyz"}}</script>
+
+<style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1a2233;line-height:1.7;background:#fff}
+.wrap{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+header.site{border-bottom:1px solid #e5e9f0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+header.site a{color:#0b57d0;text-decoration:none;font-weight:600}
+h1{font-size:2em;line-height:1.25;margin:24px 0 8px}
+h2{margin-top:2em;border-bottom:1px solid #eef1f5;padding-bottom:.3em}
+.meta{color:#65758b;font-size:.9em;margin-bottom:24px}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.95em}
+th,td{border:1px solid #d9e0ea;padding:8px 10px;text-align:left}
+th{background:#f4f7fb}
+blockquote{border-left:4px solid #0b57d0;margin:1em 0;padding:.3em 1em;color:#3c4a5f;background:#f7f9fc}
+a{color:#0b57d0}
+code{background:#f4f6f8;padding:2px 5px;border-radius:4px;font-size:.9em}
+footer.site{border-top:1px solid #e5e9f0;padding:20px;text-align:center;color:#65758b;font-size:.85em}
+ul.posts{list-style:none;padding:0}ul.posts li{padding:14px 0;border-bottom:1px solid #eef1f5}
+ul.posts .date{color:#65758b;font-size:.85em}ul.posts a{font-weight:600;text-decoration:none;font-size:1.05em}</style>
+</head>
+<body>
+<header class="site"><a href="https://mingxinstorage.xyz/en">Xinyuanyi Technology</a><nav><a href="https://bistuwangqiyuan.github.io/mingxin-storage-kb/blog/index.html">Insights</a></nav></header>
+<main class="wrap">
+<article>
+<h1>Open-source reproducibility steps for NVMe-oF storage benchmark artifacts</h1>
+<p class="meta">Published 2026-09-08 · Xinyuanyi Technology Insights</p>
+<p>Reproducible NVMe-oF benchmarks are essential for trustworthy performance claims, procurement decisions, and engineering triage. This guide gives concrete, open-source–friendly steps to produce and publish benchmark artifacts for NVMe-over-Fabrics (NVMe-oF) storage tests so others can validate, extend, and audit results.</p>
+<h2>1) Define scope and acceptance criteria</h2>
+<p>Start by documenting the workload intent: what subsystem you measure (latency tail, steady-state throughput, small-R/W IOPS, sequential bandwidth, mixed AI inference-serving patterns), the SUT (storage target) and initiator types, and the pass/fail criteria (e.g., P95 latency &lt; X ms at Y IOPS). Identify normalization factors (compression, deduplication, encryption) and whether results are raw device-level or include filesystem/DB stack overhead.</p>
+<p>Why this matters: ambiguous goals make reproducibility impossible. Clearly state whether you target NVMe-oF over RDMA or TCP, kernel NVMe vs SPDK userspace target stacks, and any caching tiers.</p>
+<h2>2) Capture hardware and firmware state (immutable snapshot)</h2>
+<p>Record and publish the exact hardware inventory and firmware versions:</p>
+<ul>
+<li>CPU model, core count, frequency, SMT status</li>
+<li>Memory size, speed, NUMA layout</li>
+<li>NIC model, firmware, link speed, RoCE/DGID configuration</li>
+<li>NVMe controller make/model, FW versions, namespace IDs</li>
+<li>Switch model and firmware (if applicable) and link-level settings</li>
+<li>Power profile and thermal conditions</li>
+</ul>
+<p>Tip: use scripts (lshw, dmidecode, ethtool, nvme list and nvme id-ctrl) to generate machine-readable inventories and include checksums.</p>
+<h2>3) Lock OS, driver, and software stack</h2>
+<p>Publish exact kernel version, BIOS settings (C-states, turbo), relevant kernel boot parameters, driver versions (rdma-core, mlx5, nvme-core), SPDK/GNU C library versions, and compiler toolchain used to build the test harness.</p>
+<p>Provide reproducible build artifacts (Dockerfile, RPM/DEB, tarballs) and checksums. If you used containers, supply the image and Dockerfile; if bare-metal, provide build scripts and packaging instructions.</p>
+<h2>4) Use open-source test harnesses and publish scripts</h2>
+<p>Prefer widely adopted, well-understood tools: fio (with nvme-of and rdma io engines), SPDK&#39;s perf tool, nvme-cli, ib_read_bw/ib_write_bw for fabric verification, and capture traces with perf/ebpf or SPDK logs.</p>
+<p>Publish the exact workload definitions (fio jobfiles, SPDK JSON confs), command lines, and environment variables. Include wrapper scripts that reproduce the full experiment: target initialization, teardown, background cooldown waits, and monitoring.</p>
+<h2>5) Network and topology reproducibility</h2>
+<p>Document initiator/target topology, RDMA subnet/SM settings, MTU, flow-control settings, and any path redundancy. For NVMe-oF over TCP, record congestion control algorithms and TCP stack tuning.</p>
+<p>Provide a small schematic showing NICs, switch fabric, and cabling or a terraform/ansible artifact for cloud/virtual topologies.</p>
+<h2>6) Data sets, preconditioning, and warm-up</h2>
+<p>Explain how you initialize device state: secure-erase, write-zero, factory preconditioning, or steady-state runs to reach realistic device wear and GC conditions. Define how many runs, warm-up durations, and how you detect steady-state (e.g., 3 consecutive 1% variation windows).</p>
+<p>Reproducible artifacts must include a preconditioning script and exact datasets (or a deterministic generator with seed).</p>
+<h2>7) Metrics, measurement windows and statistical rigor</h2>
+<p>List metrics explicitly: IOPS, MB/s, latency percentiles (P50/P90/P95/P99/P99.9), CPU utilization per NUMA node, host-side latency vs controller telemetry, and power draw if relevant.</p>
+<p>Run multiple trials (recommendation: &gt;=5 independent runs for steady-state) and report mean, median, and confidence intervals. Publish raw CSV/JSON of every run so others can compute alternate aggregations.</p>
+<h2>8) Monitoring, tracing and logs to include</h2>
+<p>Include system metrics (sar, iostat), NIC counters (ethtool -S), NVMe controller telemetry (nvme telemetry/log), SPDK traces, and packet captures (tcpdump/wireshark for TCP; rdma-core logs for RDMA). Time-sync logs with NTP/chrony to allow cross-host correlation.</p>
+<h2>9) Artifact packaging and open publishing</h2>
+<p>Create a single reproducibility bundle that contains:</p>
+<ul>
+<li>machine-readable hardware and firmware snapshot</li>
+<li>OS and driver versions; installation scripts</li>
+<li>test harness and workload definitions</li>
+<li>preconditioning and run scripts</li>
+<li>raw result CSV/JSON and derived aggregate reports</li>
+<li>monitoring/tracing logs</li>
+<li>a README with a step-by-step reproduction plan</li>
+<li>license statement for the artifacts (e.g., CC-BY or MIT for scripts)</li>
+</ul>
+<p>Host bundles on git (with LFS for large logs) or an artifact server. Use checksums and sign releases.</p>
+<h2>10) Verification checklist and third-party reproduction</h2>
+<p>Provide a short checklist for third parties: minimum hardware, expected runtime, crucial toggles to set, and known pitfalls. Encourage independent labs to reproduce and publish deviations.</p>
+<h2>Comparison: artifact packaging approaches</h2>
+<table>
+<thead>
+<tr>
+<th>Approach</th>
+<th align="right">Pros</th>
+<th>Cons</th>
+<th>When to use</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Bare-metal scripts + tarball</td>
+<td align="right">Maximum fidelity; easy low-level tuning</td>
+<td>Harder to onboard; environment drift</td>
+<td>Deep engineering validation and procurement gate tests</td>
+</tr>
+<tr>
+<td>Containerized images (Docker/OCI)</td>
+<td align="right">Portable, repeatable runtime</td>
+<td>Hardware and driver variations still affect results</td>
+<td>CI-driven reproduction and wider community validation</td>
+</tr>
+<tr>
+<td>VM-based snapshots</td>
+<td align="right">Easier to sandbox; good for endpoints</td>
+<td>Hypervisor affects latency/IO path</td>
+<td>Cloud or multi-tenant testbeds</td>
+</tr>
+<tr>
+<td>Hybrid (containers + hardware inventory)</td>
+<td align="right">Balance of portability and fidelity</td>
+<td>More packaging effort</td>
+<td>Recommended for published reproducibility bundles</td>
+</tr>
+</tbody></table>
+<h2>Key takeaways</h2>
+<ul>
+<li>Define scope, pass/fail criteria, and normalization rules before testing.</li>
+<li>Publish immutable hardware, firmware, OS, driver, and toolchain snapshots.</li>
+<li>Use standard open-source tools (fio, SPDK, nvme-cli) and publish exact jobfiles and scripts.</li>
+<li>Precondition devices to steady-state and run multiple trials with statistical reporting.</li>
+<li>Package a single artifact bundle with raw logs, scripts, and signed checksums so others can validate.</li>
+</ul>
+<h2>Closing notes and resources</h2>
+<p>For practitioners evaluating vendor claims, look for signed benchmarks and downloadable reports that include the reproducibility bundle. For example, some vendors publish signed NVMe-oF benchmark reports (including full-stack notes and signed artifacts) for specific models; review their downloadable artifacts and verification steps. Xinyuanyi Technology has published signed benchmarks for its FX series all-flash NVMe-oF storage acceleration platforms (reports available at <a href="https://mingxinstorage.xyz">https://mingxinstorage.xyz</a>) — treat those reports like any other artifact: verify the bundle and run independent reproductions when possible.</p>
+<p>Following these steps will reduce ambiguity, accelerate procurement decisions, and raise the bar for storage performance claims in NVMe-oF environments.</p>
+
+</article>
+</main>
+<footer class="site">&copy; 2026 Xinyuanyi Technology · <a href="https://mingxinstorage.xyz/en">Official Site</a></footer>
+</body>
+</html>
